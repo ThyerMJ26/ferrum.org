@@ -1,0 +1,346 @@
+language ferrum/0.1
+
+
+let mkOp0 : { Str -> (HeapA Addr) } =
+    heapFunc1 <|
+    (opName : Str) -> (k : K @ HeapK Addr) ->
+    heapNewNode2 0 ["HOper", opName, [] ] <| opAddr ->
+    k opAddr;
+
+let mkOp1 : { Str -> (HeapA Addr) } =
+    heapFunc1 <|
+    (opName : Str) -> (k : K @ HeapK Addr) ->
+    heapNewNode2 1 ["HVar"] <| var1Addr ->
+    heapNewNode2 1 ["HOper", opName, [var1Addr] ] <| opAddr ->
+    heapNewNode2 0 ["HLambda", opAddr] <| lambda1Addr ->
+    k lambda1Addr;
+
+let mkOp2 : { Str -> (HeapA Addr) } =
+    heapFunc1 <|
+    (opName : Str) -> (k : K @ HeapK Addr) ->
+    heapNewNode2 1 ["HVar"] <| var1Addr ->
+    heapNewNode2 2 ["HVar"] <| var2Addr ->
+    heapNewNode2 2 ["HOper", opName, [var1Addr, var2Addr]] <| opAddr ->
+    heapNewNode2 1 ["HLambda", opAddr] <| lambda2Addr ->
+    heapNewNode2 0 ["HLambda", lambda2Addr] <| lambda1Addr ->
+    k lambda1Addr;
+
+let mkOp3 : { Str -> (HeapA Addr) } =
+    heapFunc1 <|
+    (opName : Str) -> (k : K @ HeapK Addr) ->
+    heapNewNode2 1 ["HVar"] <| var1Addr ->
+    heapNewNode2 2 ["HVar"] <| var2Addr ->
+    heapNewNode2 3 ["HVar"] <| var3Addr ->
+    heapNewNode2 3 ["HOper", opName, [var1Addr, var2Addr, var3Addr]] <| opAddr ->
+    heapNewNode2 2 ["HLambda", opAddr] <| lambda3Addr ->
+    heapNewNode2 1 ["HLambda", lambda3Addr] <| lambda2Addr ->
+    heapNewNode2 0 ["HLambda", lambda2Addr] <| lambda1Addr ->
+    k lambda1Addr;
+
+let mkTyOp0 : { Str -> (HeapA Addr) } =
+    heapFunc1 <|
+    (opName : Str) -> (k : K @ HeapK Addr) ->
+    heapNewNode2 0 ["TyOper", opName, [] ] <| tyOpAddr ->
+    k tyOpAddr;
+
+let mkTyTodo = mkTyOp0 "TODO";
+
+let mkTyBool = mkTyOp0 "Bool";
+let mkTyType = mkTyOp0 "Type";
+
+
+let mkFnType : { Depth -> Addr -> Addr -> (HeapA Addr) } =
+    depth -> dom -> cod -> (k : K @ HeapK Addr) ->
+    heapNewNode2 depth ["TyFun", dom, cod ] <| tyFnAddr ->
+    k tyFnAddr;
+
+
+
+let builtinPrimitives : List { [ Str, (HeapA Addr), (HeapA Addr) ] } = 
+    [ [ "Bool",  heapNewNode2 0 ["TyOper", "Bool", [] ], mkTyType ]
+    , [ "Void",  heapNewNode2 0 ["TyOper", "Void", [] ], mkTyType ]
+    , [ "Int",   heapNewNode2 0 ["TyOper", "Int",  [] ], mkTyType ]
+    , [ "Str",   heapNewNode2 0 ["TyOper", "Str",  [] ], mkTyType ]
+    , [ "Char",  heapNewNode2 0 ["TyOper", "Char", [] ], mkTyType ]
+    , [ "Any",   heapNewNode2 0 ["TyOper", "Any",  [] ], mkTyType ]
+    , [ "true",  heapNewNode2 0 ["HValue", true  ], mkTyBool ]
+    , [ "false", heapNewNode2 0 ["HValue", false ], mkTyBool ]
+    -- , [ "Type", mkOp0 "Type", mkTyTodo ]
+    , [ "Type",  heapNewNode2 0 ["TyOper", "Type", [] ], mkTyType ]
+
+    -- , [ "ifNil",  mkOp2 "ifNil"  ]
+    -- , [ "ifBool", mkOp2 "ifBool" ]
+    -- , [ "ifInt",  mkOp2 "ifInt"  ]
+    -- , [ "ifStr",  mkOp2 "ifStr"  ]
+
+    , [ "opCondition", mkOp2 "opCondition", mkTyTodo ]
+    , [ "opIfNil",  mkOp2 "opIfNil"  , mkTyTodo]
+    , [ "opIfBool", mkOp2 "opIfBool" , mkTyTodo]
+    , [ "opIfInt",  mkOp2 "opIfInt"  , mkTyTodo]
+    , [ "opIfStr",  mkOp2 "opIfStr"  , mkTyTodo]
+    , [ "opIfPair", mkOp2 "opIfPair" , mkTyTodo]
+    , [ "opIfType", mkOp2 "opIfType" , mkTyTodo]
+
+    -- , [ "ifNil", mkOp2 "ifNil" ]
+    -- , [ "if", mkOp2 "if" ]
+    , [ "error"
+      , (k : K @ HeapK Addr) -> 
+        heapNewNode2 1 ["HVar"] <| var1Addr ->
+        heapNewNode2 1 ["HOper", "error", [var1Addr] ] <| opAddr ->
+        heapNewNode2 0 ["HLambda", opAddr] <| lambda1Addr ->
+        k lambda1Addr
+      , mkTyTodo  
+      ]
+    , [ "grLoop", mkOp2 "grLoop", mkTyTodo ]
+    -- , [ "prinStrAppend", mkOp2 "primStrAppend", mkTyTodo ]
+    -- , [ "^", mkOp2 "primStrAppend", mkTyTodo ]
+    , [ "Inverse", mkOp1 "primInverse", mkTyTodo ]
+    , [ "InverseApply", mkOp2 "primInverseApply", mkTyTodo ]
+    , [ "List", mkOp1 "List", mkTyTodo ]
+    , [ "Elem", mkOp1 "Elem", mkTyTodo ]
+    , [ "TupleMap", mkOp2 "TupleMap", mkTyTodo ]
+    , [ "Single", mkOp1 "Single", mkTyTodo ]
+    , [ "Fix", mkOp1 "Fix", mkTyTodo ]
+    , [ "Self", mkOp1 "Self", mkTyTodo ]
+    , [ "SelfT", mkOp1 "SelfT", mkTyTodo ]
+    , [ "Hd", mkOp1 "Hd", mkTyTodo ]
+    , [ "Tl", mkOp1 "Tl", mkTyTodo ]
+    , [ "strLen", mkOp1 "strLen", mkTyTodo ]
+    , [ "strAdd", mkOp2 "opStrAdd", mkTyTodo ]
+    , [ "Domain", mkOp1 "Domain", mkTyTodo ]
+    , [ "Codomain", mkOp1 "Codomain", mkTyTodo ]
+    -- , [ "primMkArrayFastAccessSlowCopy", mkOp2 "primMkArrayFastAccessSlowCopy" ]
+    -- , [ "primMkArrayFastAccessNoCopy", mkOp2 "primMkArrayFastAccessNoCopy" ]
+
+    , [ "show",  mkOp1 "show", mkTyTodo ]
+    , [ "show2", mkOp1 "show2", mkTyTodo ]
+    , [ "strOrd", mkOp1 "strOrd", mkTyTodo ]
+    , [ "strChr", mkOp1 "strChr", mkTyTodo ]
+    , [ "strCharAt", mkOp2 "opStrCharAt", mkTyTodo ]
+    , [ "strCharAtMb", mkOp2 "opStrCharAtMb", mkTyTodo ]
+    , [ "showType", mkOp1 "showType", mkTyTodo ] -- purely for diagnostic purposes
+
+    , [ "ioArgV"        , mkOp0 "ioArgV"       , mkTyTodo ]
+    , [ "ioDoPrim"      , mkOp0 "ioDoPrim"     , mkTyTodo ]
+    , [ "ioPrint"       , mkOp0 "ioPrint"      , mkTyTodo ]
+    , [ "ioReadFile"    , mkOp0 "ioReadFile"   , mkTyTodo ]
+    , [ "ioRun"         , mkOp0 "ioRun"        , mkTyTodo ]
+    , [ "ioWriteFile"   , mkOp0 "ioWriteFile"  , mkTyTodo ]
+    , [ "jsEval"        , mkOp0 "jsEval"       , mkTyTodo ]
+    , [ "jsEvalMaybe"   , mkOp0 "jsEvalMaybe"  , mkTyTodo ]
+
+    -- , [ "primAssoc1MkCopyOnSnapshot"  , mkOp0 "primAssoc1MkCopyOnSnapshot"  ]
+    -- , [ "primAssoc1MkCopyOnWrite"     , mkOp0 "primAssoc1MkCopyOnWrite"     ]
+    -- , [ "primAssocMkCopyOnSnapshot"   , mkOp0 "primAssocMkCopyOnSnapshot"   ]
+    -- , [ "primAssocMkCopyOnWrite"      , mkOp0 "primAssocMkCopyOnWrite"      ]
+    , [ "primAssoc1MkEphemeral"        , mkOp0 "primAssoc1MkEphemeral"       , mkTyTodo ]
+    , [ "primAssoc1MkPersistent"       , mkOp0 "primAssoc1MkPersistent"      , mkTyTodo ]
+
+    , [ "opTrace1", mkOp2 "opTrace", mkTyTodo ]
+
+
+    ];
+
+
+let instantiateBuiltins2 : { (HeapA HEnvTy) } =
+    heapFunc0 <|
+    (k : K @ HeapK HEnvTy) ->
+    let depth = 0;
+    heapNewNode2 depth ["TyOper", "TODO", []] <| todoTy ->
+    heapMap ( [name : Str, mkTm : (HeapA Addr), mkTy : (HeapA Addr)] -> 
+        (k2 : KM @ HeapK { [Str, [Addr, Addr]] }) ->
+        mkTm <| tmAddr ->
+        mkTy <| tyAddr ->
+        k2 [name, [tmAddr, tyAddr]]
+    ) builtinPrimitives <| henv ->
+    k henv;
+
+let instantiateBuiltins = instantiateBuiltins2;
+
+
+let builtinDeclsSrc : List { [Str, Str] } =
+    [ [ "Union", "a -> b2 -> { a | b2 }" ] -- this looks wrong, Union takes a list of types
+    -- , [ "fix", "f -> (x -> (x x)) (x -> f (y -> (y $? x) x y))" ]
+    , [ "fix", "f -> (x -> (x x)) (x -> f (y -> x x y))" ]
+
+    , ["if", "a -> [kT, kF] -> (opCondition a [kT ,, kF]) []" ]
+    -- , ["ifNil", "a -> [kT, kF] -> (opCondition (a == []) [kT ,, kF]) a" ]
+    -- , ["ifNil",  "a -> [kT, kF] -> (opIfGeneric ifNil  [kT ,, kF]) a" ]
+    -- , ["ifBool", "a -> [kT, kF] -> (opIfGeneric ifBool [kT ,, kF]) a" ]
+    -- , ["ifInt",  "a -> [kT, kF] -> (opIfGeneric ifInt  [kT ,, kF]) a" ]
+    -- , ["ifStr",  "a -> [kT, kF] -> (opIfGeneric ifStr  [kT ,, kF]) a" ]
+
+    , ["ifPair", "a -> [kT, kF] -> (opIfPair a [kT ,, kF]) a" ]
+    , ["ifNil",  "a -> [kT, kF] -> (opIfNil  a [kT ,, kF]) a" ]
+    , ["ifBool", "a -> [kT, kF] -> (opIfBool a [kT ,, kF]) a" ]
+    , ["ifInt",  "a -> [kT, kF] -> (opIfInt  a [kT ,, kF]) a" ]
+    , ["ifStr",  "a -> [kT, kF] -> (opIfStr  a [kT ,, kF]) a" ]
+    , ["ifType", "a -> [kT, kF] -> (opIfType a [kT ,, kF]) a" ]  -- purely for diagnostic purposes
+
+    , [ "testIsStr", "ifStr" ]
+    , ["isString",  "a -> ifStr a [ -> true, -> false]" ]
+
+    -- TODO remove these old names
+    , [ "matchList", "ifNil" ]
+    , [ "matchMaybe", "ifNil" ]
+    , [ "testIsNil", "ifNil" ]
+    , [ "Any", "Any" ]
+    -- , [ "nil", "[]"]
+    , [ "null", "a -> ifNil [ -> true, -> false]" ]
+    , [ "type", "Type"]
+    -- , [ "singleT", "a -> Type"]
+    , [ "Single", "a -> Type"]
+
+    , [ "unionT", "A -> B -> { A | B }" ]
+    , [ "intersectT", "A -> B -> { A & B }" ]
+    -- , [ "Inverse", "A -> { A ~ }" ]
+    -- , [ "Inverse", "A -> primInverse A" ]
+    , [ "continue", "a -> [\"continue\",a]"]
+    , [ "break", "a -> [\"break\",a]"]
+    -- , [ "loop", "body -> initVal -> grLoop (continue initVal) body" ]
+    , [ "loop1", "body -> initVal -> grLoop (continue initVal) body" ]
+    , [ "loop2", "initVal -> body -> grLoop (continue initVal) body" ]
+    , [ "list", "A -> List A"]
+    , [ "hd", "[a,,b] -> a"]
+    , [ "tl", "[a,,b] -> b"]
+    , [ "head", "hd" ]
+    , [ "tail", "tl" ]
+    , [ "primMkArrayFastAccessSlowCopy", "-> error \"TODO 1 primMkArrayFastAccessSlowCopy\" " ]
+    , [ "primMkArrayFastAccessNoCopy", "-> error \"TODO 1 primMkArrayFastAccessNoCopy\" " ]
+
+    , [ "jsStrCat", "a -> loop1 ([x,y] -> ifNil x [ -> break y, [x1,,xs] -> continue [xs, strAdd y x1]]) [a, \"\"]"]
+    , [ "char_concat", "jsStrCat"]
+    -- , [ "jsStrJoin" , "-> error \"TODO jsStrJoin\" " ]
+    , [ "jsStrJoin" , 
+        """
+            sep -> elems -> 
+            ifNil elems 
+            [ -> ""
+            , [elem1 ,, elems2] -> 
+                loop2 [elems2, elem1] <| 
+                [elems3, result] -> 
+                ifNil elems3 
+                [ -> 
+                    break result
+                , [e,,es] -> 
+                    continue [es, strAdd result (strAdd sep e)]
+                ]
+            ]    
+        """
+      ]
+    , ["grShowAny", 
+        """
+            fix <| sa ->
+            a ->
+            ifNil a
+            [ -> "[]"
+            , _ ->
+                ifPair a
+                [ [ah ,, at] ->
+                    ifNil at
+                    [ -> strAdd "[" <| strAdd (sa ah) "]"
+                    , _ ->
+                        loop2 [at, strAdd "[" (sa ah)] <|
+                        [ vals, result ] ->
+                        ifNil vals
+                        [ -> 
+                            break <| strAdd result "]"
+                        , _ -> 
+                            ifPair vals
+                            [ [val1 ,, vals2] ->
+                                continue <| [vals2, strAdd result <| strAdd "," (sa val1)]
+                            , _ ->
+                                break <| strAdd result <| strAdd ",," <| strAdd (sa vals) "]"
+                            ]
+                        ]
+                    ]  
+                , _ ->
+                    show a
+                ]    
+            ]
+        """
+      ]
+    , [ "trace" , "-> error \"TODO trace\" " ]
+    , [ "trace2" , "msg -> k -> opTrace1 (grShowAny msg) k" ]
+
+    , [ "Fun", "Dom -> Cod -> { Dom -> Cod }" ]
+    -- , [ "castT", "From -> To -> term -> term"]
+    , [ "castT", "term -> term"]
+    , [ "not", "a -> if a [-> false, -> true]" ]
+
+    , ["primHpsDo", "action -> handler -> action (result -> handler -> [handler, result]) handler"]
+    , ["primHpsCall", "action -> handler -> action (result -> handler -> result) handler"]
+    , ["primHpsHandlerMk", "handlerMk -> initState -> handlerMk initState"]
+    ];
+
+let scanAndParseDecl : { [Str,Str] -> [Expr,Expr] } =
+    [pat, defn] -> [parseExpr (scan pat), parseExpr (scan defn)];
+
+let builtinDecls : { -> (List Decl) } = ->
+    map scanAndParseDecl builtinDeclsSrc;
+
+
+-- TODO some result types will need to be calculated from the argument types (and values?)
+let instOpTypes : HeapA OpTypes =
+    (k : K @ HeapK OpTypes) ->
+    let depth = 0;
+    heapNewNode2 depth ["TyOper", "Bool", []] <| boolType ->
+    heapNewNode2 depth ["TyOper", "Int", []] <| intType ->
+    heapNewNode2 depth ["TyOper", "Any", []] <| anyType ->
+    let opTyInt    = [[intType, intType], intType];
+    let opTyIntCmp = [[intType, intType], boolType];
+    let opTyBool   = [[boolType, boolType], boolType];
+    let opTyEq     = [[anyType, anyType], boolType]; 
+    -- TODO trim opTyEq to
+    -- let opTyEq     = [[dataType, dataType], boolType]
+    k <|
+    [ ["+",   opTyInt    ] 
+    , ["-",   opTyInt    ] 
+    , ["*",   opTyInt    ] 
+    , ["<",   opTyIntCmp ] 
+    , [">",   opTyIntCmp ] 
+    , ["<=",  opTyIntCmp ]
+    , [">=",  opTyIntCmp ]
+    , ["&&",  opTyBool   ]
+    , ["||",  opTyBool   ]
+    , ["==",  opTyEq     ]
+    ];
+
+let instOpFnTypes : HeapA OpFnTypes =
+    (k : K @ HeapK OpFnTypes) ->
+    let depth = 0;
+    heapNewNode2 depth ["TyOper", "Bool", []] <| boolType ->
+    heapNewNode2 depth ["TyOper", "Int", []] <| intType ->
+    heapNewNode2 depth ["TyOper", "Any", []] <| anyType ->
+
+    mkFnType 0 intType  intType        <| intToIntType         ->
+    mkFnType 0 intType  intToIntType   <| intToIntToIntType    ->
+    mkFnType 0 intType  boolType       <| intToBoolType        ->
+    mkFnType 0 intType  intToBoolType  <| intToIntToBoolType   ->
+    mkFnType 0 boolType boolType       <| boolToBoolType       ->
+    mkFnType 0 boolType boolToBoolType <| boolToBoolToBoolType ->
+    mkFnType 0 anyType  boolType       <| anyToBoolType        ->
+    mkFnType 0 anyType  anyToBoolType  <| anyToAnyToBoolType   ->
+
+    let opTyInt    = intToIntToIntType;
+    let opTyIntCmp = intToIntToBoolType;
+    let opTyBool   = boolToBoolToBoolType;
+    let opTyEq     = anyToAnyToBoolType; 
+    -- TODO trim opTyEq to
+    -- let opTyEq     = [[dataType, dataType], boolType]
+    k <|
+    [ ["+",   opTyInt    ] 
+    , ["-",   opTyInt    ] 
+    , ["*",   opTyInt    ] 
+    , ["<",   opTyIntCmp ] 
+    , [">",   opTyIntCmp ] 
+    , ["<=",  opTyIntCmp ]
+    , [">=",  opTyIntCmp ]
+    , ["&&",  opTyBool   ]
+    , ["||",  opTyBool   ]
+    , ["==",  opTyEq     ]
+    ];
+
+
+
+-- TODO ? move the OpDefns here ?

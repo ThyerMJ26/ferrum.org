@@ -1,0 +1,1496 @@
+language ferrum/0.1
+
+-- WiTs: WebIde Tab States
+
+-- TODO trigger UI crashes then fix them
+-- TODO consolidate the code, so as not to be so repetitive
+
+let WiTsTestFile = {
+    [ ["Files"      , (List Str)    ]  -- list of known test file names
+    , ["Selection"  , Str           ]  -- currently selected test file
+    , ["Contents"   , Str           ]  -- test file contents
+    , ["Tokens"     , (List Token)  ]
+    ] };
+
+let WiTsTestDefnEntry = {
+    [ Int
+    , TestDefn
+    -- , SrcPos -- TODO ? add the position of the test defn within the test file ?
+    ] };
+
+let WiTsTestDefns = {
+    [ ["Entries", (List WiTsTestDefnEntry)]
+    , ["Selection", (Maybe Int)]      -- currently selected defn
+    ] };
+
+let WiTsExprEntry = {
+    [ ["Expr", Str]
+    , ["Depth", Int]
+    , ["TiVal", Str]
+    -- location (for expr highlighting)
+    , ["Loc", Loc]
+    -- syn/ctx/ti addresses
+    , ["Addrs", (Maybe { [Int, Int, Int, Int] })] -- term-value, type-synth, type-context, type-inhab
+    ] };
+
+let WiTsExprs = {
+    [ ["Entries", (List WiTsExprEntry)]
+    , ["Selection", (Maybe Int)]      -- currently selected expr
+    , ["Heap", (Maybe Heap)]          -- the heap containing any addresses in the expr entries
+    , ["Env",  (Maybe HEnvTy)]        -- the heap-env 
+    ] };
+
+let WiTsProject = {
+    [ ["Projects"  , (List Str)  ]  -- list of known project file names
+    , ["Selection" , Str         ]  -- currently selected file
+    , ["Contents"  , Str         ]  -- file contents
+    ] };
+
+-- let SourceTag = { "Code" | "Text" };
+let SourceTag2 = { "Filename" | "Contents" };
+
+let WiSourceEntry = {
+    [ Int -- id 
+    , Str -- label to display
+    , SourceTag2
+    , Str -- expr / decls source
+    , (Maybe Heap) -- the heap, once the expr/decls have been instantiated
+    -- TODO add decl binding name/addrs
+    , (Maybe Addr) -- root address of expression / nil for decls
+    ] };
+
+let WiTsSource = {
+    [ [ "SrcEntries" , (List WiSourceEntry) ]
+    -- , ["Selection", [SourceTag, Str]]  -- currently selected file, with import-type. (source "Code" will be parsed, source "Text" will not, the same file can be imported both ways)
+    ] };
+
+let WiBindingEntry = {
+    [ Int -- id 
+    , Str -- label to display
+    , TestDefn
+    , (Maybe Heap) -- the heap, once the expr/decls have been instantiated
+    , HEnvTy
+    ] };
+
+let WiTsBinding = {
+    [ ["Bindings", (List WiBindingEntry) ]
+    ] };
+
+-- TODO WiTs: Types Synthesized, Types Context, Type Inhabitation Proof, Heap, Reductions, Indirections, ReadBackFe, ReadBackJs, Repl, 
+
+let WiTsVisibleTabs = {
+    [ ["Visible", (List Str)]
+    , ["Visible2", (List Str)] -- sub-tabs
+    ] };
+
+-- TODO ? separate fixed from variable state ?
+let WebIdeState = {
+    [ ["TestFile"  , WiTsTestFile      ]
+    , ["TestDefns" , WiTsTestDefns     ] 
+    , ["Exprs"     , WiTsExprs         ] 
+    , ["Proj"      , WiTsProject       ]
+    , ["Src"       , WiTsSource        ]
+    , ["Bind"      , WiTsBinding       ]
+    , ["VisTabs"   , WiTsVisibleTabs   ]
+    , ["JsCode"    , (List HtmlScript) ]
+    ] };
+
+-- let WebIdeStatePersist = WiTsVisibleTabs;
+
+let WebIdeStatePersist = {
+    [ ["VisTabs"            , WiTsVisibleTabs ]
+    , ["TestDefnsSelection" , (Maybe Int)     ]
+    , ["ExprSelection"      , (Maybe Int)     ]
+    ] };
+
+
+
+let htmlPrelude : { -> HtmlScript } = ->
+    htmlCodegenDecls "fe4-prelude.fe" fe4_prelude_text;
+
+let callbacksHtml : { -> HtmlScript } = ->
+    -- TODO ? include argument types, and automatically add guards ?
+    htmlCodegenFuncAdapters 
+    [ ["loadContents", []]
+    , ["choiceChange", ["choiceId"]]
+    , ["textClick", ["tabId"]]
+    , ["toggleTab", ["tabId", "buttonId"]]
+    , ["toggleTab2", ["name"]]
+    , ["setDisplay", ["tabId", "display"]]
+    , ["projSelect", ["projVal"]]
+    , ["setToggleState", ["tabId", "buttonId", "showHide"]]
+    , ["setToggleState2", ["name", "showHide"]]
+    , ["tokenClick", ["row"]]
+    , ["tableCellClick", ["tableId", "row", "col"]]
+    , ["rowSelected", ["tableId", "rowNum"]]
+    ];
+
+
+let rangeOverlap : { [Int, Int] -> [Int, Int] -> Bool } =
+    [a, b] -> [x, y] ->
+    ( (a <= x) && (x <= b) ) ||
+    ( (a <= y) && (y <= b) ) ||
+    ( (x <= a) && (a <= y) ) ||
+    ( (x <= b) && (b <= y) );
+
+
+let showAttr : { Datum -> Str } =
+    d ->
+    ifStr d
+    [   d2 -> htmlEscapeAttr d2
+    ,   d2 -> show d
+    ];
+
+let htmlMkCombo : { Str -> (List { [Datum, Str] }) -> Html } =
+    choiceId -> choices -> 
+    [   "select"
+    ,   [   ["id", choiceId]
+        ,   ["onchange", strCat ["choiceChange('", choiceId, "')"]]
+        ]
+    ,,  for choices ([cId, cLabel] -> ["option", [["value", showAttr cId]], cLabel]) 
+    ];
+
+let mkScrollPane : { Str -> Html -> Html } =
+    id -> html ->
+    ["div"
+    , [ ["id", id]
+      , ["style"
+        , strJoin " "
+          [ "position: relative;"
+          , "overflow: clip;"
+          , "width: 100%;"
+          , "height: 100%;"
+          , "border: 1px solid black;"
+          ]
+        ]
+      ]
+    , ["div"
+      , [ [ "style"
+          , strJoin " "
+            [ "position: absolute;"
+            -- , "overflow: auto;"
+            , "overflow: scroll;"
+            , "width: 100%;"
+            , "height: 100%;"
+            ]
+          ]
+        ]
+      , html
+      ]
+    ];
+
+let mkTabHtml : { Str -> Str -> Html -> Html } =
+    id -> title -> body ->
+    let tabId = strCat ["tab", id];
+    ["div", 
+        [ ["id", tabId]
+        , ["style", 
+            """
+             display: grid; 
+             width: 100%;
+             height: 100%;
+             grid-template-columns: 1fr; 
+             grid-template-rows: auto 1fr;
+             justify-content: stretch;
+             align-content: stretch;
+            """
+          ]
+        ]
+    , ["div", [["style", "border: 1px solid black; width: 100%;"]], title]
+    , ["div", 
+        [ ["style", 
+          """
+            border: 1px solid black;
+            /* overflow: none; */
+            overflow: hidden;
+            position: relative;
+            display: grid;
+            grid-auto-columns: 1fr;
+            grid-auto-rows: 1fr;
+            justify-content: stretch;
+            align-content: stretch;
+          """
+          ] 
+        ]
+      , body 
+      ]
+    ];
+
+
+
+-- provides a way for contents to provide desired stretch behaviours, that is, use "auto" or "1fr" for each child
+let mkVerticalHtml : { (List { [Str, Html] }) -> Html } =
+    heightHtmls ->
+    let [heights, htmls] = unzip heightHtmls;
+    let heights2 = strJoin " " heights;
+    ["div", 
+        [ ["style",
+            strJoin " "
+            [ "width: 100%;"
+            , "height: 100%;"
+            , "display: grid;"
+            , strCat ["grid-template-rows: ", heights2, ";"]
+            , "grid-template-columns: auto;"
+            ]
+          ]
+        ]
+    ,, htmls
+    ];
+
+let mkVerticalStretchHtml : { (List Html) -> Html } =
+    htmls ->
+    ["div", 
+        [ ["style",
+            strJoin " "
+            [ "width: 100%;"
+            , "height: 100%;"
+            , "display: grid;"
+            , "grid-auto-rows: auto;"
+            , "grid-template-columns: auto;"
+            ]
+          ]
+        ]
+    ,, htmls
+    ];
+
+let mkHorizontalHtml : { (List { [Str, Html] }) -> Html } =
+    widthHtmls ->
+    let [widths, htmls] = unzip widthHtmls;
+    let widths2 = strJoin " " widths;
+    ["div", 
+        [ ["style",
+            strJoin " "
+            [ "width: 100%;"
+            , "height: 100%;"
+            , "display: grid;"
+            , strCat ["grid-template-columns: ", widths2, ";"]
+            , "grid-template-rows: auto;"
+            , "place-content: start;"
+            ]
+          ]
+        ]
+    ,, htmls
+    ];
+
+
+let SubTabDefn = {
+    [ ["name", Str]
+    , ["display", Str]
+    , ["render", { Str -> Html }]
+    ] };
+
+let mkSubTabsHtml : { (List SubTabDefn) -> Html } =
+    subTabs ->
+    mkVerticalHtml
+    [   [ "auto"
+        ,   mkHorizontalHtml <|
+            forMap subTabs <| st ->
+            let id = strAdd "button" (st |> kvtGet "name");
+            let display = st |> kvtGet "display";
+            let onclick = strCat ["toggleTab2(", show (st |> kvtGet "name"), ")"];
+            [ "auto", ["input", [["id", id ],  ["type", "submit"], ["value", display  ], ["onclick", onclick]]] ]
+        ]
+    ,   ["1fr"
+        ,   mkVerticalStretchHtml <|
+            forMap subTabs <| st ->
+            let id = strAdd "tab" (st |> kvtGet "name");
+            let render = st |> kvtGet "render";
+            render id
+        ]
+    ];
+
+
+
+-- let WiTabState = Self <| WiTs -> {
+--     [ Str
+--     , Type
+--     , { (Hd (Tl WiTs)) -> Html } -- render
+--     ] };
+-- let wiTsTestFileRender : { WiTsTestFile -> Html } =
+--     state ->
+--     error ["TODO", "wiTsTestFileRender"];
+-- let wiTsTestFile = [ "TestFile", WiTsTestFile, wiTsTestFileRender ];
+
+
+-- let WiTabDefn = 
+--     Self <| WTD -> {
+--     [ ["Init", { (Maybe Void) -> Any }]
+--     ,,  let State = (Codomain (Hd (Tl (Hd WTD))));
+--         [ ["Id", Str]
+--         , ["Name", Str]
+--         , ["Display", Str]
+--         , ["Render", { State -> Html } ]
+--         ]
+--     ] };
+
+-- let WiTabDefn = 
+--     Self <| WTD -> {
+--     [ ["Init", { No -> Any }]
+--     , ["Id", Str]
+--     , ["Name", Str]
+--     , ["Display", Str]
+--     , ["Render", { (Codomain (Hd (Tl (Hd WTD)))) -> Html } ]
+--     ] };
+
+-- let wtTestFile : WiTabDefn = 
+--     [ ["Init"    , -> "Hello World"]
+--     , ["Id"      , "text1"     ] 
+--     , ["Name"    , "Test"      ] 
+--     , ["Display" , "Test File" ]
+--     , ["Render"  , (contents : Str) -> ["div", [], contents] ]
+--     ];
+
+-- let WiTabDefn = 
+--     Self <| WTD -> {
+--     [ Type
+--     , ["Id", Str]
+--     , ["Name", Str]
+--     , ["Display", Str]
+--     , ["Render", { (Hd WTD) -> Html } ]
+--     ] };
+
+
+let WiTabDefnContent = 
+    { ["SingleTab"  , Html]
+    | ["SubTabs"    , (List SubTabDefn)]
+    };
+
+
+let WiTabDefn = {
+    [ ["Name", Str]
+    , ["Display", Str]
+    , ["Render", WebIdeState -> WiTabDefnContent ]
+    ] };
+
+let wtTestFile : WiTabDefn = 
+    [   ["Name"    , "Test"      ] 
+    ,   ["Display" , "Test File" ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            [   "textarea", 
+                [   ["id", "text1"]
+                ,   ["wrap", "off"]
+                ,   ["readonly", ""]
+                ,   ["style",
+                        """
+                         resize: none;
+                         width: 100%;
+                         height: 100%;
+                         position: absolute;
+                        """
+                    ]
+                ,   ["onclick", "textClick('tabTest')"] 
+                ]
+            ,   state |> kvtGet "TestFile" |> kvtGet "Contents" -- tfContents
+            ] ]
+        ]
+    ];
+
+let wtTestDefns : WiTabDefn = 
+    [   ["Name"    , "TestDefns"  ] 
+    ,   ["Display" , "Test Defns" ]
+    ,   ["Render"  , 
+            state -> 
+            let tdEntries = state |> kvtGet "TestDefns" |> kvtGet "Entries";
+            let contents = forMap tdEntries <| [id, fields] -> [show id, fieldGetOrDefault fields "name" "<unknown>"];
+            ["SubTabs", 
+                [   [ ["name", "TestDefnsNameList"], ["display", "List"  ], ["render", 
+                        id ->  mkScrollPane id <| mkTableHtml "tdNames2" [["A","auto"], ["B","auto"]] contents] ]
+                ,   [ ["name", "TestDefnsEntry"   ], ["display", "Entry" ], ["render", 
+                        id ->  ["textarea", [ ["id", id], ["wrap", "off"], ["readonly", ""], ["style", "resize: none; height: 100%; width: 100%; "] ] ]] ]
+                ,   [ ["name", "TestDefnsChecks"  ], ["display", "Checks"], ["render", 
+                        id ->  mkScrollPane id <| mkTableHtml "tdChecks" [["A","auto"], ["B","auto"]] [["7","-=< Checks >=-"]]] ]
+                ,   [ ["name", "TestDefnsText"    ], ["display", "Decls" ], ["render", 
+                        id ->  ["textarea", [ ["id", id], ["wrap", "off"], ["readonly", ""], ["style", "resize: none; height: 100%; width: 100%; "] ] ]] ]
+                ]
+            ]
+        ]
+    ];
+
+
+
+let wtProj : WiTabDefn = 
+    [   ["Name"    , "Proj"    ] 
+    ,   ["Display" , "Project" ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            let projNames = state |> kvtGet "Proj" |> kvtGet "Projects";
+            mkVerticalHtml
+            [   [ "auto", htmlMkCombo "projChoiceId" (zip projNames projNames) ]
+            ,   [ "1fr", ["textarea", [ ["id", "textProj"], ["wrap", "off"], ["readonly", ""], ["style", "resize: none;"] ] ] ]
+            ] ]
+        ]
+    ];
+
+let wtSrc : WiTabDefn = 
+    [   ["Name"    , "Src"     ] 
+    ,   ["Display" , "Source"  ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            let srcEntries = state |> kvtGet "Src" |> kvtGet "SrcEntries";
+            mkVerticalHtml
+            [   [ "auto", htmlMkCombo "srcChoiceId" <| forMap srcEntries <| [id, label, _, contents, heapMb, addrMb] -> [id, label] ]
+            ,   [ "1fr", ["textarea", [ ["id", "textSrc"], ["wrap", "off"], ["readonly", ""], ["style", "resize: none;"] ] ] ]
+            ] ]
+        ]
+    ];
+
+let wtSrc2 : WiTabDefn = 
+    [   ["Name"    , "Src2"    ] 
+    ,   ["Display" , "Source2" ]
+    ,   ["Render"  , 
+            state -> 
+            let srcEntries = state |> kvtGet "Src" |> kvtGet "SrcEntries";
+            let contents = forMap srcEntries <| [id, label, _, contents, heapMb, addrMb] -> [show id, label];
+            ["SubTabs", 
+                [ [ ["name", "Src2List"], ["display", "List"], ["render", 
+                    id -> mkScrollPane id <| mkTableHtml "srcTable2b" [["A","auto"], ["B","auto"]] contents] ]
+                , [ ["name", "Src2Text"], ["display", "Detail"], ["render", 
+                    id -> ["textarea", [ ["id", id], ["wrap", "off"], ["readonly", ""], ["style", "resize: none; height: 100%; width: 100%; "] ] ] ] ]
+                ]
+            ] 
+        ]
+    ];
+
+let wtToken : WiTabDefn = 
+    [   ["Name"    , "Token"   ] 
+    ,   ["Display" , "Tokens"  ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            -- mkTabHtml "Token" <|
+            ["div", [], "Tokens"]
+        ] ]
+    ];
+
+let wtExpr : WiTabDefn = 
+    [   ["Name"    , "Expr"        ] 
+    ,   ["Display" , "Expressions" ]
+    ,   ["Render"  , 
+            state -> 
+            let exprEntries = state |> kvtGet "Exprs" |> kvtGet "Entries";
+            let contents = forMap exprEntries <| ee -> [show (ee |> kvtGet "Depth"), show (ee |> kvtGet "Expr")];
+            ["SubTabs", 
+                [   [ ["name", "ExprList"], ["display", "List"  ], ["render", 
+                        id ->  mkScrollPane id <| mkTableHtml "exprList" [["A","auto"], ["B","auto"], ["C","auto"]] contents] ]
+                ,   [ ["name", "TermValue"  ], ["display", "Term" ], ["render", 
+                        id ->  ["textarea", [ ["id", id], ["wrap", "off"], ["readonly", ""], ["style", "resize: none; height: 100%; width: 100%; "] ] ]] ]
+                ,   [ ["name", "TypeSyn"   ], ["display", "Syn" ], ["render", 
+                        id ->  ["textarea", [ ["id", id], ["wrap", "off"], ["readonly", ""], ["style", "resize: none; height: 100%; width: 100%; "] ] ]] ]
+                ,   [ ["name", "TypeCtx"  ], ["display", "Ctx"], ["render", 
+                        id ->  ["textarea", [ ["id", id], ["wrap", "off"], ["readonly", ""], ["style", "resize: none; height: 100%; width: 100%; "] ] ]] ]
+                ,   [ ["name", "TypeInhab"  ], ["display", "Inhab" ], ["render", 
+                        id ->  ["textarea", [ ["id", id], ["wrap", "off"], ["readonly", ""], ["style", "resize: none; height: 100%; width: 100%; "] ] ]] ]
+                ]
+            ]
+        ]
+    ];
+
+
+let wtBind : WiTabDefn = 
+    [   ["Name"    , "Bind"       ] 
+    ,   ["Display" , "Bindings"   ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            let bindingEntries = state |> kvtGet "Bind" |> kvtGet "Bindings";
+            mkVerticalHtml
+            [   [ "auto", htmlMkCombo "bindingChoiceId" (forMap bindingEntries <| [id, label, td, heapMb, env] -> [id, label]) ]
+            ,   [ "1fr", ["textarea", [ ["id", "textBinding"], ["wrap", "off"], ["readonly", ""], ["style", "resize: none;"] ] ] ]
+            ] ]
+        ]
+    ];
+
+let wtHeap : WiTabDefn = 
+    [   ["Name"    , "Heap"       ] 
+    ,   ["Display" , "Heap"       ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            mkVerticalHtml
+            [   [ "auto", ["p", [], "Before"] ]
+            ,   [ "1fr", ["textarea", [ ["id", "textHeap"], ["wrap", "off"], ["readonly", ""], ["style", "resize: none;"] ] ] ]
+            ,   [ "auto", ["p", [], "After"] ]
+            ] ]
+        ]
+    ];
+
+let wtReduc : WiTabDefn = 
+    [   ["Name"    , "Reduc"      ] 
+    ,   ["Display" , "Reductions" ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            ["div", [], "Reductions"] 
+        ] ]
+    ];
+
+let wtIndir : WiTabDefn = 
+    [   ["Name"    , "Indir"        ] 
+    ,   ["Display" , "Indirections" ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            ["div", [], "Indirections"] 
+        ] ]
+    ];
+
+let wtRbJs : WiTabDefn = 
+    [   ["Name"    , "RbJs"         ] 
+    ,   ["Display" , "Read Back Js" ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            mkVerticalHtml
+            [   [ "auto", ["textarea", [ ["id", "textRbJs"], ["wrap", "off"], ["readonly", ""], ["style", "resize: none;"] ] ] ]
+            ]
+        ] ]
+    ];
+
+
+let wtRbFe : WiTabDefn = 
+    [   ["Name"    , "RbFe"         ] 
+    ,   ["Display" , "Read Back Fe" ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            ["div", [], "Read Back Fe"]
+        ] ]
+    ];
+
+let wtMisc1 : WiTabDefn = 
+    [   ["Name"    , "Misc1"    ] 
+    ,   ["Display" , "Misc 1"   ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            ["textarea", [ ["id", "text2"], ["wrap", "off"], ["readonly", ""] ] ]
+        ] ]
+    ];
+
+let wtMisc2 : WiTabDefn = 
+    [   ["Name"    , "Misc2"    ] 
+    ,   ["Display" , "Misc 2"   ]
+    ,   ["Render"  , 
+            state -> ["SingleTab", 
+            mkVerticalHtml
+            [   ["auto", mkScrollPane "tableMisc2aScroll" ["div", [["id", "tableMisc2"] ] ] ]
+            ,   ["auto"
+                ,   mkScrollPane "tableMisc2bScroll"
+                    ["div"
+                    ,   [   ["id", "tableMisc2b"] 
+                        ,   [   "style"
+                            ,   strCat
+                                [ "display: grid;"
+                                , "grid-auto-rows: auto;"
+                                , "grid-gap: 1px;"
+                                -- , "grid-gap: 0.1em;"
+                                , "background-color: white;"
+                                , "border: 1px solid black;"
+                                ]
+                            ]
+                        ] 
+                    ]
+                ]
+            ] ]
+        ]
+    ];
+
+let wt_QQQ : WiTabDefn = 
+    [   ["Name"    , "TestDefns"  ] 
+    ,   ["Display" , "Test Defns" ]
+    ,   ["Render"  , 
+            state -> error "TODO"
+        ]
+    ];
+
+
+let tabDefns = 
+    [   wtTestFile 
+    ,   wtTestDefns
+    ,   wtProj     
+    ,   wtSrc      
+    ,   wtSrc2     
+    ,   wtToken    
+    ,   wtExpr     
+    ,   wtBind     
+    ,   wtHeap     
+    ,   wtReduc    
+    ,   wtIndir    
+    ,   wtRbJs     
+    ,   wtRbFe     
+    ,   wtMisc1    
+    ,   wtMisc2    
+    ];
+
+-- let initialVisibleTabs = ["Bind", "Heap", "RbJs"];
+-- let initialVisibleTabs = ["Test", "Misc1", "Misc2"];
+let initialVisibleTabs = ["Test", "Src", "Src2", "Misc2"];
+
+
+-- let allSubTabs = 
+let initialVisibleSubTabs = 
+    [   "Src2List"           
+    ,   "Src2Text"           
+    ,   "TestDefnsNameList"  
+    ,   "TestDefnsEntry"      
+    ,   "TestDefnsChecks"      
+    ,   "TestDefnsText"      
+    -- ,   "TestDefnsFieldList" 
+    -- ,   "TestDefnsFieldValue"
+    ];
+
+
+
+let tabDefnsTypeCheck = tabDefns : List WiTabDefn;
+
+let tabDefnsValueCheck : { [(List Str), (List Str)] } =
+    let names : List Str =
+        forMap tabDefns <|
+        defn -> 
+        let name = defn |> kvtGet "Name";
+        name;
+
+    while [names, [] : List Str] <|
+    [ [n ,, ns], done ] |=>
+    if (isElem n done)
+    [ ->
+        panic ["tabDefnsValueCheck", "duplicate Tab Defn name", n, done]
+    , ->
+        [ns, [n ,, done]]
+    ];
+
+
+
+let wiGenerateFixedeCode : { (IoA (List HtmlScript)) } =
+    k ->
+    k
+    [   htmlRuntime2 []
+    ,   htmlPrelude[] 
+    ,   htmlCodegenDecls "fe4-step.fe" fe4_step_text
+    ,   htmlCodegenDecls "fe4-html-common.fe" fe4_html_common_text
+    ,   htmlCodegenDecls "fe4-html-client.fe" fe4_html_client_text
+    ,   htmlCodegenDecls "fe4-webide-common.fe" fe4_webide_common_text
+    ,   htmlCodegenDecls "fe4-webide-client.fe" fe4_webide_client_text
+    ,   callbacksHtml []
+    ];
+
+let wiGenerateVariableCode : { WebIdeState -> (List HtmlScript) } =
+    state -> 
+    let visibleTabs : List Str = state |> kvtGet "VisTabs" |> kvtGet "Visible";
+    let visibleTabs2 : List Str = state |> kvtGet "VisTabs" |> kvtGet "Visible2";
+    -- TODO? add an onload function to initialize initial contents?
+    [   ["script", [ ],
+            strJoin "\n" <|
+            forMap tabDefns <| td ->
+            let name = td |> kvtGet "Name";
+            let tabId = strCat ["tab", name];
+            let buttonId = strCat ["button", name];
+            let showHide = if (isElem tabId visibleTabs) [ -> "show", -> "hide"];
+            -- let display = if (isElem tabId visibleTabs) [ -> "grid", -> "none"];
+            strCat ["setToggleState('", tabId, "', '", buttonId, "', ", show showHide, ");"]
+        ]  
+    ,   ["script", [ ],
+            strJoin "\n" <|
+            let allSubTabs = 
+                concat <| forMap tabDefns <| td -> 
+                -- TODO re-rendering the whole page a second time, 
+                -- TODO   so as to get a list of the names of the sub-tabs,
+                -- TODO   is needlessly expensive
+                match ((td |> kvtGet "Render") state) 
+                [ ["SingleTab", _] |=> 
+                    []
+                , ["SubTabs", subTabs] |=> 
+                    forMap subTabs <| st -> 
+                    st |> kvtGet "name"
+                ];
+            forMap allSubTabs <| name ->
+            let showHide = if (isElem name visibleTabs2) [ -> "show", -> "hide"];
+            -- let display = if (isElem id visibleTabs2) [ -> "block", -> "none"];
+            strCat ["setToggleState2(", show name, ", ", show showHide, ");"]
+        ]
+    ,   ["script", [ ],
+            "loadContents()"
+        ]
+    ];
+
+let htmlScriptMerge : { (List HtmlScript) -> HtmlScript } =
+-- let htmlScriptMerge : { (List HtmlScript) -> Html } =
+    scripts ->
+    ["script", [["type", "module"]],
+        scripts 
+        |> map (([_, _, s]: HtmlScript) -> s)
+        |> strJoin "\n\n// SCRIPT \n\n"
+    ];
+
+
+let exprTreeToList : { ExprLoc -> (List ExprLoc) -> (List ExprLoc) } =
+    rec <| (exprTreeToList : { ExprLoc -> (List ExprLoc) -> (List ExprLoc) }) ->
+    expr -> accum ->
+    let subExprs = subExprLocs expr;
+    let [_, result] =
+        while [subExprs, [expr ,, accum] : List ExprLoc] <|
+        [ [se ,, ses], accum] |=>
+        let accum = exprTreeToList se accum;
+        [ ses, accum ];
+    result;
+
+let exprTreeToList2 : { ExprTy -> (List ExprTy) -> (List ExprTy) } =
+    rec <| (exprTreeToList2 : { ExprTy -> (List ExprTy) -> (List ExprTy) }) ->
+    expr -> accum ->
+    let subExprs = exprTySubExprs expr;
+    let [_, result] =
+        while [subExprs, [expr ,, accum] : List ExprTy] <|
+        [ [se ,, ses], accum] |=>
+        let accum = exprTreeToList2 se accum;
+        [ ses, accum ];
+    result;
+
+let declsTreeToExprList : { DeclLocs -> (List ExprLoc) } =
+    decls ->
+    let [_, result] =
+        while [decls, [] : List ExprLoc] <|
+        [ [ decl ,, decls], accum] |=>
+        let [pat, def] = decl;
+        let patExprList = reverse <| exprTreeToList pat [];
+        let defExprList = reverse <| exprTreeToList def [];
+        [ decls, concat [defExprList, patExprList, accum] ];
+    let result = reverse result;
+    result;
+
+let declsTreeToExprList2 : { DeclTys -> (List ExprTy) } =
+    decls ->
+    let [_, result] =
+        while [decls, [] : List ExprTy] <|
+        [ [ decl ,, decls], accum] |=>
+        let [pat, def] = decl;
+        let patExprList = reverse <| exprTreeToList2 pat [];
+        let defExprList = reverse <| exprTreeToList2 def [];
+        [ decls, concat [defExprList, patExprList, accum] ];
+    let result = reverse result;
+    result;
+
+
+let declsToExprList : { Str -> (List WiTsExprEntry) } =
+    declsStr ->
+    let tokens = scan declsStr;
+    let decls = parseDeclsLoc tokens;
+    let exprList = declsTreeToExprList decls;
+    forMap exprList <| 
+    [ [expTag ,, _], loc] -> 
+    [ ["Expr", expTag], ["Depth", 0], ["TiVal", "?"], ["Loc", loc], ["Addrs", no] ];
+
+-- let declsToExprList2 : { DeclTys -> (List WiTsExprEntry) } =
+let declsToExprList2 : { DeclTys -> (List WiTsExprEntry) } =
+    declsTE ->
+    let exprList = declsTreeToExprList2 declsTE;
+    forMap exprList <| 
+    [ [expTag ,, _], loc, _, _, _, tiAddr] -> 
+    [ ["Expr", expTag], ["Depth", 0], ["TiVal", show tiAddr], ["Loc", loc], ["Addrs", no] ];
+
+let declsToExprList3 : { DeclTys -> Heap -> [Heap, (List WiTsExprEntry)] } =
+    declsTE -> heap ->
+    let exprTeList = declsTreeToExprList2 declsTE;
+    let [_, heap, result] =
+        while [exprTeList, heap, [] : List WiTsExprEntry] <|
+        [ [exprTE ,, exprTEs], heap, result] |=>
+        -- debug2 ["declsToExprList3", exprTE] <| ->
+        let [[expTag ,, _], loc, term, syn, ctx, tiAddr] = exprTE;
+        -- eagerly reduce the synthesized and context types before performing type-inhabitation calculations
+        -- TODO ? at some point it might be useful to reduce the types lazily, during the TI calculation,
+        -- TODO ?   this added flexibility would come with new complications though,
+        -- TODO?    so stick with reducing type once up-front for_ now
+        let heap = graphReduceAddrs [syn, ctx] heap;
+        let [heap, tiVal] = doTypeCheckAddr heap 10 tiAddr;
+        let result1 = [ ["Expr", expTag], ["Depth", 0], ["TiVal", showTiVal tiVal], ["Loc", loc], ["Addrs", yes [term, syn, ctx, tiAddr]] ];
+        [ exprTEs, heap, [result1 ,, result] ];
+    let result = reverse result;
+    [heap, result];
+
+let renderExprList : { (List WiTsExprEntry) -> (List WiResponse) } =
+    exprEntryList ->
+    let tableRows =
+        forMap exprEntryList <| 
+        ee ->
+        [ show (ee |> kvtGet "Depth")
+        -- , hd (hd (ee |> kvtGet "Expr"))
+        , ee |> kvtGet "Expr"
+        , ee |> kvtGet "TiVal"
+        ];
+    [ ["ok", "setTableRows", "exprList", tableRows] ];
+
+
+-- let handlePost : { WiRequest -> WebIdeState -> (IoA { [WiResponse, WebIdeState] }) } =
+let handlePost : { Any -> WebIdeState -> (IoA { [(List WiResponse), WebIdeState] }) } =
+    wiRequest -> state -> k ->
+    match wiRequest
+    [ ["loadContents"] |=>
+        -- (k : { [WiResponse, WebIdeState] -> Io }) ->
+        let response1 = ["ok", "setText", "tabTestDefnsEntry", "Contents Payload"];
+
+        let selectedRowMb = state |> kvtGet "TestDefns" |> kvtGet "Selection";    
+
+        let setNewResp = 
+            ifNil selectedRowMb
+            [ -> []
+            , [selectedRow] ->
+                let rowId1 = strCat ["row", "tdNames2", "-", show selectedRow, "-", "0"];
+                let rowId2 = strCat ["row", "tdNames2", "-", show selectedRow, "-", "1"];
+                let response2 = ["ok", "setElemProp", rowId1, ["style", "background"], "lightblue"];
+                let response3 = ["ok", "setElemProp", rowId2, ["style", "background"], "lightblue"];
+                    [response2, response3]
+            ];
+
+        -- TODO parse the current decls and add expr entries
+        -- TODO highlight currently selected expr
+        -- TODO display corresponding type syn/ctx/inhab values
+
+        let selectedRow = ifYes selectedRowMb [r -> r, -> 0];
+        let stateTestDefns = state |> kvtGet "TestDefns";
+        let tdEntries = stateTestDefns |> kvtGet "Entries";
+        let testDefns = forMap tdEntries <| [num, td] -> td;
+        let entry = listIndex testDefns selectedRow;
+        let [decls, loc] = fieldGetOrDefault entry "decls" ["let _ = \"NO DECLS\";", nilLoc];
+
+        let exprList = declsToExprList decls;        
+        let exprResponse = renderExprList exprList;
+
+        let selectedExprMb = state |> kvtGet "Exprs" |> kvtGet "Selection";
+        let exprHighlightResponse = 
+            ifYes selectedExprMb
+            [ row ->
+                let rowIds = 
+                    forMap [0, 1, 2] <| colNum -> 
+                    strJoin "-" ["exprList", show row, show colNum];
+                let responses = 
+                    forMap rowIds <| rowId ->
+                    ["ok", "setElemProp", rowId, ["style", "background"], "lightblue"];
+                responses
+            , -> []
+            ];
+
+        let responses = concat [setNewResp, [response1], exprResponse, exprHighlightResponse];
+
+        k [responses, state]
+
+    , ["textClick", tabId, start, end] |->
+        guardInt start <| cStart ->
+        guardInt end <| cEnd =>
+        -- (k2 : { [WiResponse, WebIdeState] -> Io }) ->
+        let tfTokens = state |> kvtGet "TestFile" |> kvtGet "Tokens";
+        let tokens = filter (([tag, val, [_,[_,_,tStart],[_,_,tEnd]]]: Token) -> rangeOverlap [cStart, cEnd] [tStart, tEnd]) tfTokens;
+        -- let tokens = forFilter tfTokens <| [tag, val, [_,[_,_,tStart],[_,_,tEnd]]] -> rangeOverlap [cStart, cEnd] [tStart, tEnd];
+        let outputTabId = "tab2";
+        -- let output = forMap tokens <| a -> strCat [show a, "\n"];
+        let output = forMap tokens <| [tag,val,loc] -> [tag, show val];
+        let [_, tokens2] = 
+            forEach 0 tfTokens <| 
+            pos -> [tag, val, [_,[_,_,tStart],[_,_,tEnd]]] ->
+            if (rangeOverlap [cStart, cEnd] [tStart, tEnd])
+            [ -> [ pos + 1, [ [tag, show val, pos] ] ]
+            , -> [ pos + 1, [] ]
+            ];
+        let tokens3 = concat tokens2;
+        let response = ["ok", "miscTokens", outputTabId, tokens3];
+        k [ [response], state ]
+    , ["projSelect", projVal] |->
+        guardStr projVal <| projVal2 =>
+        -- (k : { [WiResponse, WebIdeState] -> Io }) ->
+        io2ReadFile projVal2 <| projContents ->
+        let cache1 = []; -- TODO read the cache from the app-state
+        let evalMode = "Direct";
+        -- let evalMode = "InstRb";
+        let srcDirMb = [];
+        loadProjectViaCache srcDirMb evalMode projVal2 cache1 "." <| [cacheEntry,cache2] ->
+        -- TODO store the cache in the app-state
+        let [_, [hpSnapshot, heapEnv, jsCode, cgHandler, cghEnv]] = cacheEntry;
+        let response = ["ok", "proj", projContents, show heapEnv, jsCode ];
+        k [ [response] , state ]
+    -- , ["choiceChange", "srcChoiceId", srcVal] |->
+    -- , ["choiceChange", "srcTable2b", srcVal] |->
+    , ["choiceChange", srcId, srcVal] |->
+        guardStr srcId <| srcId ->
+        guardTrue (isElem srcId ["srcChoiceId", "srcTable2b"]) <| _ ->
+        guardInt srcVal <| srcVal =>
+        let srcEntries = state |> kvtGet "Src" |> kvtGet "SrcEntries";
+        let entry @ [_, _, tag, decls, _, _] = listIndex srcEntries srcVal;
+        match tag
+        [ "Contents" |=>
+            let response = ["ok", "src", strJoin "\n" ["SRC ", show srcVal, show entry, decls] ];
+            k [ [response] , state ]
+        , "Filename" |=>
+            let filePath = strCat ["../../fe/", decls]; -- TODO handle path-relative filenames
+            io2ReadFile filePath <| fileContents ->
+            let response =["ok", "src", strJoin "\n" ["SRC ", show srcVal, show entry, fileContents] ];
+            k [ [response] , state ]
+        ]
+
+    , ["choiceChange", "tdNames2", srcVal] |->
+        guardInt srcVal <| srcVal =>
+        let stateTestDefns = state |> kvtGet "TestDefns";
+        let tdEntries = stateTestDefns |> kvtGet "Entries";
+        let oldSelectionMb = stateTestDefns |> kvtGet "Selection";
+        -- let state = state |> kvtMod "TestDefns" (kvtSet "Selection" ([srcVal] : Maybe Int));
+        let stateTestDefns = stateTestDefns |> kvtSet "Selection" ([srcVal] : Maybe Int);
+        let state = state |> kvtSet "TestDefns" stateTestDefns;
+
+        let clearOldResp = 
+            ifNil oldSelectionMb
+            [ -> []
+            , [oldRow] ->
+                let rowId1 = strCat ["row", "tdNames2", "-", show oldRow, "-", "0"];
+                let rowId2 = strCat ["row", "tdNames2", "-", show oldRow, "-", "1"];
+                let response2 = ["ok", "setElemProp", rowId1, ["style", "background"], "white"];
+                let response3 = ["ok", "setElemProp", rowId2, ["style", "background"], "white"];
+                [response2, response3]
+            ];
+        let setNewResp = (
+            let rowId = strCat ["row", "tdNames2", "-", show srcVal, "-", "0"];
+            let rowId2 = strCat ["row", "tdNames2", "-", show srcVal, "-", "1"];
+            let response2 = ["ok", "setElemProp", rowId, ["style", "background"], "lightblue"];
+            let response3 = ["ok", "setElemProp", rowId2, ["style", "background"], "lightblue"];
+                [response2, response3]
+            );
+
+        let testDefns = forMap tdEntries <| [num, td] -> td;
+        let entry = listIndex testDefns srcVal;
+        let [decls, loc] = fieldGetOrDefault entry "decls" ["let _ = \"NO DECLS\";", nilLoc];
+        let response1 = ["ok", "setText", "tabTestDefnsText", decls];
+
+        -- update expr-tab contents
+        let selectedRow = srcVal;
+        let stateTestDefns = state |> kvtGet "TestDefns";
+        let tdEntries = stateTestDefns |> kvtGet "Entries";
+        let testDefns = forMap tdEntries <| [num, td] -> td;
+        let entry = listIndex testDefns selectedRow;
+        let [declsStr, loc] = fieldGetOrDefault entry "decls" ["let _ = \"NO DECLS\";", nilLoc];
+        let exprList = declsToExprList declsStr;        
+
+        -- TODO type-check the decls and update the TiVal in each exprList entry
+
+        let tokens = scan declsStr;
+        let decls = parseDeclsLoc tokens;
+        let [heap, henv] = graphReduceInit instantiateBuiltins;
+        let builtinDecls = declsAddNilLoc (builtinDecls []);
+        let [heap, henvNew, declsTE] = instDecls heap henv builtinDecls;
+        let henv = henv |> append henvNew;
+        let [heap, henvNew, declsTE] = instDecls heap henv decls;
+        let henv = henv |> append henvNew;
+
+        -- let exprList2 = declsToExprList2 declsTE;
+
+        let [heap, exprList2] = declsToExprList3 declsTE heap;
+
+        let state = state |> kvtMod "Exprs" (kvtSet "Env" (yes henv : Maybe HEnvTy));
+        let state = state |> kvtMod "Exprs" (kvtSet "Heap" (yes heap : Maybe Heap));
+        let state = state |> kvtMod "Exprs" (kvtSet "Entries" exprList2);
+
+        -- TODO evaluate TI addresses, so as to compute TI values
+
+        let exprResponse = renderExprList exprList2;
+
+        let responses = concat [clearOldResp, setNewResp, [response1], exprResponse];
+        k [ responses, state ]
+
+    , ["choiceChange", "bindingChoiceId", bindingVal] |->
+        guardInt bindingVal <| bindingVal =>
+        let bindingEntries = state |> kvtGet "Bind" |> kvtGet "Bindings";
+        let entry = listIndex bindingEntries bindingVal;
+        let [heap, henv : HEnvTy, declsRb, state2] = 
+            match entry
+            [ [ _, _, _, [heap], henv] |=>
+                [heap, henv : HEnvTy, [], state]
+            , [_, _, testDefn, [], _] |=>
+                let [decls, _] = fieldGetOrDefault testDefn "decls" ["", nilLoc];
+                let declsAst = parseDeclsStr decls;
+                let expectVals : List Str = 
+                    forFlatMap testDefn (["expectValue",[expr,val]] |=> expr);
+                let evListAst : Expr = 
+                    ["EList", forMap expectVals parseExprStr, [] ];
+                let declsAst2 = append declsAst [ [["EVar", "_expect_"], evListAst] ];
+                let [heap0, henv0] = graphReduceInit instantiateBuiltins;
+                let doGR = true;
+                let [heap1, henv1, declsRb1] = graphReduceDecls doGR [heap0, henv0, (builtinDecls [])];
+                let [heap2, henv2, declsRb2] = graphReduceDecls doGR [heap1, henv1, declsAst2];
+                let state2 = state;
+                [heap2, henv2 : HEnvTy, declsRb2, state2]
+            ];
+        let envStr = strCat <| for henv <| a -> strCat [show a, "\n"];
+        let roots = forMap henv <| [name,[addr, _]] -> addr;
+        let [heap2, heapStr2] = heapDumpAllShow roots heap;
+        let declsRbStr = cgDeclsJsStr declsRb;
+        let response = ["ok", "binding", envStr, heapStr2, declsRbStr];
+        k [ [response], state2 ]
+    , ["tokenClick", row] |->
+        guardInt row <| row2 =>
+        -- (k : { [WiResponse, WebIdeState] -> Io }) ->
+        let tfTokens = state |> kvtGet "TestFile" |> kvtGet "Tokens";
+        let tokMb = listIndexMaybe tfTokens row2;
+        let response = 
+            match tokMb
+            [ [] |=>
+                ["fail", "token row out of range", row2, length tfTokens]
+            , [tok] |=>
+                let [_,_,[_,[_,_,from],[_,_,to]]] = tok;
+                ["ok", "textHighlight", "text1", from, to]
+            ];
+        k [[response], state]
+
+    , ["tableCellClick", "exprList", row, col] |->
+        guardInt row <| row ->
+        guardInt col <| col =>
+
+        let oldSelectionMb = state |> kvtGet "Exprs" |> kvtGet "Selection";
+        let clearOldResp = 
+            ifNil oldSelectionMb
+            [ -> []
+            , [oldRow] ->
+                let rowIds = 
+                    forMap [0, 1, 2] <| colNum -> 
+                    strJoin "-" ["exprList", show oldRow, show colNum];
+                let responses = 
+                    forMap rowIds <| rowId ->
+                    ["ok", "setElemProp", rowId, ["style", "background"], "white"];
+                responses
+            ];
+
+        let rowIds = 
+            forMap [0, 1, 2] <| colNum -> 
+            strJoin "-" ["exprList", show row, show colNum];
+        let setNewResp = 
+            forMap rowIds <| rowId ->
+            ["ok", "setElemProp", rowId, ["style", "background"], "lightblue"];
+
+        let state = state |> kvtMod "Exprs" (kvtSet "Selection" (yes row : Maybe Int));
+
+        let exprEntries : List WiTsExprEntry = state |> kvtGet "Exprs" |> kvtGet "Entries";
+        -- let exprEntryMb : List WiTsExprEntry = state |> kvtGet "Exprs" |> kvtGet "Entries" |> listIndexMb row;
+        let exprEntryMb = listIndexMaybe exprEntries row;
+        let [state, highlistResp : List WiResponse] = 
+            match exprEntryMb
+            [ [] |=>
+                [   state
+                ,   [ ["fail", "token row out of range", row, length exprEntries] ]
+                ]
+            , [exprEntry] |=>
+                let loc : Loc = exprEntry |> kvtGet "Loc";
+                let [_,[_,_,from],[_,_,to]] = loc;
+
+                let sourceResp = 
+                    [ ["ok", "textHighlight", "tabTestDefnsText", from, to] ];
+
+                let addrsMb = exprEntry |> kvtGet "Addrs";
+                let [state, addrsResp] = 
+                    ifNil addrsMb
+                    [ -> 
+                        [state, []]
+                    , [[term, synth, context, inhab]] ->
+
+                        let heapMb = state |> kvtGet "Exprs" |> kvtGet "Heap";
+                        let henvMb = state |> kvtGet "Exprs" |> kvtGet "Env";
+
+                        let [state, rbResp] =
+                            match [heapMb, henvMb]
+                            [ [ [heap], [henv] ] |=>
+                                let [heap, termRb   ] = readbackExpr2 heap henv term;
+                                let [heap, synthRb  ] = readbackExpr2 heap henv synth;
+                                let [heap, contextRb] = readbackExpr2 heap henv context;
+
+                                let termPp    = pretty3Show (pfExpr 0 [] (exprStripLoc termRb   ));
+                                let synthPp   = pretty3Show (pfExpr 0 [] (exprStripLoc synthRb  ));
+                                let contextPp = pretty3Show (pfExpr 0 [] (exprStripLoc contextRb));
+
+                                -- TODO include type-inhabitation deduction steps
+                                -- TODO pretty print synth/context types
+                                -- TODO make types clickable, expand/contract parts of types, toggle the replacement of vars with their definitions
+
+                                let [heap, termHp   ] = heapDumpAllShow [term   ] heap;
+                                let [heap, synthHp  ] = heapDumpAllShow [synth  ] heap;
+                                let [heap, contextHp] = heapDumpAllShow [context] heap;
+                                let [heap, inhabHp  ] = heapDumpAllShow [inhab  ] heap;
+
+                                let [heap, inhabHp2  ] = heapDo Str (heapDumpAllShow2 "Term" [inhab  ]) heap;
+
+
+                                let [heap, tiDag    ] = doCollectTypeRuleInfo inhab heap;
+                                let tiDag = strJoin "\n" tiDag;
+
+                                let state = state |> kvtMod "Exprs" (kvtSet "Heap" (yes heap : Maybe Heap));
+
+
+                                [   state
+                                ,   [   ["ok", "setText", "tabTermValue", strJoin "\n" [show termRb,    "", termPp,    "", "", termHp   ] ]
+                                    ,   ["ok", "setText", "tabTypeSyn"  , strJoin "\n" [show synthRb,   "", synthPp,   "", "", synthHp  ] ]
+                                    ,   ["ok", "setText", "tabTypeCtx"  , strJoin "\n" [show contextRb, "", contextPp, "", "", contextHp] ]
+                                    ,   ["ok", "setText", "tabTypeInhab", strJoin "\n" [show ["ADDRS", addrsMb], "", "", inhabHp, "", "", inhabHp2, "", tiDag] ]
+                                    ]
+                                ]
+                            , _ |=>
+                                [state, []]
+                            ];
+
+                        [   state
+                        ,   [ ["ok", "setText", "tabTypeSyn", show addrsMb] 
+                            ,, rbResp
+                            ]
+                        ]    
+                    ];
+
+                [state, concat [sourceResp, addrsResp]]
+            ];
+
+
+        let responses = concat [clearOldResp, setNewResp, highlistResp];
+
+        k [responses, state]
+
+    , ["tableCellClick", tableId, row, col] |->
+        guardStr tableId <| tableId ->
+        guardInt row <| row ->
+        guardInt col <| col =>
+        debug2 ["TODO tableCellClick", tableId, row, col] <| ->
+        k [[], state]
+    , ["tabSelect", tabId, buttonId] |->
+        guardStr tabId <| tabId ->
+        guardStr buttonId <| buttonId |=>
+        -- (k : { [WiResponse, WebIdeState] -> Io }) ->
+        let visibleTabs = state |> kvtGet "VisTabs" |> kvtGet "Visible";
+        debug2 ["tabSelect/1", visibleTabs] <| ->
+        let [visibleTabs, action] =
+            if (isElem tabId visibleTabs)
+            [ ->
+                let visibleTabs = filter ((tab : Str) -> not (tab == tabId)) visibleTabs;
+                [visibleTabs, "hide"]
+            , ->
+                let visibleTabs = [tabId ,, visibleTabs];
+                [visibleTabs, "show"]
+            ];
+        debug2 ["tabSelect/2", visibleTabs] <| ->
+        let visibleTabState = state |> kvtGet "VisTabs";
+        let visibleTabState = visibleTabState |> kvtSet "Visible" visibleTabs;
+        let state = state |> kvtSet "VisTabs" visibleTabState;
+        let response : WiResponse = ["ok", "tabSelect", tabId, buttonId, action];
+        k [[response], state]
+    , ["tabSelect2", name] |->
+        guardStr name <| name =>
+        -- (k : { [WiResponse, WebIdeState] -> Io }) ->
+        debug2 ["tabSelect2", state |> kvtGet "VisTabs"] <| ->
+        let visibleTabs = state |> kvtGet "VisTabs" |> kvtGet "Visible2";
+        debug2 ["tabSelect2/1", visibleTabs] <| ->
+        let [visibleTabs, action] =
+            if (isElem name visibleTabs)
+            [ ->
+                let visibleTabs = filter ((tab : Str) -> not (tab == name)) visibleTabs;
+                [visibleTabs, "hide"]
+            , ->
+                let visibleTabs = [name ,, visibleTabs];
+                [visibleTabs, "show"]
+            ];
+        debug2 ["tabSelect2/2", visibleTabs] <| ->
+        let visibleTabState = state |> kvtGet "VisTabs";
+        let visibleTabState = visibleTabState |> kvtSet "Visible2" visibleTabs;
+        let state = state |> kvtSet "VisTabs" visibleTabState;
+        let response : WiResponse = ["ok", "tabSelect2", name, action];
+        k [[response], state]
+    , _ |=>
+        -- (k : { [WiResponse, WebIdeState] -> Io }) ->
+        let response = ["fail", wiRequest];
+        k [ [response], state ]
+    ];
+
+
+let webIde : { WebIdeState -> IoId -> (IoA WebIdeState) } =
+    state -> request -> k0 ->
+
+    io2HttpReqMethod request <| [method] ->
+    match method
+    [ "GET" |=>
+        let response = htmlToStr2 
+            ["html", []
+            , ["meta", [["charset","utf-8"]]]
+            , ["title", [], "Ferrum WebIDE"]
+            , ["style", [],
+                """
+                  html {
+                    box-sizing: border-box;
+                  }
+                  *, *:before, *:after {
+                    box-sizing: inherit;
+                  }
+                  body {
+                      margin: 0;
+                      width: 100vw;
+                      height: 100vh;
+                      font-family: sans-serif;
+                  }
+                """
+              ]
+            , ["body", []
+              , [ "div", 
+                  [ ["id", "page"]
+                  , ["style", strJoin "\n"
+                      [ "display: grid;"
+                      , "grid-template-areas:"
+                      , "    \"toggles tabs\";"
+                      , "grid-template-columns: auto 1fr;"
+                      , "grid-template-rows: auto;"
+                      -- , "// border: 5px solid gray;"
+                      , "border: 1px solid gray;"
+                      , "padding: 0px;"
+                      , "width: 100%;"
+                      , "height: 100%;"
+                      ]
+                    ]
+                  ]
+                , [ "div", 
+                    [ ["id", "toggles"]
+                    , ["style", strJoin " "
+                        [ "grid-area: toggles;"
+                        -- , "// padding: 5px;"
+                        , "padding: 1px;"
+                        , "background-color: darkgray;"
+                        , "display: grid;"
+                        , "grid-auto-columns: auto;"
+                        , "grid-auto-rows: auto;"
+                        , "place-content: start;"
+                        ]
+                      ]
+                    ]
+                    ,,  forMap tabDefns <| tab ->
+                        let name = tab |> kvtGet "Name";
+                        let tabId = strCat ["tab", name];
+                        let buttonId = strCat ["button", name];  
+                        let display = tab |> kvtGet "Display";
+                        let buttonValue = strCat ["+ ", display];  
+                        ["input", 
+                            [ ["id", buttonId]
+                            , ["type", "submit"]
+                            , ["value", buttonValue]
+                            , ["style", "text-align: left"]
+                            , ["onclick", strCat ["toggleTab('", tabId,"', '", buttonId,"')"]]
+                            ]
+                        ]
+                  ]
+                , ["div", 
+                    [ ["id", "tabs"]
+                    , ["style", strJoin " "
+                        [ "grid-area: tabs;"
+                        -- , "// padding: 5px;"
+                        , "padding: 1px;"
+                        , "background-color: lightgray;"
+                        , "display: grid;"
+                        -- , "// grid-template-columns: auto;"
+                        , "grid-auto-columns: 1fr;"
+                        , "grid-auto-rows: auto;"
+                        , "grid-auto-flow: column;"
+                        , "justify-content: stretch;"
+                        , "align-content: stretch;"
+                        ]
+                      ]
+                    ]
+
+                  ,, forMap tabDefns <| tab ->
+                      let name = tab |> kvtGet "Name";  
+                      let display = tab |> kvtGet "Display";  
+                      let content = (tab |> kvtGet "Render") state;
+                      let html = 
+                        match content
+                        [ ["SingleTab", html] |=> html
+                        , ["SubTabs", subTabs] |=> mkSubTabsHtml subTabs
+                        ];
+                      mkTabHtml name display html
+                  ]  
+                ]
+              ,
+                  let fixedCode = state |> kvtGet "JsCode";
+                  let variableCode = wiGenerateVariableCode state;
+                  htmlScriptMerge <| concat [fixedCode, variableCode]
+              ]
+            ];
+        -- io2HttpRespond request [["content-type", "text/html"]] response <| ->
+        ioHttpServerSendResponse request [["content-type", "text/html"]] response <| ->
+        k0 state
+
+    , "POST" |=>
+        -- let _ = debug ["State", state];
+        io2HttpReqData request <| [data] ->
+        let _ = debug ["POST", "Request", data];
+        handlePost data state <| [wiResponse, state] ->
+        let _ = debug ["POST", "Response", wiResponse];
+        let response = show2 wiResponse;
+        -- io2HttpRespond request [["content-type", "application/json"]] response <| ->
+        ioHttpServerSendResponse request [["content-type", "application/json"]] response <| ->
+        k0 state
+    , _ |=> 
+        error ["unknown/unhandled http request method", method]
+    ];
+
+
+let from_testFile_to_webIdeState : { Str -> (IoA WebIdeState) } =
+    testFilename -> k ->
+    loadTestDefns testFilename <| testDefns ->
+    let projFileNames : List Str = 
+        listUniq <| concat <| concat <|
+        for testDefns <| testDefn ->
+        for testDefn <| testLine ->
+        match testLine
+        [ ["project", name] |=> [name] 
+        , _ |=> []
+        ];
+    ioMap ( (projFilename: Str) ->
+        (k :  { [Str,[Str,Project]] -> Io }) ->
+        io2ReadFile projFilename <| projFileContents ->
+        loadProject projFilename <| project ->
+        k [projFilename, [projFileContents, project]]
+    ) projFileNames <| projFileNameContents ->
+    let _ = debug ["projFileNames", projFileNames];
+    io2ReadFile testFilename <| testFileContents ->
+    let wiTsTestFile2 : WiTsTestFile = 
+        [ ["Files"      , [testFilename]                          ]
+        , ["Selection"  , testFilename                            ]
+        , ["Contents"   , testFileContents                        ]
+        , ["Tokens"     , scanFile testFilename testFileContents  ]
+        ];
+    let wiTsProject2 : WiTsProject = 
+        [ ["Projects"  ,  projFileNames  ]
+        , ["Selection" ,  ""             ]
+        , ["Contents"  ,  ""             ]
+        ];
+    let [nextSrcEntryNum, tfSrcEntries1 : List (List WiSourceEntry)] = 
+        forEach (0 : Int) testDefns <| num -> testDefn ->
+        let name = fieldGetOrDefault testDefn "name" "<unknown>";
+        let name2 = strCat [testFilename, " / ", name];
+        let [decls, _] = fieldGetOrDefault testDefn "decls" ["", nilLoc];
+        let entry = [ num, name2, "Contents", decls, [], [] ];
+        let nextNum = num + 1;
+        let declsEntry = [nextNum, entry];
+        let expectVals : List Str = 
+            forFlatMap testDefn (["expectValue",[expr,val]] |=> expr);
+        let [nextNum2, expectEntries : List WiSourceEntry] = 
+            forEach (nextNum : Int) expectVals <| 
+            num2 -> expr ->
+            -- let name2 = strCat [name, " [ ", expr, " ]"];
+            let name3 = strCat [name2, " / ", expr];
+            [ num2 + 1, [num2, name3, "Contents", expr, [], [] ] ];
+        [ nextNum2, [entry ,, expectEntries] ];
+    let tfSrcEntries : List WiSourceEntry = concat tfSrcEntries1;
+    let [_, projSrcEntries1 : List (List WiSourceEntry)] = 
+        forEach nextSrcEntryNum projFileNames <|
+        num0 -> fileName ->
+        let contentsProject = lookup fileName projFileNameContents;
+        let [contents2, project] = match contentsProject [ [] |=> ["",[]], [contents2Proj] |=> contents2Proj ];
+        -- let entry = [num0, fileName, "Contents", contents2, [], []];
+        let entry = [num0, fileName, "Filename", fileName, [], []];
+        let [nextNum, srcEntry : List (Maybe WiSourceEntry)] = 
+            forEach num0 project <|
+                num -> projectLine ->
+                match projectLine
+                [ ["source", srcFilename] |=>
+                    let srcName = strCat [fileName, " / CODE / ", srcFilename];
+                    [ num + 1, [ [num, srcName, "Filename", srcFilename, [], []] ] ]
+                , ["text", bindName, srcFilename] |=>
+                    let srcName = strCat [fileName, " / TEXT / ", srcFilename];
+                    [ num + 1, [ [num, srcName, "Filename", srcFilename, [], []] ] ]
+                , _ |=>
+                    [num, []]
+                ];
+        [nextNum, concat srcEntry];
+    let projSrcEntries = concat projSrcEntries1;
+    let srcEntries : List WiSourceEntry = concat [ tfSrcEntries, projSrcEntries ];
+    let wiTsSource2 : WiTsSource = [ ["SrcEntries", srcEntries] ];
+
+    let [nextBindingEntryNum, bindingEntries : (List WiBindingEntry)] = 
+        forEach (0 : Int) testDefns <| num -> testDefn ->
+        let name = fieldGetOrDefault testDefn "name" "<unknown>";
+        let name2 = strCat [testFilename, " / ", name];
+        let entry = [ num, name2, testDefn, [], [] ];
+        let nextNum = num + 1;
+        [ nextNum, entry ];
+    let wiTsBinding2 : WiTsBinding = [ ["Bindings", bindingEntries ] ];
+
+    let [tdEntryNum, tdEntries : (List WiTsTestDefnEntry)] = 
+        forEach (0 : Int) testDefns <| num -> testDefn ->
+        let nextNum = num + 1;
+        let entry = [ num, testDefn ];
+        [ nextNum, entry ];
+
+    let testDefnSelection : Maybe Int = [];
+    let wiTsTestDefns2 : WiTsTestDefns = [ ["Entries", tdEntries], ["Selection", testDefnSelection] ];
+
+    let wiStateFileName = "tmp-webide.state";
+
+    let visibleTabs = forMap initialVisibleTabs <| tab -> strCat ["tab", tab];
+    let visibleTabState : WiTsVisibleTabs = [ ["Visible", visibleTabs], ["Visible2", initialVisibleSubTabs] ];
+
+    let wiTsExprs : WiTsExprs = [ ["Entries", []], ["Selection", no], ["Heap", no], ["Env", no] ];
+
+    wiGenerateFixedeCode <| jsCode ->
+
+    let state : WebIdeState =
+        [ ["TestFile"  , wiTsTestFile2    ]
+        , ["TestDefns" , wiTsTestDefns2   ]
+        , ["Exprs"     , wiTsExprs        ]
+        , ["Proj"      , wiTsProject2     ]
+        , ["Src"       , wiTsSource2      ]
+        , ["Bind"      , wiTsBinding2     ]
+        , ["VisTabs"   , visibleTabState  ]
+        , ["JsCode"    , jsCode           ]
+        ];
+
+    k state;
+
+let applyStateUpdates : { Str -> WebIdeState -> (IoA WebIdeState) } =
+    wiStateFileName -> state -> k ->
+
+    io2ReadFile2 wiStateFileName <| stateStrResult ->
+    let stateDataMb = 
+        match stateStrResult
+        [ ["Ok", stateStr] |=> 
+            let stateDataMb = tryParseData stateStr;
+            stateDataMb
+        , ["Error", errMsg] |=>
+            debug2 ["missing webide state file (", wiStateFileName, ") using default contents"] <| ->
+            no
+        ];
+    debug2 ["READ STATE", stateDataMb] <| ->
+
+    -- let visibleTabState : WiTsVisibleTabs = 
+    let statePersist : WebIdeStatePersist = 
+        ifNil stateDataMb
+        [ -> 
+            let visibleTabs = forMap initialVisibleTabs <| tab -> strCat ["tab", tab];
+            let visibleTabState : WiTsVisibleTabs = [ ["Visible", visibleTabs], ["Visible2", initialVisibleSubTabs] ];
+            [ ["VisTabs", visibleTabState], ["TestDefnsSelection", [] ], ["ExprSelection", [] ] ]
+        , [stateData] -> 
+            debug2 ["READ TABS", stateData] <| ->
+            let statePersist = justTrustMeCast Any WebIdeStatePersist stateData;
+            statePersist
+        ];
+
+    let state = state |> kvtSet "VisTabs" (statePersist |> kvtGet "VisTabs");
+    let testDefns = state |> kvtGet "TestDefns";
+    let testDefns = testDefns |> kvtSet "Selection" (statePersist |> kvtGet "TestDefnsSelection");
+    let state = state |> kvtSet "TestDefns" testDefns;
+    let state = state |> kvtMod "Exprs" (kvtSet "Selection" (statePersist |> kvtGet "ExprSelection"));
+
+    k state;    
+
+
+let runWebApp_webIde : Io = 
+    io2GetArgs <| args ->
+    match args
+    [ [testFilename] |=>
+
+        from_testFile_to_webIdeState testFilename <| state ->
+
+        let wiStateFileName = "tmp-webide.state";
+
+        applyStateUpdates wiStateFileName state <| state ->
+
+        let persist : { WebIdeState -> (IoA Nil) } =
+            state -> k ->
+            let statePersist : WebIdeStatePersist = 
+                [ ["VisTabs", state |> kvtGet "VisTabs"]
+                , ["TestDefnsSelection", state |> kvtGet "TestDefns" |> kvtGet "Selection"]
+                , ["ExprSelection", state |> kvtGet "Exprs" |> kvtGet "Selection"]
+                ];
+            io2WriteFile wiStateFileName (strCat [show statePersist, "\n"]) <| ->
+            k [];
+
+        runWebApp2 state webIde persist
+    , _ |=>
+        error ["Usage: webide <test-filename>"]
+    ];
+

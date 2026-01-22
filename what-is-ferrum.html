@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>
+What is Ferrum?
+</title>
+<style>
+html { box-sizing: border-box; }
+*, *:before, *:after { box-sizing: inherit; }
+body { font-family: sans-serif; margin: auto; line-height: 1.5; }
+.s0 { display: flex; flex-direction: column; margin-block-end: 1em; max-width: 100ch; margin-left: calc(50% - 50ch); }
+.s1 { display: flex; flex-direction: column; margin-block-end: 1em; max-width: 100ch; margin-left: calc(50% - 50ch); }
+.s2 { margin-left: 4ch; text-indent: -4ch; }
+.s3 { margin-left: 4ch; text-indent: -2ch; }
+.s4 { text-indent: 4ch; }
+.s5 { text-indent: 0ch; }
+.s6 { max-width: 100ch; margin-top: 1ch; text-indent: 0ch; }
+.s7 { max-width: 100ch; margin-left: calc(50% - 50ch); }
+</style>
+</head>
+<body>
+<hr style='margin: 4ch'>
+<script type="module">
+import "/gen/site/page-reload.js"
+</script>
+<div style="margin-left: calc(50% - 50ch); width: 100ch;">
+<h1>
+What is Ferrum?
+</h1>
+</div>
+<div class="s1">
+<span class="s2">
+Ferrum is the solution, when the problem is too many forms of abstraction.
+</span>
+<span class="s3">
+(Or at least, that is what it aspires to be.)
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Programming languages often have more than one form of abstraction.
+</span>
+<span class="s3">
+Examples include:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+Functions,
+</li>
+<li class="s5">
+macros,
+</li>
+<li class="s5">
+templates,
+</li>
+<li class="s5">
+generics,
+</li>
+<li class="s5">
+type-constructors,
+</li>
+<li class="s5">
+staging.
+</li>
+</ul>
+</span>
+<span class="s3">
+New forms of abstraction can be added to a language for a number of reasons, two common ones are:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+Moving computation from run-time to compile-time,
+</li>
+<li class="s5">
+Improving the expressiveness of the type-system,
+(which can be seen as moving error-detection from run-time to compile-time).
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+The downside of multiple forms of abstraction, is that you may then need to write the essentially same code multiple times.
+</span>
+<span class="s3">
+Abstractions are created to avoid repetition.
+</span>
+<span class="s3">
+But, the act of introducing a new form of abstraction, changes the very thing we are trying to abstract over.
+</span>
+<span class="s3">
+Each time we add a new form of abstraction to avoid one form of repetition we risk (or inevitably cause?) a new potential form of repetition.
+</span>
+<span class="s3">
+Ferrum aims to provide a single form of abstraction in such a way that there is no need to introduce further forms of abstraction.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Ferrum is unusual in a number of ways:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+Terms and types are abstracted over together,
+</li>
+<li class="s5">
+graph-reduction is performed beneath lambdas, and
+</li>
+<li class="s5">
+pattern-match failure can be handled by the caller.
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+The benefits this brings are:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+For many purposes, functions can be used instead of macros,
+</li>
+<li class="s5">
+the same code can be used at run-time as compile-time,
+</li>
+<li class="s5">
+interpretive overhead can be specialized away,
+</li>
+<li class="s5">
+we don't need to keep adding new syntactic constructs each time the expressiveness of the type-system is increased.
+</li>
+<li class="s5">
+language constructs can be defined using functions:
+<ul class="s6">
+<li class="s5">
+Effect-handlers are just objects with asynchronous methods, 
+</li>
+<li class="s5">
+objects are just functions with an intersected function type,
+</li>
+<li class="s5">
+asynchronous methods/functions are just functions which take a continuation argument,
+</li>
+<li class="s5">
+continuations are just functions.
+</li>
+</ul>
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+To provide better syntactic support for specific language constructs,
+</span>
+<span class="s3">
+(perhaps because writing everything in CPS (continuation-passing style) looks a bit odd),
+</span>
+<span class="s3">
+we can write an interpreter for an extended language, and specialize away the interpretive overhead.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Is this all too good to be true?
+</span>
+<span class="s3">
+Well, maybe.
+</span>
+<span class="s3">
+The fundamental tension between type-system expressability and decidability means we cannot have everything desirable simultaneously.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+A language design cannot choose both expressability and decidability, but perhaps it can not choose at all.
+</span>
+<span class="s3">
+That is, the decision can be deferred to the user.
+</span>
+<span class="s3">
+We can have both, but not at the same time.
+</span>
+<span class="s3">
+When we want decidability, we must limit our expressiveness.
+</span>
+<span class="s3">
+When we want unbounded expressiveness, we must accept the type-checker might return "unknown".
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+The ideal type-system should be able to decide everything we wish to express.
+</span>
+<span class="s3">
+Most (practically all) typed programming languages start with a decidable type-system with limited expressiveness.
+</span>
+<span class="s3">
+Often, these will then go on to gain greater expressiveness.
+</span>
+<span class="s3">
+For example adding polymorphic-types to Java/Go, or adding dependent-types to Haskell.
+</span>
+<span class="s3">
+Each time the expressiveness of a decidable language is increased, the syntax is typically modified.
+</span>
+<span class="s3">
+The things which cannot be decided simply cannot be expressed.
+</span>
+<span class="s3">
+This is both good and bad.
+</span>
+<span class="s3">
+It's good because; so long as we follow the syntax of the language, we'll either get a working program, or a definitive type-error.
+</span>
+<span class="s3">
+It's bad because; the things which cannot be decided, cannot even be written down.
+</span>
+<span class="s3">
+Without a valid notation, it becomes difficult to even talk about that which cannot currently be typed.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+A type-system can either: 
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+Start decidable, and become more expressive (but never fully expressive), or
+</li>
+<li class="s5">
+start expressive, and become more decidable (but never fully decidable).
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Which is best?
+</span>
+<span class="s3">
+It depends.
+</span>
+<span class="s3">
+There's value in being able to switch between the two approaches without switching language.
+</span>
+<span class="s3">
+If you know you are programming within the capabilities of the type-checker, then a decidable approach is best.
+</span>
+<span class="s3">
+If you are exploring possible ways of expressing a program, an expressive approach might make sense.
+</span>
+<span class="s3">
+Sometimes it can be useful to approach a problem from both ends of a spectrum.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+What is the worst?
+</span>
+<span class="s3">
+Using a type-system to model problem-domain specific characteristics,
+</span>
+<span class="s3">
+only to spend much more time learning about and working-around the limits of a particular type-system,
+</span>
+<span class="s3">
+than understanding the actual problem-domain.
+</span>
+<span class="s3">
+(It's even worse, when the compiler has bugs in its lesser used parts. This can make people very wary about trying anything new.)
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Extending an expressive type-system to be be decidable is less intrusive than extending a decidable type-system to be more expressive.
+</span>
+<span class="s3">
+A type-checker for an expressive type-system ends up looking more like a model-checker than a conventional decidable type-checker.
+</span>
+<span class="s3">
+A type-system which is able to admit it doesn't know can be more helpful than a type-system that fails to distinguish between user-error and type-system limitation.
+</span>
+<br>
+</div>
+<hr style='margin: 4ch'>

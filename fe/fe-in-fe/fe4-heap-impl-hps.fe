@@ -1,0 +1,288 @@
+language ferrum/0.1
+
+-- let heapStyle : HeapStyle = "HPS";
+
+let HeapHandler = 
+    Rec <| HH ->
+    { { "hGet"      ->  [Addr]              -> K @ { Indirect         -> HH -> Any } -> K Indirect         HH }
+    & { "hSet"      ->  [Addr, Indirect]    -> K @ { []               -> HH -> Any } -> K []               HH }
+    & { "hNew"      ->  [NcNode]            -> K @ { Addr             -> HH -> Any } -> K Addr             HH }
+    & { "hNew_noHashCons" ->  [NcNode]      -> K @ { Addr             -> HH -> Any } -> K Addr             HH }
+    & { "snapshot"  ->  []                  -> K @ { { [] -> HH }     -> HH -> Any } -> K { [] -> HH }     HH }
+    & { "toList"    ->  []                  -> K @ { (List AddrInd)   -> HH -> Any } -> K (List AddrInd)   HH }
+    & { "skip"      ->  []                  -> K @ { []               -> HH -> Any } -> K []               HH }
+    };
+
+let HeapK : { Type -> Type } = 
+    A -> { A -> HeapHandler -> Any };
+let HeapA : { Type -> Type } = 
+    A -> { K @ (HeapK A) -> HeapHandler -> K A HeapHandler };
+
+-- TODO ?
+-- let HeapA2 : { Type -> Type } = 
+--     A -> { K @ (HeapK A) -> K A };
+
+
+let Heap = HeapHandler;
+let HeapSnapshot = { [] -> Heap };
+
+
+let heapHandlerMk : { (Array Indirect) -> HeapHandler } =
+    annotate_HandlerMk <|
+    rec <| (heapHandlerMk : { (Array Indirect) -> HeapHandler }) -> 
+    array ->
+    hpsDispatch HeapHandler
+    [ [ "hGet"
+      , [addr : Addr] ->
+        (k : K @ HeapK Indirect) ->
+        let [array2, indirect] = array ["get", addr];
+        k indirect (heapHandlerMk array2)
+      ]  
+    , [ "hSet"
+      , [addr : Addr, indirect : Indirect] ->
+        (k : K @ HeapK Nil) ->
+        let [array2,[]] = array ["set", addr, indirect];
+        k [] (heapHandlerMk array2)
+      ]
+    , [ "hNew"
+      , [ncNode : NcNode] ->
+        (k : K @ HeapK Addr) ->
+        let [nc, node] = ncNode;
+        let [array2, addr] = array ["length"];
+        let indirect = [[], nc, node];
+        let [array3,[]] = array2 ["extend",[indirect]];
+        k addr (heapHandlerMk array3)
+      ]  
+    , [ "snapshot"
+      , [] ->
+        (k : K @ HeapK HeapSnapshot) ->
+        let [array2, arraySnapshot] = array ["snapshot"];
+        let heapSnapshot = [] -> hpsHandlerMk HeapHandler heapHandlerMk (arraySnapshot []);
+        k heapSnapshot (heapHandlerMk array2)
+      ]  
+    , [ "toList"
+      , [] ->
+        (k : K @ HeapK (List AddrInd)) ->
+        let [array1, length1] = array ["length"];
+        let pos0 : Int = 0;
+        let inds0 : List AddrInd = [];
+        let [array4, _, inds2] =
+            while [array1, pos0, inds0] <|
+            [array2, pos1, inds1] ->
+            guardLt [pos1, length1] <| _ =>
+            let [array3, ind] = array2 ["get", pos1];
+            [array3, pos1 + 1, [[pos1, ind] ,, inds1]];
+        let result = reverse inds2;
+        k result (heapHandlerMk array4)
+      ]  
+    , [ "skip"
+      , [] ->
+        (k : K @ HeapK Nil) ->
+        k [] (heapHandlerMk array)
+      ]  
+    ];
+
+let HeapHashCons = Assoc1 NcNode Addr;
+
+let heapHandlerMk2 : { [(Array Indirect), HeapHashCons] -> HeapHandler } =
+    annotate_HandlerMk <|
+    rec <| (heapHandlerMk : { [(Array Indirect), HeapHashCons] -> HeapHandler }) -> 
+    state ->
+    hpsDispatch HeapHandler
+    [ [ "hGet"
+      , [addr : Addr] ->
+        (k : K @ HeapK Indirect) ->
+        let [array, hashCons] = state;
+        let [array, indirect] = array ["get", addr];
+        k indirect (heapHandlerMk [array, hashCons])
+      ]  
+    , [ "hSet"
+      , [addr : Addr, indirect : Indirect] ->
+        (k : K @ HeapK Nil) ->
+        let [array, hashCons] = state;
+        let [array,[]] = array ["set", addr, indirect];
+        k [] (heapHandlerMk [array, hashCons])
+      ]
+    , [ "hNew_noHashCons"
+      , [ncNode : NcNode] ->
+        (k : K @ HeapK Addr) ->
+        let [array, hashCons] = state;
+        let [nc, node] = ncNode;
+        let [array, addr] = array ["length"];
+        let indirect = [[], nc, node];
+        let [array,[]] = array ["extend",[indirect]];
+        k addr (heapHandlerMk [array, hashCons])
+      ]  
+    , [ "hNew"
+      , [ncNode : NcNode] ->
+        (k : K @ HeapK Addr) ->
+        let [array, hashCons] = state;
+        let [nc, node] = ncNode;
+        let [hashCons, addrMb] = hashCons "get" [ncNode];
+        -- let addrMb = [] : Maybe Addr;
+        let [array, hashCons, addr] = 
+            ifYes addrMb
+            [ addr -> 
+                [array, hashCons, addr]
+            , ->
+                let [array, addr] = array ["length"];
+                let indirect = [[], nc, node];
+                let [array,[]] = array ["extend",[indirect]];
+                let [hashCons, _] = hashCons "set" [ncNode, [addr]];
+                [array, hashCons, addr]
+            ];
+        k addr (heapHandlerMk [array, hashCons])
+      ]  
+    , [ "snapshot"
+      , [] ->
+        (k : K @ HeapK HeapSnapshot) ->
+        let [array, hashCons] = state;
+        let [array, arraySnapshot] = array ["snapshot"];
+        let [hashCons, hashConsSnapshot] = hashCons "persistent" [];
+        let heapSnapshot = 
+            [] -> 
+            let [_, hashConsRestored] = hashConsSnapshot "ephemeral" [];
+            hpsHandlerMk HeapHandler heapHandlerMk [arraySnapshot [], hashConsRestored];
+        k heapSnapshot (heapHandlerMk [array, hashCons])
+      ]  
+    , [ "toList"
+      , [] ->
+        (k : K @ HeapK (List AddrInd)) ->
+        let [array, hashCons] = state;
+        let [array, length1] = array ["length"];
+        let pos0 : Int = 0;
+        let inds0 : List AddrInd = [];
+        let [array, _, inds2] =
+            while [array, pos0, inds0] <|
+            [array, pos1, inds1] ->
+            guardLt [pos1, length1] <| _ =>
+            let [array, ind] = array ["get", pos1];
+            [array, pos1 + 1, [[pos1, ind] ,, inds1]];
+        let result = reverse inds2;
+        k result (heapHandlerMk [array, hashCons])
+      ]  
+    , [ "skip"
+      , [] ->
+        (k : K @ HeapK Nil) ->
+        let [array, hashCons] = state;
+        k [] (heapHandlerMk [array, hashCons])
+      ]  
+    ];
+
+
+
+
+let heapMk1 : { [] -> HeapHandler } = 
+    [] ->
+    let array = mkArrayFastAccessNoCopy Indirect [];
+    hpsHandlerMk HeapHandler heapHandlerMk array;
+
+let heapMk2 : { [] -> HeapHandler } = 
+    [] ->
+    let array = mkArrayFastAccessNoCopy Indirect [];
+    let hashCons = assoc1MkEphemeral ([] : List { [NcNode, Addr] });
+    hpsHandlerMk HeapHandler heapHandlerMk2 [array, hashCons];
+
+let heapMk : { [] -> HeapHandler } = 
+    -- heapMk1;
+    heapMk2;
+
+let heapGet : { Addr -> (HeapA Indirect) } =
+    hpsAction1 <|
+    (addr : Addr) -> 
+    (k : K @ HeapK Indirect) -> 
+    (handler : HeapHandler) ->
+    handler "hGet" [addr] k;
+
+let heapSet : { Addr -> Indirect -> (HeapA Nil) } =
+    hpsAction2 <|
+    (addr : Addr) -> (indirect : Indirect) -> 
+    (k : K @ HeapK Nil) ->
+    (handler : HeapHandler) ->
+    handler "hSet" [addr, indirect] k;
+
+let heapNewNode1 : { NcNode -> (HeapA Addr) } =
+    hpsAction1 <|
+    (ncNode : NcNode) -> 
+    (k : K @ HeapK Addr) ->
+    (handler : HeapHandler) ->
+    handler "hNew" [ncNode] k;
+
+let heapNewNode2 : { Depth -> Node -> (HeapA Addr) } =
+    (depth : Depth) -> (node : Node) -> 
+    let nc = ncDefault |> ncSetDepth depth;
+    heapNewNode1 [nc, node];
+
+let heapNewNodeTi : { Addr -> (HeapA Addr) } =
+    addr ->
+    let depth = 0;
+    heapNewNode2 depth ["TI", addr, tiUnknown, []];
+
+let heapNewHole : { Depth -> (HeapA Addr) } =
+    (depth : Depth) -> 
+    (k : K @ HeapK Addr) ->
+    (handler : HeapHandler) ->
+    let nc : NodeCommon = ncDefault |> ncSetDepth depth;
+    let node : Node = ["HHole"];
+    handler "hNew_noHashCons" [[nc, node]] k;
+
+
+let heapSkip : HeapA Nil =
+    hpsAction0 <|
+    (k : K @ HeapK Nil) ->
+    (handler : HeapHandler) ->
+    handler "skip" [] k;
+
+let heapSnapshot : HeapA HeapSnapshot =
+    hpsAction0 <|
+    (k : K @ HeapK HeapSnapshot) -> 
+    (handler : HeapHandler) ->
+    handler "snapshot" [] k;
+
+let heapToList0 : HeapA (List AddrInd) =
+    hpsAction0 <|
+    (k : K @ HeapK (List AddrInd)) -> 
+    (handler : HeapHandler) ->
+    handler "toList" [] k;
+
+
+
+-- let heapDo : { { Result : Type } -> (HeapA Result) -> Heap -> [Heap, Result] } =
+--     (Result : Type) ->
+--     action -> handler ->
+--     action (result -> handler2 -> [handler2, result]) handler;
+
+let heapDo : { { Result : Type } -> (HeapA Result) -> Heap -> [Heap, Result] } =
+    (Result : Type) ->
+    action -> handler ->
+    hpsDo HeapHandler action handler;
+
+let snapshotHeap : { Heap -> [Heap, HeapSnapshot] } =
+    heap -> 
+    heapDo HeapSnapshot heapSnapshot heap;
+
+let heapToList : { Heap -> [Heap, (List AddrInd)] } =
+    heapDo (List AddrInd) heapToList0;
+
+let heapWhile  = hpsWhile  HeapHandler;
+let heapMap    = hpsMap    HeapHandler;
+-- let heapLoop1  = hpsLoop1  HeapHandler;
+let heapLoop2  = hpsLoop2  HeapHandler;
+-- let heapLoop   = heapLoop2;
+
+let heapMatch       = hpsMatch       HeapHandler;
+let heapMatchGuard  = hpsMatchGuard  HeapHandler;
+let heapMatchFail   = hpsMatchFail   HeapHandler;
+let heapMatchOk     = hpsMatchOk     HeapHandler;
+
+let heapMatchNo     = hpsMatchFail   HeapHandler;
+let heapMatchYes    = hpsMatchOk     HeapHandler;
+
+let heapFunc0       = hpsFunc0       HeapHandler;
+let heapFunc1       = hpsFunc1       HeapHandler;
+let heapFunc2       = hpsFunc2       HeapHandler;
+let heapFunc3       = hpsFunc3       HeapHandler;
+let heapFunc4       = hpsFunc4       HeapHandler;
+let heapFunc5       = hpsFunc5       HeapHandler;
+let heapFunc6       = hpsFunc6       HeapHandler;
+let heapFunc7       = hpsFunc7       HeapHandler;

@@ -1,0 +1,138 @@
+language ferrum/0.1
+
+
+    -- Integers
+    -- let +  = primitive "+";
+    -- let -  = primitive "-";
+    -- let *  = primitive "*";
+    -- let == = primitive "==";
+    -- let >  = primitive ">";
+    -- let >= = primitive ">=";
+    -- let <  = primitive "<";
+    -- let <= = primitive "<=";
+
+    -- Booleans
+    let false    = primitive "false";
+    let true     = primitive "true";
+    let not      = primitive "not";
+    let if       = primitive "if";
+
+    -- let &&    = primitive "&&" ;
+    -- let ||    = primitive "||" ;
+    -- let |-    = primitive "|-";
+    -- let |=    = primitive "|=";
+
+    -- Pairs
+    let head = primitive "hd";
+    let tail = primitive "tl";
+    let hd   = primitive "hd";
+    let tl   = primitive "tl";
+
+    -- Diagnostics
+    let trace    = primitive "trace";
+    let trace2   = primitive "trace2";
+    let error    = primitive "error";
+    let show     = primitive "show";
+    let show2    = primitive "show";
+    let showType = primitive "show";
+
+    -- Specialization
+    -- let <$ = primitive "<$";
+
+
+    -- Types
+    let Single       = primitive "Single";
+    let Any          = primitive "Any";
+    let All          = primitive "Any";
+    let Void         = primitive "Void";
+    let Nil          = primitive "Nil";
+    let Int          = primitive "Int";
+    let Str          = primitive "Str";
+    let Char         = primitive "Char";
+    let Bool         = primitive "Bool";
+    let Domain       = primitive "Domain";
+    let Dom          = primitive "Domain";
+    let Codomain     = primitive "Codomain";
+    let Cod          = primitive "Codomain";
+    let Inverse      = primitive "Inverse";
+    let InverseApply = primitive "InverseApply";
+    -- let Fun          = primitive "Fun";
+    -- let Union        = primitive "Union";
+    let List         = primitive "List";
+    let Hd           = primitive "Hd";
+    let Tl           = primitive "Tl";
+    let Elem         = primitive "Elem";
+    let Type         = primitive "Type";
+    let Unknown      = primitive "Unknown";
+    -- let Error        = primitive "Error";
+    -- let Variant      = primitive "Variant";
+    let TupleMap = primitive "TupleMap";
+    -- let | = primitive "|";
+    -- let & = primitive "&";
+    -- let \\ = primitive "\\";
+    -- let coerceT = primitive "coerceT";
+    let castT   = primitive "castT";
+    -- let typeOf = primitive "typeOf";
+
+    -- Recursion / self-reference
+    let Fix   = primitive "Fix";
+    let Self  = primitive "Self";
+    let SelfT = primitive "SelfT";
+    let fix   = primitive "fix";
+
+    -- Loops
+    let loop1    = primitive "loop1";
+    let loop2    = primitive "loop2";
+    let break    = primitive "break";
+    let continue = primitive "continue";
+
+    -- Graph-readback primitives 
+    -- ( These can be used at graph-instantiation time, and then readback,
+    --   They are not intended for general use.
+    -- )
+
+    let grLoop  = primitive "grLoop";
+    -- let grWhile = primitive "grWhile";
+    let unknownVariable = primitive "unknownVariable";
+    let unknownPrimitive = primitive "unknownPrimitive";
+
+    -- JS evaluation
+    let jsEval      = primitive "jsEval";
+    let jsEvalMaybe = primitive "jsEvalMaybe";
+
+    -- -- Io
+    let ioDoPrim = primitive "ioDoPrim";
+
+    -- -- Array / Assoc (object / intersected-function interface to aggregate data-structures)
+    let primMkArrayFastAccessSlowCopy = primitive "primMkArrayFastAccessSlowCopy";
+    let primMkArrayFastAccessNoCopy   = primitive "primMkArrayFastAccessNoCopy";
+    let primAssoc1MkPersistent        = primitive "primAssoc1MkPersistent";
+    let primAssoc1MkEphemeral         = primitive "primAssoc1MkEphemeral";
+
+    -- Data
+    let ifNil  = primitive "ifNil";
+    let ifInt  = primitive "ifInt";
+    let ifBool = primitive "ifBool";
+    let ifStr  = primitive "ifStr";
+    let ifPair = primitive "ifPair";
+    -- For diagnostic purposes only
+    let ifType = primitive "ifType";
+
+    -- Strings
+    let strOrd      = primitive "strOrd";     -- charFromInt
+    let strChr      = primitive "strChr";     -- charToInt
+    let strLen      = primitive "strLen";
+    let strAdd      = primitive "strAdd";
+    let strCharAt   = primitive "strCharAt";   -- charAt
+    let strCharAtMb = primitive "strCharAtMb"; -- charAtMb
+
+    let jsStrCat    = primitive "jsStrCat";    -- strCat
+    let jsStrJoin   = primitive "jsStrJoin";   -- strJoin
+    let char_concat = primitive "char_concat"; -- charCat
+
+    -- -- Handler-passing style
+    let primHpsDo        = primitive "primHpsDo";
+    let primHpsCall      = primitive "primHpsCall";
+    let primHpsHandlerMk = primitive "primHpsHandlerMk";
+
+

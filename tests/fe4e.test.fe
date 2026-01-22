@@ -1,0 +1,328 @@
+language ferrum/test/0.1
+
+
+[
+
+-- TODO instantiate types
+
+   [ [ "name", "cond" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        let cond1 = 
+          """
+            let a = true ? [1,,2];
+            let b = false ? [1,,2];
+            [a,b]   
+          """
+          ;
+          let testCond1 = evalStr cond1;
+      """
+    ]
+  , [ "expect", "testCond1", "value", "[1,2]"]
+
+  ]
+
+,  [ [ "name", "instType" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+         let t1 = -> instantiateReadBack "1 + 2";
+         let t2 = -> instantiateReadBack 
+            """ 
+             { "A" | "B" }
+            """
+            ;
+
+      """
+    ]
+  , [ "expect", "t1[]", "value", 
+      """
+       ["EOper","+",[["ELit",1],["ELit",2]]]
+      """
+    ]
+  , [ "expect", "t2[]", "value", 
+      """
+       ["ETypeBrackets",["EOper","|",[["ELit","A"],["ELit","B"]]]]
+      """
+    ]
+
+  ]
+
+
+,  [ [ "name", "evalType" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+         let t1 = -> graphReduceStrToExpr " {\"A\"} ";
+         let t2 = -> graphReduceStrToExpr
+            """ 
+             { "A" | "B" }
+            """
+            ;
+         let t3 = -> graphReduceStrToExpr
+            """ 
+             { { "A" | "B" } \ { "A" } }
+            """
+            ;
+
+      """
+    ]
+  , [ "expect", "t1[]", "value", 
+      """
+       ["ETypeBrackets",["ELit","A"]]
+      """
+    ]
+  , [ "expect", "t2[]", "value", 
+      """
+       ["ETypeBrackets",["EOper","|",[["ELit","A"],["ELit","B"]]]]
+      """
+    ]
+  -- , [ "expect", "t3", "value", 
+  --     """
+  --      ["ETypeBrackets",["ELit","B"]]
+  --     """
+  --   ]
+
+  ]
+
+
+, [ [ "name", "array1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+  , [ "decls",
+      """
+        -- let array = mkArrayList [1,2,3];
+        -- let array = mkArrayList2 Int [1,2,3];
+        let t1 = ->
+          let array = mkArrayFastAccessSlowCopy Int [1,2,3];
+          let [array2, b] = array ["get", 1];
+          b;
+        let testArray = (array: Array Int) ->
+            let a0 = array;
+            let [a1, b ] = a0 ["length"];
+            let [a2, c1] = a1 ["get", 1];
+            let [a3, c2] = a2 ["get", 2];
+            let [a4, d ] = a3 ["set", 1, 7];
+            let [a5, e1] = a4 ["get", 1];
+            let [a6, e2] = a5 ["get", 2];
+            [b, c1, c2, d, e1, e2];  
+
+        let t2 = -> testArray (mkArrayList2 Int [1,2,3]);   
+        let t3 = -> testArray (mkArrayFastAccessSlowCopy Int [1,2,3]);   
+        let t4 = -> testArray (mkArrayFastAccessNoCopy Int [1,2,3]);   
+
+        let testArray2 = (array: Array Int) ->
+            let a0 = array;
+            let [a1, _ ] = a0 ["extend", [1, 2]];
+            let [a2, _ ] = a1 ["extend", [3, 4, 5]];
+            let [a3, _ ] = a2 ["extend", [6, 7, 8, 9]];
+            let [a4, _ ] = a3 ["set", 0, 99];
+            let [a5, _ ] = a4 ["set", 4, 77];
+            let [a6, b1] = a5 ["get", 0];
+            let [a7, b2] = a6 ["get", 2];
+            let [a8, b3] = a7 ["get", 4];
+            let [a9, b4] = a8 ["get", 6];
+            [b1, b2, b3, b4];
+
+        let u1 = -> testArray2 (mkArrayList2 Int []);   
+        let u2 = -> testArray2 (mkArrayFastAccessSlowCopy Int []);   
+        let u3 = -> testArray2 (mkArrayFastAccessNoCopy Int []);   
+      """
+    ]
+  , ["expect", "t1[]", "value", "2"]
+  , ["expect", "t2[]", "value", "[3,2,3,[],7,3]"]
+  , ["expect", "t3[]", "value", "[3,2,3,[],7,3]"]
+  , ["expect", "t4[]", "value", "[3,2,3,[],7,3]"]
+  , ["expect", "u1[]", "value", "[99,3,77,7]"]
+  , ["expect", "u2[]", "value", "[99,3,77,7]"]
+  , ["expect", "u3[]", "value", "[99,3,77,7]"]
+  ]
+
+, [ [ "name", "assoc1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+  , [ "decls",
+      """
+        let t1 = ->
+          let elems : List { [Str, Int] } = [ ["a", 1], ["b", 2], ["c", 3] ];
+          let assoc = assoc1MkPersistent elems;
+          let [_, b] = assoc "get" ["b"];
+          b;
+
+        let testAssoc = (assoc: Assoc1 Int Int) ->
+            let a0 = assoc;
+            let [a1, c1] = a0 "get" [1];
+            let [a2, c2] = a1 "get" [2];
+            let [a3, _ ] = a2 "set" [1, [7]];
+            let [a4, e1] = a3 "get" [1];
+            let [a5, e2] = a4 "get" [2];
+            [c1, c2, e1, e2];
+
+        let elems : List {[Int,Int]} = [[1,2],[2,3],[3,4]];
+        let t2 = -> testAssoc (assoc1MkPersistent elems);
+        let t3 = -> testAssoc (assoc1MkEphemeral elems);
+      """
+    ]
+  , ["expect", "t1[]", "value", "[2]"]
+  , ["expect", "t2[]", "value", "[[2],[3],[7],[3]]"]
+  , ["expect", "t3[]", "value", "[[2],[3],[7],[3]]"]
+  ]
+
+-- -- deprecated
+-- , [ [ "name", "assoc2" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+--   , [ "decls",
+--       """
+--         let t1 = ->
+--           let elems : List { [Str, Int] } = [ ["a", 1], ["b", 2], ["c", 3] ];
+--           let assoc = assocMkCopyOnWrite elems;
+--           let b = assoc "get" "b";
+--           b;
+-- 
+--         let testAssoc = (assoc: Assoc Int Int) ->
+--             let a0 = assoc;
+--             let c1 = a0 "get" 1;
+--             let c2 = a0 "get" 2;
+--             let a1 = a0 "set" 1 [7];
+--             let e1 = a1 "get" 1;
+--             let e2 = a1 "get" 2;
+--             [c1, c2, e1, e2];
+-- 
+--         let elems : List {[Int,Int]} = [[1,2],[2,3],[3,4]];
+--         let t2 = -> testAssoc (assocMkCopyOnWrite elems);
+--         let t3 = -> testAssoc (assocMkCopyOnSnapshot elems);
+--       """
+--     ]
+--   , ["expect", "t1[]", "value", "[2]"]
+--   , ["expect", "t2[]", "value", "[[2],[3],[7],[3]]"]
+--   , ["expect", "t3[]", "value", "[[2],[3],[7],[3]]"]
+--   ]
+
+
+
+-- This test worked with tree-types, but possibly not yet with graph-types.
+-- The fe4-html...fe files have been commented out in fe4.proj.fe so this test no longer runs.
+-- , [ [ "name", "html" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+--   , [ "decls",
+--       """
+--         let hello : Html = 
+--           ["html", [],
+--             ["body", [],
+--               "hello"
+--             ]
+--           ];
+--         let t1 = -> htmlToStr hello;  
+--       """
+--     ]
+--   , ["expect", "t1[]", "value", "\"<html>\\n<body>\\nhello\\n</body>\\n</html>\""]
+--   , ["expect", "t1[]", "value", 
+--       """
+--        "<html>\n<body>\nhello\n</body>\n</html>"
+--       """
+--     ]
+--   ]
+
+, [ [ "name", "transient" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+  , [ "decls",
+      """
+        let testAssoc = (assoc : Assoc1 Int Int) ->
+            let [assoc, a]      = assoc "get" [1];
+            let [assoc, assocP] = assoc "persistent" [];
+            let [_, b]          = assocP "get" [1];
+            let [_, c]          = assocP "get" [3];
+            let [assocP2, _]    = assocP "set" [1,[22]];
+            let [_, b2]         = assocP "get" [1];
+            let [_, b3]         = assocP2 "get" [1];
+            let [assoc, assocE] = assoc "ephemeral" [];
+            let [assocE, _]     = assocE "set" [3, [44]];
+            let [assocE, d]     = assocE "get" [1];
+            let [assocE, e]     = assocE "get" [3];
+            [a, b, b2, b3, c, d, e];
+        let elems : List {[Int,Int]} = [[1,2],[2,3],[3,4]];
+        let t2 = -> testAssoc (assoc1MkPersistent elems);
+        let t3 = -> testAssoc (assoc1MkEphemeral elems);
+      """
+    ]
+  , ["expect", "t2[]", "value", "[[2],[2],[2],[22],[4],[2],[44]]"]
+  , ["expect", "t3[]", "value", "[[2],[2],[2],[22],[4],[2],[44]]"]
+  ]
+
+, [ [ "name", "transient_data" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+  , [ "decls",
+      """
+        let testAssoc = (assoc : Assoc1 (List Int) Int) ->
+            let [assoc, a]      = assoc "get" [[1]];
+            let [assoc, assocP] = assoc "persistent" [];
+            let [_, b]          = assocP "get" [[1]];
+            let [_, c]          = assocP "get" [[3]];
+            let [assocP2, _]    = assocP "set" [[1],[22]];
+            let [_, b2]         = assocP "get" [[1]];
+            let [_, b3]         = assocP2 "get" [[1]];
+            let [assoc, assocE] = assoc "ephemeral" [];
+            let [assocE, _]     = assocE "set" [[3], [44]];
+            let [assocE, d]     = assocE "get" [[1]];
+            let [assocE, e]     = assocE "get" [[3]];
+            [a, b, b2, b3, c, d, e];
+        let elems : List {[(List Int),Int]} = [[[1],2],[[2],3],[[3],4]];
+        let t2 = -> testAssoc (assoc1MkPersistent elems);
+        let t3 = -> testAssoc (assoc1MkEphemeral elems);
+      """
+    ]
+  , ["expect", "t2[]", "value", "[[2],[2],[2],[22],[4],[2],[44]]"]
+  , ["expect", "t3[]", "value", "[[2],[2],[2],[22],[4],[2],[44]]"]
+  ]
+
+
+, [ [ "name", "assoc_data" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+  , [ "decls",
+      """
+        let testAssoc = (assoc : Assoc1 Any Int) ->
+            let [assoc, a]    = assoc "get" ["A"];
+            let [assoc, b]    = assoc "get" [["B", "C"]];
+            let [assoc, c]    = assoc "get" [[1,2,"D"]];
+            let [assoc, _]    = assoc "set" ["A",[22]];
+            let [assoc, b2]   = assoc "get" ["A"];
+            let [assoc, _]    = assoc "set" [["X", "Y", "Z"], [99]];
+            let [assoc, _]    = assoc "set" [["B", "C"], [44]];
+            let [assoc, d]    = assoc "get" [["B", "C"]];
+            let [assoc, e]    = assoc "get" [["X", "Y", "Z"]];
+            [a, b, c, b2, d, e];
+        let elems : List {[Any,Int]} = 
+            [ [ "A"        , 2]
+            , [ ["B", "C"] , 3]
+            , [ [1,2,"D"]  , 4]
+            ];
+        let t2 = -> testAssoc (assoc1MkPersistent elems);
+        let t3 = -> testAssoc (assoc1MkEphemeral elems);
+      """
+    ]
+  , ["expect", "t2[]", "value", "[[2],[3],[4],[22],[44],[99]]"]
+  , ["expect", "t3[]", "value", "[[2],[3],[4],[22],[44],[99]]"]
+  ]
+
+
+
+]

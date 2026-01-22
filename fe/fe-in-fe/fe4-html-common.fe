@@ -1,0 +1,42 @@
+language ferrum/0.1
+
+
+let HtmlTag = 
+    { "html" | "body" | "div" | "meta" | "div" | "input" | "li" | "script" | "textarea" 
+    | "pre" | "style" | "select" | "option" | "span" | "p" | "title"
+    };
+
+let HtmlAttrs = List { [Str, Str] };
+
+let Html = Rec <| Html -> 
+    { [ HtmlTag, HtmlAttrs ,, (List { Str | Html }) ] };
+
+    -- { Str | [ HtmlTag, HtmlAttrs ,, List Html ] };
+
+    -- TODO ?
+    -- { [ HtmlTagSelfClosing, HtmlAttrs] 
+    -- | [ HtmlTagExplicitClosing, HtmlAttrs ,, (List { Str | Html }) ]
+    -- };
+
+let HtmlScript = { ["script", HtmlAttrs, Str] };
+
+
+let guardHtml : { Any -> K @ { Html -> Any } -> [] | K Html } =
+    a -> (k : K @ { Html -> Any }) ->
+    -- TODO implement this properly
+    let a2 = a |> justTrustMeCast Any Html;
+    k a2;
+
+
+-- TODO ? define some kind of 
+-- TODO ?     HtmlPart / HtmlComponent / HtmlModule
+-- TODO ?     UiPart / WuiPart
+-- TODO ?     Widget
+-- TODO ?   that contains html and css (and js?) 
+-- TODO ?     such that the css can be declared locally, 
+-- TODO ?     but rendered globally in the main <style> section.
+-- TODO ? do the same for the script parts too? 
+-- TODO ?   both server-side and client-side ?
+-- TODO ? 
+
+

@@ -1,0 +1,420 @@
+language ferrum/0.1
+
+let Value = Datum;
+let Strict = { "Strict" | "NonStrict" }; 
+let PrimitiveDefn = { [ Str, (List Strict) ] };
+let PrimitiveName = Str;
+let Strategy = { "NF" | "WNF" };
+let PtsSort = { "Term" | "Type" };
+
+-- let Form = { "None" | "Reduced" | "Specialized" };
+-- let Form = { "WNF" | "NF" }; -- TODO ? perhaps { "Weak" | "Strong" } ?
+let Form = { "Weak" | "Strong" };
+let Reduced = { "NotReduced" | "Reduced" };
+
+-- let Form = { ["None"] | ["Weak", Int] | ["Strong"] };
+let ReducedForm = { "None" | "Weak" | "Strong" };
+let TargetForm = { "Weak" | "Strong" };
+let ContextForm = { "Weak" | "Strong" };
+
+let Addr = Int;
+
+let NodeCommon = 
+    { [ Int -- depth
+      , PtsSort -- is this a Term or a Type
+      -- , Bool -- is this fully reduced / free of all variables / not blocked
+      , TargetForm -- what form does this node want to be reduced to
+      , ReducedForm -- how far has this node been reduced
+      , (Maybe Expr) -- source annotation
+    ] };
+
+let Node = 
+    { [ "HHole" ]
+    | [ "HVar" ]
+    | [ "HLambda", Addr ] -- TODO ? include an instantiation of the argument pattern / references to all the bound variables / ?
+    | [ "HApply", Addr, Addr ] -- TODO ? add func+arg reduction strategies ?
+    | [ "HValue", Value ]
+    | [ "HPair", Addr, Addr ]
+    | [ "HOper", PrimitiveName, (List Addr) ]
+    -- | [ "HType", Addr ]
+    -- | [ "HTerm", Addr ]
+    | [ "HAs", Str, Addr ] -- TODO ? for instantiating patterns ?
+    };
+
+let NcNode = {[NodeCommon, Node]};
+
+let Indirect = 
+    {[ Addr         -- addr
+     , (Maybe Addr) -- indirect
+     , NodeCommon
+     , Node         -- node
+     -- , (Maybe Expr)   -- src annotation
+     -- , List Addr  -- obligations 
+     -- , (Maybe {[Addr, Int]}) -- reducedTo, reducedAt
+    ]};
+
+-- let {[_, _, Node]} = Addr;
+-- let Node = Hd (Tl (Tl Addr));
+
+
+-- State = { 
+--     [ ["a", Int]
+--     , ["b", Str] 
+--     ]
+-- };
+-- 
+-- let assign = (name: Str) -> (value: (Lookup name State)) -> (state: State) -> 
+--     error "TODO"; -- loop and update state while retaining type
+
+
+
+let Heap = 
+    {[ "Heap"
+    ,  (List Indirect)
+    ]};
+
+-- let StackEntryTag = { "Ascend" | "Descend" };
+let StackEntryTag = { "Descend" };
+-- let Stack = List {[StackEntryTag, Addr]};
+
+-- let Stack = List {[Form, Addr]};
+let Stack = List Addr;
+let Stack2 = List {[Addr, ContextForm]};
+
+
+
+let heapEmpty = ["Heap", []];
+
+
+-- let HeapStep = Rec ( HS -> 
+--     { [ ["hGet",    Addr],                Indirect     -> HS ]
+--     | [ ["hSet",    Addr, Indirect],      []           -> HS ]
+--     | [ ["hNew",    NodeCommon, Node],    Addr         -> HS ]
+--     | [ ["skip"],                         []           -> HS ]
+--     | [ ["done"],                         []                 ]
+--     } );
+
+let HeapStepNonStop : { Type -> Type } 
+    = HS -> 
+    { [ ["hGet",    Addr],                Indirect     -> HS ]
+    | [ ["hSet",    Addr, Indirect],      []           -> HS ]
+    | [ ["hNew",    NodeCommon, Node],    Addr         -> HS ]
+    | [ ["skip"],                         []           -> HS ]
+    };
+
+-- TODO a stream of zero or more non-stopping steps, followed by a specific, possibibly stopping, step.
+
+let HeapStep : { Type -> Type } = 
+    T -> Rec ( HS -> 
+    { [ ["hGet",    Addr],                Indirect     -> HS ]
+    | [ ["hSet",    Addr, Indirect],      []           -> HS ]
+    | [ ["hNew",    NodeCommon, Node],    Addr         -> HS ]
+    | [ ["skip"],                         []           -> HS ]
+    | [ ["done", T],                      []                 ]
+    } );
+
+let HeapStepResult : { Type -> Type } =
+    HS ->
+    Hd (Tl (Hd ({ HS & [ ["done", Any], []] })));
+
+-- let heapStepper : { Heap -> HeapStep -> Heap } =
+--     ["Heap", heap] -> step ->
+--     loop ( [heap: List Indirect, step: HeapStep] ->
+--         match step
+--         [ [ ["hGet", addr], k ] |=>
+--             let indirect = listIndex heap addr;
+--             continue [ heap, k indirect ]
+--         , [ ["hSet", addr, indirect], k ] |=>
+--             let heap2 = listUpdate heap addr indirect;
+--             continue [ heap2, k [] ]
+--         , [ ["hNew", nc, node], k ] |=>
+--             let addr = length heap;
+--             let indirect = [addr, [], nc, node];
+--             let heap2 = append heap [indirect];
+--             continue [ heap2, k addr ]
+--         , [ ["skip"], k ] |=>
+--             continue [ heap, k [] ] 
+--         , [ ["done"], [] ] |=>
+--             break ["Heap", heap]
+--         ] 
+--     ) [heap, step];
+
+
+-- let heapStepper : { Heap -> HS @ (HeapStep Any) -> [Heap, (HeapStepResult HS)]  } =
+--     ["Heap", heap] -> step ->
+--     loop ( [heap: List Indirect, step: HeapStep Any] ->
+--         match step
+--         [ [ ["hGet", addr], k ] |=>
+--             let indirect = listIndex heap addr;
+--             continue [ heap, k indirect ]
+--         , [ ["hSet", addr, indirect], k ] |=>
+--             let heap2 = listUpdate heap addr indirect;
+--             continue [ heap2, k [] ]
+--         , [ ["hNew", nc, node], k ] |=>
+--             let addr = length heap;
+--             let indirect = [addr, [], nc, node];
+--             let heap2 = append heap [indirect];
+--             continue [ heap2, k addr ]
+--         , [ ["skip"], k ] |=>
+--             continue [ heap, k [] ] 
+--         , [ ["done", result], [] ] |=>
+--             break [ ["Heap", heap], result ]
+--         ] 
+--     ) [heap, step];
+
+
+-- let HeapK : { Type -> Type } = 
+--     T -> 
+--     { { T -> HeapStep} -> HeapStep };
+
+let HeapK : { Type -> Type } = 
+    T -> 
+    { T -> (HeapStep Any) };
+
+let HeapR : { Type -> Type } = 
+    T ->
+    { K @ { T -> (HeapStep Any) } -> K T };
+
+
+-- a stream of non-stop steps that ultimately calls the k continuation
+
+-- let HeapStepThen : { { Void -> (HeapStep Any) } -> Type } =
+--     (k: K @ { Void -> (HeapStep Any) } ) ->
+--     Rec ( HS -> { (Codomain K) | (HeapStepNonStop HS) } );
+
+let HeapStepThen : { Type -> Type } =
+    (K : Type) ->
+    Rec ( HS -> { (Codomain K) | (HeapStepNonStop HS) } );
+
+-- returns a function type from a continuation taking a T to a stream of non-stop steps that ultimately calls the continuation
+let HeapKStep = -- : { Type -> Type } =
+    (T: Type) ->
+    {  K @ { T -> (HeapStep Any) } 
+    -> ( Rec ( HS -> { K T | (HeapStepNonStop HS) } ) )
+    };
+
+
+
+-- let heapMap = stepMap HeapStep;
+-- let heapLoop = stepLoop HeapStep;
+
+let heapMap = stepMap (HeapStep Any);
+let heapLoop = stepLoop (HeapStep Any);
+-- let heapLoopThen = stepLoopThen HeapStepNonStop;
+
+
+-- let heapGet : { Addr -> (HeapK Indirect) -> HeapStep } =
+--     addr -> returnK ->
+--     [ ["hGet", addr], returnK ];
+-- 
+-- let heapSet : { Addr -> Indirect -> (HeapK Nil) -> HeapStep } =
+--     addr -> indirect -> returnK ->
+--     [ ["hSet", addr, indirect], returnK ];
+-- 
+-- let heapNewNode : { NcNode -> (HeapK Addr) -> HeapStep } =
+--     [nc, node] -> returnK ->
+--     [ ["hNew", nc, node], returnK ];
+-- 
+-- let heapNew : { [] -> (HeapK Addr) -> HeapStep } =
+--     [] ->
+--     let ncNode = [ [0, "Term", "Weak", "None", []], ["HHole"] ];
+--     heapNewNode ncNode;
+-- 
+-- let heapSkip : { (HeapK Nil) -> HeapStep } =
+--     k ->
+--     [ ["skip"], k ];
+-- 
+-- let heapDone : HeapStep =
+--     [ ["done"], [] ];
+
+
+
+let heapGet : { Addr -> K @ (HeapK Indirect) -> (HeapStepThen K) } =
+    addr -> (returnK: K @ (HeapK Indirect)) ->
+    [ ["hGet", addr], returnK ];
+
+let heapSet : { Addr -> Indirect -> K @ (HeapK Nil) -> (HeapStepThen K) } =
+    addr -> indirect -> (returnK: K @ (HeapK Nil)) ->
+    [ ["hSet", addr, indirect], returnK ];
+
+let heapNewNode : { NcNode -> K @ (HeapK Addr) -> (HeapStepThen K) } =
+    [nc, node] -> (returnK: K @ (HeapK Addr)) ->
+    [ ["hNew", nc, node], returnK ];
+
+let heapNew : { [] -> K @ (HeapK Addr) -> (HeapStepThen K) } =
+    [] -> (returnK : K @ (HeapK Addr)) ->
+    let ncNode = [ [0, "Term", "Weak", "None", []], ["HHole"] ];
+    heapNewNode ncNode <| addr ->
+    returnK addr;
+
+let heapSkip : { K @ (HeapK Nil) -> (HeapStepThen K) } =
+    (k: K @ (HeapK Nil)) ->
+    [ ["skip"], k ];
+
+let heapDone : { R @ Any -> HeapStep R } =
+    (result: R @ Any) ->
+    [ ["done", result], [] ];
+
+
+
+let heapDeref : { Addr -> K @ (HeapK NcNode) -> (HeapStepThen K) } = 
+    addr -> (returnK: K @ (HeapK NcNode)) ->
+    heapLoop ( (addr: Addr) -> (breakK: HeapK NcNode) -> continueK ->
+        heapGet addr <| indirect ->
+        let [addr2, indirect2, nc, node] = indirect;
+        match indirect2
+        [ [] |=> breakK [nc, node]
+        , [addr3] |=> continueK addr3
+        ]
+    ) addr <| ncNode ->
+    returnK ncNode;
+
+let heapDerefInd : { Addr -> K @ (HeapK Indirect) -> (HeapStepThen K) } =
+    addr -> returnK ->
+    heapLoop ( (addr: Addr) -> (breakK: HeapK Indirect) -> continueK ->
+        heapGet addr <| indirect ->
+        let [addr2, indirect2, nc, node] = indirect;
+        match indirect2
+        [ [] |=> breakK indirect
+        , [addr3] |=> continueK addr3
+        ]
+    ) addr <| indirect ->
+    returnK indirect;
+
+let heapRef : { Addr -> K @ (HeapK Addr) -> (HeapStepThen K) } =
+    addr -> returnK ->
+    heapDerefInd addr <| [addr2, _, _, _] ->
+    returnK addr2;
+
+let heapLink : { Addr -> Addr -> K @ (HeapK Nil) -> (HeapStepThen K) } =
+    from -> to -> (returnK: K @ (HeapK Nil)) ->
+    heapLoop ( (addr : Addr) -> (breakK: K) -> continueK ->
+        heapGet addr <| [ addr1, addrInd, nc, node] ->
+        heapSet addr [addr1, [to], nc, node] <| ->  -- TODO conditionally drop old nodes
+        match addrInd
+        [ [] |=> breakK []
+        , [addr2] |=>
+            continueK addr2
+        ]
+    ) from returnK;
+
+let heapSetReducedForm : { ReducedForm -> Addr -> K @ (HeapK Nil) -> (HeapStepThen K) } =
+    newForm -> addr -> returnK ->
+    heapDerefInd addr <| [addr2, ind, [depth, sort, form, redu, sa], node] ->
+    heapSet addr2 [addr2, ind, [depth, sort, form, newForm, sa], node] <| _ ->
+    returnK [];
+
+let heapSetReducedWeak : { Addr -> K @ (HeapK Nil) -> (HeapStepThen K) }
+    = addr ->
+    heapSetReducedForm "Weak" addr;
+
+let heapSetReducedStrong : { Addr -> K @ (HeapK Nil) -> (HeapStepThen K) }
+    = addr ->
+    heapSetReducedForm "Strong" addr;
+
+let nodeChildren : { Node -> (List Addr) }
+    = node ->
+    match node
+    [ ["HHole"] |=> []
+    , ["HVar"] |=> []
+    , ["HLambda", a ] |=> [a]
+    , ["HApply", a, b ] |=> [a,b]
+    , ["HValue", value ] |=> []
+    , ["HPair", a, b ] |=> [a,b]
+    , ["HOper", name, addrs ] |=> addrs
+    ];
+
+let nodeRebuild : { Node -> (List Addr) -> Node }
+    = node -> children ->
+    match [node, children]
+    [ [ ["HHole"], [] ] |=> node
+    , [ ["HVar"], [] ] |=> node
+    , [ ["HLambda", _ ], [a] ] |=> ["HLambda", a]
+    , [ ["HApply", _, _ ], [a,b] ] |=> ["HApply", a, b]
+    , [ ["HValue", value ], [] ] |=> node
+    , [ ["HPair", _, _ ], [a,b] ] |=> ["HPair", a,b]
+    , [ ["HOper", name, _ ], addrs] |=> ["HOper", name, addrs]
+    ];
+
+let heapDumpIsDone : { Addr -> (List Addr) -> Bool }
+    = addr -> done ->
+    listExists ((a: Addr) -> a==addr) done;
+
+
+let heapDump : { Addr -> K @ (HeapK (List Indirect)) -> (HeapStepThen K) }
+    = root -> returnK -> 
+    heapLoop ( [todo: List Addr, done: List Addr, result: (List Indirect)] ->
+        (breakK: HeapK (List Indirect)) -> continueK ->
+        -- let _ = debug ["DumpLoop1", todo];
+        -- let _ = debug ["DumpLoop2", map hd result];
+        match todo
+        [ [] |=> breakK result
+        , [todo1,,todos] |=> 
+            if (heapDumpIsDone todo1 done)
+            [ -> continueK [todos, done, result]
+            , -> 
+                heapGet todo1 <| ind@[addr, ind2, nc, node] ->
+                let _ = if (addr == todo1) [ -> [], -> error ["addr mismatch", addr, todo1]];
+                let done2 = [todo1,,done];
+                match ind2
+                [ [] |=> 
+                    let children = nodeChildren node;
+                    let todo2 = append children todos;
+                    continueK [todo2, done2, [ind,,result]]
+                , [addr2] |=> 
+                    continueK [ [addr2,,todos], done2, [ind,,result]]
+                ]
+                -- let [nc,node] = heapDeref todo1 ([nc,n]->h2->[nc,n]) heap;
+
+            ]
+        ]
+    ) [[root], [], []] returnK;
+    
+let showReduced : { Reduced -> Str }
+    = redu ->
+    match redu
+    [ "Reduced" |=> " * "
+    , "NotReduced" |=> " . "
+    ];
+
+let showReduced2 : { TargetForm -> ReducedForm -> Str }
+    = form -> redu ->
+    -- if (form==redu)
+    -- [ -> " * "
+    -- , -> " . "
+    -- ];
+    match [form, redu]
+    [ ["Weak"   , "None"  ] |=> " . "
+    , ["Weak"   , "Weak"  ] |=> " * "
+    , ["Weak"   , "Strong"] |=> " ERROR "
+    , ["Strong" , "None"  ] |=> " . "
+    , ["Strong" , "Weak"  ] |=> " o "
+    , ["Strong" , "Strong"] |=> " * "
+    ];
+
+let showForm : { Form -> Str }
+    = redu ->
+    match redu
+    [ "Strong" |=> " S "
+    , "Weak" |=> " W "
+    ];
+
+let showIndirect : { Indirect -> Str }
+    = ind -> 
+    match ind
+    [ [a, [i], _, _] |=> -- a ^ ": " ^ i
+        strCat [strPadEnd 4 (showInt a), ": ", showAny i]
+    -- , [a, [], nc@[depth, _, form, redu, _], n] |=> 
+    --     strCat [strPadEnd 4 (showInt a), ": ", showInt depth, showForm form, showReduced redu, strCat (repeat depth "    "), " ", showAny n]
+    , [a, [], nc@[depth, _, form, redu, _], n] |=> 
+        strCat [strPadEnd 4 (showInt a), ": ", showInt depth, showForm form, showReduced2 form redu, strCat (repeat depth "    "), " ", showAny n]
+    ];
+
+
+let traceHeap : { Addr -> K @ (HeapK Nil) -> (HeapStepThen K) } =
+    addr -> returnK ->
+    heapDump addr <| dump ->
+    let dump2 = map ((a: Indirect) -> showIndirect a ^ "\n") (reverse dump);
+    let _ = debug (strCat ["Dump2\n",,dump2]);
+    returnK [];
+    

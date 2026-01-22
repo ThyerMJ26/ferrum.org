@@ -1,0 +1,230 @@
+language ferrum/0.1
+
+-- this contains some early (currently unused) work on CPS code, before abstracting types in a system-F like way was possible,
+-- it would still be nice to get the types from the term-level arguments, 
+-- but for now, the currently used code in fe-cps2.fe uses a type argument to make type-checking easier.
+
+
+let cpsBreak = (arg:A@Any) -> (state: S@Any) -> ["break", arg, state];
+let cpsContinue = (arg:A@Any) -> (state: S@Any) -> ["continue", arg, state];
+
+-- let CpsLoopBody = Self (CLB -> { CLS@Any -> S@Any -> ["break", Any, (Domain (Codomain CLB))] | ["continue", (Domain CLB), (Domain (Codomain CLB)) ] });
+let cpsLoop 
+    : { CLB@{ Void -> Void -> ["break", Any, (Domain (Codomain CLB))] | ["continue", (Domain CLB), (Domain (Codomain CLB)) ] } 
+      -> (Domain CLB)
+      -> K@{ (Hd (Tl { (Codomain (Codomain CLB)) & ["break", Any, Any] })) -> (Domain (Codomain CLB)) -> Any }
+      -> (Domain (Codomain CLB))
+      -> (Codomain (Codomain K)) 
+      }
+    = (loopBody: CLB@{ Void -> Void -> ["break", Any, (Domain (Codomain CLB))] | ["continue", (Domain CLB), (Domain (Codomain CLB)) ] })
+    -> (loopState: Domain CLB) 
+    -> (k: K@{ (Hd (Tl { (Codomain (Codomain CLB)) & ["break", Any, Any] })) -> (Domain (Codomain CLB)) -> Any }) 
+    -> state
+    ->
+    let [loopResult, state3] = 
+        loop ( [loopState: Domain CLB, state: (Domain (Codomain CLB))] ->
+            let action = loopBody loopState state;
+            match action
+            [ ["break", loopResult, state2] |=> break [loopResult, state2]
+            , ["continue", loopState, state2] |=> continue [loopState, state2]
+            ]
+        ) [loopState, state];
+    k loopResult state3;
+
+  
+let cpsCons = _ -> error "TODO";
+
+--  -- let cps0 : 
+--  --     {  F@{FK@Void -> Void -> (Codomain (Codomain FK))} 
+--  --     -> K@{ (Domain (Domain F)) -> [(Domain (Codomain F)),,Void] -> Any }
+--  --     -> (Domain (Codomain K))
+--  --     -> (Codomain (Codomain K))
+--  --     }
+--  --     =  (f: F@{FK@Void -> Void -> (Codomain (Codomain FK))})
+--  --     -> (k: K@{ (Domain (Domain F)) -> [(Domain (Codomain F)),,Void] -> Any })
+--  --     -- -> ([state0,,stateTl]: (Domain (Codomain K)))
+--  --     -- -> f (arg -> state1 -> k arg [state1,,stateTl]) state0;
+--  --     -> (state: (Domain (Codomain K)))
+--  --     -> 
+--  --     let k2 = (arg: Domain (Domain F)) -> (state1: (Domain (Codomain F))) -> k arg [state1,, tl (state)];
+--  --     f k2 (hd state);
+--  
+--  
+--  let cps1 = _ -> error "TODO";
+
+
+-- let cpsHd : 
+--     {  F@{ FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> (Codomain (Codomain FK))} 
+--     -> K@{ (Domain (Domain F)) -> [(Domain (Codomain (Domain F))),,Void] -> Any }
+--     -> {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]}
+--     -> (Codomain (Codomain K))
+--     }
+--     =  (f: F@{FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> (Codomain (Codomain FK))})
+--     -> (k: K@{ (Domain (Domain F)) -> [(Domain (Codomain (Domain F))),,Void] -> Any })
+--     -> ([state0,,stateTl]: {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]})
+--     -> 
+--     let k2 : { (Domain (Domain F)) -> (Domain (Codomain (Domain F))) -> (Codomain (Codomain K)) }
+--         = (arg: Domain (Domain F)) -> (state1: Domain (Codomain (Domain F))) -> 
+--         k arg ( [state1,,stateTl]: {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]} );
+--     f k2 state0;
+
+
+-- let cpsHd : 
+--     {  F@{ FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))} 
+--     -> K@{ (Domain (Domain F)) -> [(Domain (Codomain (Domain F))),,Void] -> Any }
+--     -> {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]}
+--     -> K (Domain (Domain F)) {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]}
+--     }
+--     =  (f: F@{FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))})
+--     -> (k: K@{ (Domain (Domain F)) -> [(Domain (Codomain (Domain F))),,Void] -> Any })
+--     -> ([stateHd,,stateTl]: {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]})
+--     -> 
+--     let k2 : { (Domain (Domain F)) -> (Domain (Codomain (Domain F))) -> K (Domain (Domain F)) {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]} }
+--         =  (arg: Domain (Domain F))
+--         -> (stateHd2: Domain (Codomain (Domain F)))
+--         ->
+--         k arg ( [stateHd2,,stateTl]: {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]} );
+--     f k2 stateHd;
+
+
+let cpsHd : 
+    {  F@{ FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))} 
+    -> K@{ (Domain (Domain F)) -> [(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))] -> Any }
+    -> {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]}
+    -> K (Domain (Domain F)) {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]}
+    }
+    =  (f: F@{FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))})
+    -> (k: K@{ (Domain (Domain F)) -> [(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))] -> Any })
+    -> ([stateHd,,stateTl]: {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]})
+    -> 
+    let k2 : { (Domain (Domain F)) -> (Domain (Codomain (Domain F))) -> K (Domain (Domain F)) {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]} }
+        =  (arg: Domain (Domain F))
+        -> (stateHd2: Domain (Codomain (Domain F)))
+        ->
+        k arg ( [stateHd2,,stateTl]: {[(Domain (Codomain (Domain F))),,(Tl (Domain {K (Domain (Domain F))}))]} );
+    f k2 stateHd;
+
+
+-- let cpsTl :
+--     {  F@{ FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))} 
+--     -> K@{ (Domain (Domain F)) -> [Void,,(Domain (Codomain (Domain F)))] -> Any }
+--     -> {[(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))]}
+--     -> K (Domain (Domain F)) {[(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))]}
+--     }
+--     =  (f: F@{FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))})
+--     -> (k: K@{ (Domain (Domain F)) -> [Void,,(Domain (Codomain (Domain F)))] -> Any })
+--     -> ([stateHd,,stateTl]: {[(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))]})
+--     -> 
+--     let k2 : { (Domain (Domain F)) -> (Domain (Codomain (Domain F))) -> K (Domain (Domain F)) {[(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))]} }
+--         =  (arg: Domain (Domain F)) 
+--         -> (stateTl2: Domain (Codomain (Domain F))) 
+--         -> 
+--         k arg ( [stateHd,,stateTl2]: {[(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))]} );
+--     f k2 stateTl;
+
+let cpsTl :
+    {  F@{ FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))} 
+    -> K@{ (Domain (Domain F)) -> [(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))] -> Any }
+    -> {[(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))]}
+    -> K (Domain (Domain F)) {[(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))]}
+    }
+    =  (f: F@{FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))})
+    -> (k: K@{ (Domain (Domain F)) -> [(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))] -> Any })
+    -> ([stateHd,,stateTl]: {[(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))]})
+    -> 
+    let k2 : { (Domain (Domain F)) -> (Domain (Codomain (Domain F))) -> K (Domain (Domain F)) {[(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))]} }
+        =  (arg: Domain (Domain F)) 
+        -> (stateTl2: Domain (Codomain (Domain F))) 
+        -> 
+        k arg ( [stateHd,,stateTl2]: {[(Hd (Domain {K (Domain (Domain F))})),,(Domain (Codomain (Domain F)))]} );
+    f k2 stateTl;
+
+
+
+let cps0 = cpsHd;
+-- let cps1 
+--     =  (f: F@{ FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))})
+--     -> cpsTl (cpsHd f);
+-- let cps2 = f -> cpsTl (cpsTl (cpsHd f));
+-- let cps3 = f -> cpsTl (cpsTl (cpsTl (cpsHd f)));
+-- TODO ? these will probably need the reduction operators to be implemented before the types can be written without non-termination
+-- let cpsN = (n: Int) -> f -> error "TODO";
+-- let cpsL = (label: Str) -> f -> error "TODO";
+
+
+-- let cps1 : 
+--     {  F@{ FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))} 
+--     -> K@{ (Domain (Domain F)) -> [Void, (Domain (Codomain (Domain F))),,Void] -> Any }
+--     -> {[(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))]}
+--     -> K (Domain (Domain F)) {[(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))]}
+--     }
+--     =  (f: F@{FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))})
+--     -> (k: K@{ (Domain (Domain F)) -> [Void, (Domain (Codomain (Domain F))),,Void] -> Any })
+--     -> ([state0, state1,,stateTl]: {[(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))]})
+--     -> 
+--     let k2 : { (Domain (Domain F)) -> (Domain (Codomain (Domain F))) -> K (Domain (Domain F)) {[(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))]} }
+--         =  (arg: Domain (Domain F))
+--         -> (state1b: Domain (Codomain (Domain F)))
+--         ->
+--         k arg ( [state0, state1b,,stateTl]: {[(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))]} );
+--     f k2 state1;
+
+
+let cps1 : 
+    {  F@{ FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))} 
+    -> K@{ (Domain (Domain F)) -> [(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))] -> Any }
+    -> {[(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))]}
+    -> K (Domain (Domain F)) {[(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))]}
+    }
+    =  (f: F@{FK@{ Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> FK (Domain (Domain F)) (Domain (Codomain (Domain F)))})
+    -> (k: K@{ (Domain (Domain F)) -> [(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))] -> Any })
+    -> ([state0, state1,,stateTl]: {[(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))]})
+    -> 
+    let k2 : { (Domain (Domain F)) -> (Domain (Codomain (Domain F))) -> K (Domain (Domain F)) {[(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))]} }
+        =  (arg: Domain (Domain F))
+        -> (state1b: Domain (Codomain (Domain F)))
+        ->
+        k arg ( [state0, state1b,,stateTl]: {[(Hd (Domain {K (Domain (Domain F))})), (Domain (Codomain (Domain F))),,(Tl (Tl (Domain {K (Domain (Domain F))})))]} );
+    f k2 state1;
+
+
+
+-- let cpsMap : 
+--     -- {  F@{ Void -> (CPS2 Any Any) }
+--     {  F@{ Void -> { Any -> Any -> Any } -> (Domain (Codomain (Domain (Codomain F)))) -> (Codomain (Codomain (Domain (Codomain F)))) }
+--     -> (List (Domain F))
+--     -> K2@{ (List (Domain (Domain (Codomain F)))) -> (Domain (Codomain (Domain (Codomain F)))) -> Any }
+--     -> (Domain (Codomain (Domain (Codomain F))))
+--     -> (Codomain (Codomain K2)) 
+--     }
+--     = 
+--     (f: F@{ Void -> { Any -> Any -> Any } -> (Domain (Codomain (Domain (Codomain F)))) -> (Codomain (Codomain (Domain (Codomain F)))) } ) -> 
+--     args -> 
+--     (k: K2@{ (List (Domain (Domain (Codomain F)))) -> (Domain (Codomain (Domain (Codomain F)))) -> Any }) -> 
+--     state ->
+--     error ["TODO", "cpsMap"];
+
+let cpsMap :
+    {  F@{ Void -> K@{ Any -> (Domain (Codomain (Domain (Codomain F)))) -> Any } -> (Domain (Codomain (Domain (Codomain F)))) -> K (Domain (Domain (Codomain F))) (Domain (Codomain (Domain (Codomain F)))) }
+    -> (List (Domain F))
+    -> K2@{ (List (Domain (Domain (Codomain F)))) -> (Domain (Codomain (Domain (Codomain F)))) -> Any }
+    -> (Domain (Codomain (Domain (Codomain F))))
+    -> (Codomain (Codomain K2))
+    }
+    = 
+    (f: F@{ Void -> K@{ Any -> (Domain (Codomain (Domain (Codomain F)))) -> Any } -> (Domain (Codomain (Domain (Codomain F)))) -> K (Domain (Domain (Codomain F))) (Domain (Codomain (Domain (Codomain F)))) } ) -> 
+    args -> 
+    (k: K2@{ (List (Domain (Domain (Codomain F)))) -> (Domain (Codomain (Domain (Codomain F)))) -> Any }) -> 
+    state ->
+    -- error ["TODO", "cpsMap"];
+
+    let [result, state2] =
+        loop ( [input: List (Domain F), output: List (Domain (Domain (Codomain F))), state: (Domain (Codomain (Domain (Codomain F))))] ->
+        match input
+        [ [] |=> break [output, state]
+        , [in1,,ins] |=>
+            f in1 (out1 -> (state: (Domain (Codomain (Domain (Codomain F)))) ) -> continue [ ins, [out1,,output], state] ) state
+        ]
+        ) [reverse args, [], state];
+    k result state2;
+

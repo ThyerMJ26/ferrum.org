@@ -1,0 +1,538 @@
+language ferrum/0.1
+
+
+-- let heapCheckValidity : { Addr -> (HeapA Bool) } =
+--     heapFunc1 <| 
+--     (addr0 : Addr) ->
+--     (k : K @ HeapK Bool) ->
+--     -- let _ = debug ["heapCheckValidity", "started"];
+--     heapDeref addr0 <| [ [depth, _, _, _], _ ] ->
+--     heapWhile [ [[depth, addr0]] : List { [Int, Addr] }, true : Bool ] (
+--         [ [ [expectedDepth, addr] ,, todo], ok ] |=>
+--         (k2 : K @ HeapK { [ (List { [Int, Addr] }) , Bool ] }) ->
+--         -- let _ = debug ["heapCheckValidity", "loop", addr, length todo];
+--         heapDeref addr <| [ [depth2, _, _, _], node ] ->
+--         let ok2 = 
+--             if (depth2 > expectedDepth)
+--             [ ->
+--                 let _ = debug ["heapCheckValidity", "depth error", addr, depth2, expectedDepth];
+--                 false
+--             , -> 
+--                 ok    
+--             ];
+--         let more = 
+--             match node
+--             [ ["HLambda", body] |=>
+--                 [ [addr + 1, body] ]
+--             , ["TyFun", dom, cod] |=>
+--                 [ [addr + 1, dom], [addr + 1, cod] ]
+--             , _ |=>
+--                 forMap (nodeChildren node) <| childAddr -> [depth2, childAddr]
+--             ];
+--         -- let _ = debug ["heapCheckValidity", "more", more];
+-- 
+--         k2 [ append more todo, ok2 ]
+--     ) <| [_, ok] ->
+--     -- let _ = debug ["heapCheckValidity", "finished"];
+--     if (not ok)
+--     [ ->
+--         traceHeap addr0 <| _ ->
+--         k ok
+--     , ->
+--         k ok
+--     ];
+
+    
+
+
+let HEnv = List {[Str, Addr]};
+
+let PatGuard = 
+    { [ "PgEq",   Depth, Addr, Datum ]
+    | [ "PgPair", Depth, Addr        ]
+    };
+let PatGuards = List PatGuard;
+
+-- let PatGuardEnv = { [ (List PatGuard), HEnv ] };
+
+let DepthPgEnv = { [ Depth, (List PatGuard), HEnv ] };
+
+let dpgeIncDepth : { DepthPgEnv -> DepthPgEnv } = 
+    [depth, pg, env] -> [depth+1, pg, env];
+
+let instantiatePat : { Int -> Addr -> HEnv -> ExprLoc -> (HeapA HEnv) } =
+    heapFunc4 <|
+    rec <| (instPat: { Int -> Addr -> HEnv -> ExprLoc -> (HeapA HEnv) }) ->
+    depth -> addr -> env -> [pat, _] -> (k : K @ HeapK HEnv) ->
+    match pat
+    [ ["EVar", name] |=> 
+        let env2 = [ [name, addr],,env];
+        k env2
+    , ["ELit", datum] |=> 
+        k env
+    , ["EPair", hdPat, tlPat] |=>
+        heapNewNode2 depth ["HOper", "hd", [addr]] <| hdAddr ->
+        heapNewNode2 depth ["HOper", "tl", [addr]] <| tlAddr ->
+        instPat depth hdAddr env hdPat <| env2 ->
+        instPat depth tlAddr env2 tlPat <| env3 ->
+        k env3
+    , ["EList", [], []] |=>
+        k env
+    , ["EList", [], [tlPat]] |=>
+        instPat depth addr env tlPat <| env2 ->
+        k env2 
+    , ["EList", [elemPat ,, elemPats], tlPat] |=>
+        heapNewNode2 depth ["HOper", "hd", [addr]] <| hdAddr ->
+        heapNewNode2 depth ["HOper", "tl", [addr]] <| tlAddr ->
+        instPat depth hdAddr env elemPat <| env2 ->
+        let loc = nilLoc; -- TODO better location
+        instPat depth tlAddr env2 [ ["EList", elemPats, tlPat], loc ] <| env3 ->
+        k env3
+    , ["EAs", name, pat2] |=>
+        instPat depth addr env pat2 <| env2 ->
+        let env3 = [ [name, addr],,env2 ];
+        k env3
+    , ["ETermBrackets", pat2] |=>
+        instPat depth addr env pat2 k
+    , ["EType", pat2, typ] |=>
+        instPat depth addr env pat2 k
+    , other |=> error ["invalid pattern", other]
+    ];
+
+-- let instantiatePatGuardVars : { Depth -> Addr -> ExprLoc -> PatGuardEnv -> (HeapA PatGuardEnv) } =
+--     heapFunc4 <|
+--     rec <| (instPgv : { Depth -> Addr -> ExprLoc -> PatGuardEnv -> (HeapA PatGuardEnv) }) ->
+--     depth -> addr -> [pat, _] -> pgEnv @ [pg, env] -> (k : K @ HeapK PatGuardEnv) ->
+--     match pat
+--     [ ["EVar", name] |=>
+--         -- heapNewNode [[depth+1, "Weak", "None", [pat]], ["HVar"]] <| varAddr ->
+--         let env2 = [ [name, addr] ,, env ];
+--         k [pg, env2]
+--     , ["ELit", datum] |=>
+--         let pg1 = [ ["PgEq", depth, addr, datum],,pg ];
+--         k [pg1, env]
+--     , ["EPair", hdPat, tlPat] |=>
+--         let pgEnv1 = [ [ ["PgPair", depth, addr],,pg], env ];
+--         heapNewNode [[depth+1, "Weak", "None", [hdPat]], ["HVar"]] <| varHdAddr ->
+--         heapNewNode [[depth+2, "Weak", "None", [tlPat]], ["HVar"]] <| varTlAddr ->
+--         instPgv depth varHdAddr hdPat pgEnv1 <| pgEnv2 ->
+--         instPgv (depth+1) varTlAddr tlPat pgEnv2 <| pgEnv3 ->
+--         k pgEnv3
+--     , ["EList", [], []] |=>
+--         let pgEnv1 = [ [ ["PgEq", depth, addr, []],,pg], env ];
+--         k pgEnv
+--     , ["EList", [], [tlPat]] |=>
+--         instPgv depth addr tlPat pgEnv <| pgEnv2 ->
+--         k pgEnv2 
+--     , ["EList", [elemPat ,, elemPats], tlPat] |=>
+--         let pgEnv1 = [ [ ["PgPair", depth, addr],,pg], env ];
+--         heapNewNode [[depth + 1, "Weak", "None", [elemPat]], ["HVar"]] <| varHdAddr ->
+--         heapNewNode [[depth + 2, "Weak", "None", []], ["HVar"]] <| varTlAddr ->
+--         instPgv depth varHdAddr elemPat pgEnv1 <| pgEnv2 ->
+--         let loc = nilLoc; -- TODO better location
+--         instPgv (depth+1) varTlAddr [ ["EList", elemPats, tlPat], loc ] pgEnv2 <| pgEnv3 ->
+--         k pgEnv3
+--     , ["EAs", name, pat2] |=>
+--         instPgv depth addr pat2 pgEnv <| [pg2, env2] ->
+--         let env3 = [ [name, addr],,env2 ];
+--         k [pg2, env3]
+--     , ["ETermBrackets", pat2] |=>
+--         instPgv depth addr pat2 pgEnv k
+--     , ["EType", pat2, typ] |=>
+--         instPgv depth addr pat2 pgEnv k
+--     , other |=> error ["invalid pattern", other]
+--     ];
+
+let instantiatePatGuardVars2 : { Addr -> ExprLoc -> DepthPgEnv -> (HeapA DepthPgEnv) } =
+    heapFunc3 <|
+    rec <| (instPgv : { Addr -> ExprLoc -> DepthPgEnv -> (HeapA DepthPgEnv) }) ->
+    addr -> [pat, _] -> pgEnv@[depth, pg,env] -> (k : K @ HeapK DepthPgEnv) ->
+    match pat
+    [ ["EVar", name] |=>
+        -- heapNewNode [[depth+1, "Weak", "None", [pat]], ["HVar"]] <| varAddr ->
+        let env2 = [ [name, addr] ,, env ];
+        k [depth, pg, env2]
+    , ["ELit", datum] |=>
+        let pg1 = [ ["PgEq", depth, addr, datum] ,, pg ];
+        k [depth+1, pg1, env]
+    , ["EList", [], []] |=>
+        let pgEnv1 = [ depth+1, [ ["PgEq", depth, addr, []],,pg], env ];
+        k pgEnv1
+    , ["EList", [], [tlPat]] |=>
+        instPgv addr tlPat pgEnv <| pgEnv2 ->
+        k pgEnv2 
+    , ["EList", [elemPat ,, elemPats], tlPat] |=>
+        let dpge1 = [ depth, [ ["PgPair", depth, addr],,pg], env ];
+        heapNewNode2 (depth + 1) ["HVar"] <| varHdAddr ->
+        heapNewNode2 (depth + 2) ["HVar"] <| varTlAddr ->
+        let dpge2 = dpgeIncDepth (dpgeIncDepth dpge1);
+        instPgv varHdAddr elemPat ( dpge2) <| dpge3 ->
+        let loc = nilLoc; -- TODO better location
+        instPgv varTlAddr [ ["EList", elemPats, tlPat], loc ] dpge3 <| dpge4 ->
+        k dpge4
+    , ["EAs", name, pat2] |=>
+        instPgv addr pat2 pgEnv <| [depth2, pg2, env2] ->
+        let env3 = [ [name, addr] ,, env2 ];
+        k [depth2, pg2, env3]
+    , ["ETermBrackets", pat2] |=>
+        instPgv addr pat2 pgEnv k
+    , ["EType", pat2, typ] |=>
+        instPgv addr pat2 pgEnv k
+    , other |=> error ["invalid pattern", other]
+    ];
+
+
+-- let instantiatePatGuardCalls : { PatGuardEnv -> Addr -> (HeapA Addr) } =
+--     heapFunc2 <|
+--     ([pg, env] : PatGuardEnv) -> (addr : Addr) -> (k : K @ HeapK Addr) ->
+--     heapLoop2 [pg : List PatGuard, addr : Addr] (
+--         [pg2 : List PatGuard, result: Addr] ->
+--         -- (breakK: {Addr -> HeapStep}) -> continueK ->
+--         (breakK: KB @ HeapK Addr) -> 
+--         (continueK : KC @ HeapK {[(List PatGuard), Addr]}) ->
+--         match pg2
+--         [ [] |=>
+--             breakK result
+--         , [ ["PgEq", depth, addr1, datum] ,, pgs] |=>
+--             heapNewNode [[depth, "Weak", "None", []], ["HValue", datum]] <| addr2 ->
+--             heapNewNode [[depth, "Weak", "None", []], ["HLambda", result]] <| lambdaAddr ->
+--             heapNewNode [[depth, "Weak", "None", []], ["HOper", "pgEq", [addr1, addr2, lambdaAddr]]] <| pgAddr ->
+--             continueK [pgs, pgAddr]
+--         , [ ["PgPair", depth, addr1] ,, pgs] |=>
+--             heapNewNode [[depth, "Weak", "None", []], ["HLambda", result]] <| lambdaAddr ->
+--             heapNewNode [[depth, "Weak", "None", []], ["HOper", "pgPair", [addr1, lambdaAddr]]] <| pgAddr ->
+--             continueK [pgs, pgAddr]
+--         ]
+--     ) <| result ->
+--     k result;
+
+let instantiatePatGuardCalls2 : { DepthPgEnv -> Addr -> (HeapA Addr) } =
+    heapFunc2 <|
+    ([depth0, pg, env] : DepthPgEnv) -> (addr : Addr) -> (k : K @ HeapK Addr) ->
+    heapLoop2 [pg : List PatGuard, addr : Addr] ( 
+        [pg2 : List PatGuard, result: Addr] ->
+        -- (breakK: {Addr -> HeapStep}) -> continueK ->
+        (breakK: KB @ HeapK Addr) -> 
+        (continueK : KC @ HeapK {[(List PatGuard), Addr]}) ->
+        match pg2
+        [ [] |=>
+            breakK result
+        , [ ["PgEq", depth, addr1, datum] ,, pgs] |=>
+            heapNewNode2 depth ["HValue", datum] <| addr2 ->
+            heapNewNode2 depth ["HLambda", result] <| lambdaAddr ->
+            heapNewNode2 depth ["HOper", "pgEq", [addr1, addr2, lambdaAddr]] <| pgAddr ->
+            continueK [pgs, pgAddr]
+        , [ ["PgPair", depth, addr1] ,, pgs] |=>
+            heapNewNode2 (depth + 1) ["HLambda", result] <| tlAddr ->
+            heapNewNode2 (depth)     ["HLambda", tlAddr] <| hdAddr ->
+            heapNewNode2 (depth)     ["HOper", "pgPair", [addr1, hdAddr]] <| pgAddr ->
+
+            continueK [pgs, pgAddr]
+        ]
+    ) <| result ->
+    k result;
+
+
+-- let instantiateDecl : { { Int -> HEnv -> ExprLoc -> (HeapA Addr) } -> Depth -> HEnv -> DeclLoc -> (HeapA HEnv) } =
+--     heapFunc4 <|
+--     (inst : { Int -> HEnv -> ExprLoc -> (HeapA Addr) }) -> 
+--     (depth : Depth) -> 
+--     (env : HEnv) -> 
+--     ([pat, defn] : DeclLoc) -> 
+--     (k : K @ HeapK HEnv) ->
+--     inst depth env defn <| defnAddr ->
+--     instantiatePat depth defnAddr env pat <| env2 ->
+--     k env2;
+
+let InstantiateDecls = { { Int -> HEnv -> ExprLoc -> (HeapA Addr) } -> Int -> HEnv -> HEnv -> (List {[ExprLoc, ExprLoc]}) -> (HeapA {[HEnv,HEnv]}) };
+
+
+let instantiateDecls2 : InstantiateDecls =
+    heapFunc5 <|
+    (inst : { Int -> HEnv -> ExprLoc -> (HeapA Addr) }) -> 
+    (depth : Depth) -> 
+    (env0 : HEnv) -> 
+    (declEnv0 : HEnv) -> 
+    (decls : List DeclLoc) -> 
+    (k : K @ HeapK {[HEnv,HEnv]}) ->
+    heapWhile ([decls, env0, declEnv0] : { [ DeclLocs, HEnv, HEnv] }) (
+        [ [ [pat, defn] ,, decls2 ], env, declEnv ] |=>
+        (k2 : KW @ HeapK { [ DeclLocs, HEnv, HEnv] }) ->
+        inst depth env defn <| defnAddr ->
+        instantiatePat depth defnAddr [] pat <| declEnv2 ->
+        let env2 : HEnv = concat [declEnv2, env];
+        let declEnv3 = concat [declEnv2, declEnv];
+        -- instDecls inst depth env2 declEnv3 decls2 <| [env4, declEnv4] ->
+        k2 [decls2, env2, declEnv3]
+    ) <| [_, env2, declEnv2] ->
+    k [env2, reverse declEnv2];
+
+let instantiateDecls = instantiateDecls2;
+
+
+
+let instantiateLoc1 : { PtsSort -> Int -> HEnv -> ExprLoc -> (HeapA Addr) } =
+    heapFunc4 <|
+    rec <| (inst: { PtsSort -> Int -> HEnv -> ExprLoc -> (HeapA Addr) }) ->
+    sort -> depth -> env -> exprLoc -> (k : K @ HeapK Addr) ->
+    let [expr0, loc0] = exprLoc;
+    match [sort, expr0] 
+        -- term-context
+    [ ["Term", ["ELit", a] ] |=> 
+        heapNewNode2 depth ["HValue", a] <| valueAddr ->
+        k valueAddr
+    , ["Term", ["EApply", func, arg]] |=> 
+        inst sort depth env func <| funcAddr ->
+        inst sort depth env arg <| argAddr ->
+        heapNewNode2 depth ["HApply", funcAddr, argAddr] <| applyAddr ->
+        k applyAddr
+
+    -- , ["Term", ["ELambda", ["EType", pat, ["EAs", tyName, ty]], body]] |=>
+    , ["Term", ["ELambda", [ ["ETermBrackets", [ ["EType", pat, [ ["EAs", tyName, ty], _]], _]], _], body]] |=>
+        heapNewNode2 (depth + 1) ["TyVar"] <| tyAddr ->
+        let env2 = [ [tyName, tyAddr],,env];
+        -- let _ = debug ["Term Lambda As", tyName];
+        heapNewNode2 (depth + 1) ["HVar"] <| varAddr ->
+        instantiatePat (depth+1) varAddr env2 pat <| env3 ->
+        inst sort (depth+1) env3 body <| bodyAddr ->
+        heapNewNode2 depth ["HLambda", bodyAddr] <| lambdaAddr ->
+        k lambdaAddr
+
+    , ["Term", ["ELambda", pat, body]] |=>
+        heapNewNode2 (depth + 1) ["HVar"] <| varAddr ->
+        instantiatePat (depth + 1) varAddr env pat <| env2 ->
+        inst sort (depth + 1) env2 body <| bodyAddr ->
+        heapNewNode2 depth ["HLambda", bodyAddr] <| lambdaAddr ->
+        k lambdaAddr
+
+    , ["Term", ["ELambdaYes", pat, body]] |=>
+        heapNewNode2 (depth + 1) ["HVar"] <| varAddr ->
+        instantiatePat (depth + 1) varAddr env pat <| env2 ->
+        inst sort (depth + 1) env2 body <| bodyAddr ->
+        heapNewNode2 (depth + 1) ["HValue", []] <| nilAddr ->
+        heapNewNode2 (depth + 1) ["HPair", bodyAddr, nilAddr] <| body2Addr ->
+        heapNewNode2 depth       ["HLambda", body2Addr] <| lambdaAddr ->
+        k lambdaAddr
+
+    -- , ["Term", ["ELambdaMaybe", pat, body]] |=>
+    --     heapNewNode [[depth+1, "Weak", "None", [pat]], ["HVar"]] <| varAddr ->
+    --     instantiatePatGuardVars (depth+1) varAddr pat [[], env] <| pgEnv@[patGuards, env2] ->
+    --     inst sort (depth+1) env2 body <| bodyAddr ->
+    --     instantiatePatGuardCalls pgEnv bodyAddr <| guardAddr ->
+    --     heapNewNode [[depth, "Weak", "None", []], ["HLambda", guardAddr]] <| lambdaAddr ->
+    --     k lambdaAddr
+         
+    , ["Term", ["ELambdaMaybe", pat, body]] |=>
+        heapNewNode2 (depth + 1) ["HVar"] <| varAddr ->
+        instantiatePatGuardVars2 varAddr pat [depth+1, [], env] <| dpge@[depth2, patGuards, env2] ->
+        inst sort depth2 env2 body <| bodyAddr ->
+        heapNewNode2 depth2 ["HValue", []] <| nilAddr ->
+        heapNewNode2 depth2 ["HPair", bodyAddr, nilAddr] <| resultAddr ->
+        instantiatePatGuardCalls2 dpge resultAddr <| guardAddr ->
+        heapNewNode2 depth ["HLambda", guardAddr] <| lambdaAddr ->
+        k lambdaAddr
+         
+    , ["Term", ["ELambdaNo", pat, body]] |=>
+        heapNewNode2 (depth + 1) ["HVar"] <| varAddr ->
+        instantiatePatGuardVars2 varAddr pat [depth+1, [], env] <| dpge@[depth2, patGuards, env2] ->
+        inst sort depth2 env2 body <| bodyAddr ->
+        heapNewNode2 depth2 ["HValue", []] <| nilAddr ->
+        -- heapNewNode [[depth2, "Weak", "None", []], ["HPair", bodyAddr, nilAddr]] <| resultAddr ->
+        let resultAddr = bodyAddr;
+        instantiatePatGuardCalls2 dpge resultAddr <| guardAddr ->
+        heapNewNode2 depth ["HLambda", guardAddr] <| lambdaAddr ->
+        k lambdaAddr
+         
+
+
+   , ["Term", ["EVar", name]] |=>
+        match (lookup name env)
+        [ [] |=>             
+            -- error ["Unknown Variable", name, env]
+            let _ = debug ["ERROR: Instantiate: Unknown Variable: ", name, loc0];
+            heapNewNode2 depth ["HValue", strCat ["ERROR: Instantiate: Unknown Variable: ", show2 name]] <| errorAddr ->
+            k errorAddr
+        , [addr] |=> 
+            k addr
+        ]
+
+--   , ["ELets", decls, expr] |=>
+--        instantiateDecls inst depth env decls ( env2 ->
+--        inst depth env2 expr ( exprAddr ->
+--        k exprAddr ) )
+
+   , ["Term", ["ELets", [], expr]] |=>
+        inst sort depth env expr <| exprAddr ->
+        k exprAddr
+
+   , ["Term", ["ELets", [[pat,defn],,decls], expr]] |=>
+        inst sort depth env defn <| defnAddr ->
+        instantiatePat depth defnAddr env pat <| env2 ->
+        let loc = nilLoc; -- TODO better location
+        inst sort depth env2 [ ["ELets", decls, expr], loc ] <| letAddr ->
+        k letAddr
+
+   , ["Term", ["EOper", opName, args]] |=> 
+        heapMap (inst sort depth env) args <| argAddrs ->
+        -- heapNewNode [[depth, false, []], ["HOper", opName, argAddrs]] <| opAddr ->
+        heapNewNode2 depth ["HOper", opName, argAddrs] <| opAddr ->
+        k opAddr
+
+    , ["Term", ["EList", [], []]] |=> 
+        -- heapNewNode [[depth, false, []], ["HValue", []]] ( valueAddr ->
+        heapNewNode2 depth ["HValue", []] <| valueAddr ->
+        k valueAddr
+    , ["Term", ["EList", [], [tlExpr]]] |=> 
+        inst sort depth env tlExpr <| tlAddr ->
+        k tlAddr
+    , ["Term", ["EList", [elemExpr,,elemsExpr], tlExpr]] |=> 
+        inst sort depth env elemExpr <| elemAddr ->
+        let loc = nilLoc; -- TODO better location
+        inst sort depth env [ ["EList", elemsExpr, tlExpr], loc ] <| elemsAddr ->
+        -- heapNewNode [[depth, false, []], ["HPair", elemAddr, elemsAddr]] <| pairAddr ->
+        heapNewNode2 depth ["HPair", elemAddr, elemsAddr] <| pairAddr ->
+        k pairAddr
+    , ["Term", ["ETermBrackets", expr]] |=>
+        inst "Term" depth env expr <| exprAddr ->
+        k exprAddr
+    , ["Term", ["ETypeBrackets", expr]] |=>
+        inst "Type" depth env expr <| exprAddr ->
+        k exprAddr
+        -- -- TODO restore the above code
+        -- -- TODO   for now all type-brackets instantiate as the unknown type
+        -- -- heapNewNode [[depth, "Weak", "None", []], ["TyOper", "UnknownType", []]] <| typeAddr ->
+        -- heapNewNode [[depth, "Weak", "None", []], ["HValue", []]] <| typeAddr ->
+        -- k typeAddr
+    , ["Term", ["EType", term, ty]] |=>
+        inst "Term" depth env term <| termAddr ->
+        -- TODO ? do we want HTypeAnnot nodes in the heap ?
+        -- TODO   maybe not, terms should reduce the the same things, regardless of type-annotations
+        -- TODO   and having HTypeAnnot nodes in the heap breaks/complicates term-graph substitution
+        -- inst "Type" depth env ty   <| typeAddr ->
+        -- heapNewNode2 depth ["HTypeAnnot", termAddr, typeAddr] <| annotAddr ->
+        -- k annotAddr
+        k termAddr
+
+    -- type-context
+    , ["Type", ["ELit", a] ] |=> 
+        heapNewNode2 depth ["TyDatum", a] <| valueAddr ->
+        k valueAddr
+    , ["Type", ["EApply", func, arg]] |=> 
+        inst sort depth env func <| funcAddr ->
+        inst sort depth env arg <| argAddr ->
+        heapNewNode2 depth ["TyApp", funcAddr, argAddr] <| applyAddr ->
+        -- heapNewNode [[depth, "Weak", "None", []], ["HOper", "Apply", [funcAddr, argAddr]]] <| applyAddr ->
+        k applyAddr
+    , ["Type", ["ELambda", [ ["EAs", name, pat], _], body]] |=>
+        -- TODO handle as-patterns in function type
+        heapNewNode2 (depth + 1) ["TyVar"] <| tyVarAddr ->
+        let env2 = [ [name, tyVarAddr],,env];
+        inst sort (depth + 1) env2 pat <| patAddr ->
+        inst sort (depth + 1) env2 body <| bodyAddr ->
+        heapNewNode2 depth ["TyFun", patAddr, bodyAddr] <| funcAddr ->
+        k funcAddr
+    , ["Type", ["ELambda", [ [ "ETypeBrackets", [ ["EType", term @ [["EVar", termVarName], _], patType], _] ], _] , body]] |=>
+    -- , ["Type", ["ELambda", [ ["EType", term @ [["EVar", termVarName], _], patType], _], body]] |=>
+        -- TODO handle term-annotation patterns in function type
+        heapNewNode2 (depth + 1) ["HVar"] <| termVarAddr ->
+        let env2 = [ [termVarName, termVarAddr],,env];
+        inst sort (depth + 1) env2 patType <| patAddr ->
+        inst sort (depth + 1) env2 body <| bodyAddr ->
+        heapNewNode2 depth ["TyFun", patAddr, bodyAddr] <| funcAddr ->
+        k funcAddr
+    , ["Type", ["ELambda", pat, body]] |=>
+        -- TODO handle as-patterns in function type
+        -- heapNewNode [[depth+1, "Weak", "None", [pat]], ["HVar"]] <| varAddr ->
+        inst sort (depth+1) env pat <| patAddr ->
+        inst sort (depth+1) env body <| bodyAddr ->
+        heapNewNode2 depth ["TyFun", patAddr, bodyAddr] <| funcAddr ->
+        k funcAddr
+   , ["Type", ["EVar", name]] |=>
+        match (lookup name env)
+        [ [] |=> 
+            -- error ["unknown variable", name, env]
+            let _ = debug (strCat ["ERROR: Instantiate: Unknown Variable: ", show2 name]);
+            heapNewNode2 depth["HValue", strCat ["ERROR: Instantiate: Unknown Variable: ", show2 name]] <| errorAddr ->
+            k errorAddr
+        , [addr] |=> 
+            k addr
+        ]
+
+   -- TODO ? let-bound definitions in type-brackets?
+   -- not currently needed, but makes sense
+   -- , ["Type", ["ELets", [], expr]] |=>
+   --      inst sort depth env expr <| exprAddr ->
+   --      k exprAddr
+
+   -- , ["Type", ["ELets", [[pat,defn],,decls], expr]] |=>
+   --      -- TODO a cps loop-based version, to avoid excess stack usage
+   --      inst sort depth env defn <| defnAddr ->
+   --      instantiatePat depth defnAddr env pat <| env2 ->
+   --      inst sort depth env2 ["ELets", decls, expr] <| letAddr ->
+   --      k letAddr
+
+   , ["Type", ["EOper", opName, args]] |=> 
+        heapMap (inst sort depth env) args <| argAddrs ->
+        heapNewNode2 depth ["TyOper", opName, argAddrs] <| opAddr ->
+        k opAddr
+
+    , ["Type", ["EList", [], []]] |=> 
+        heapNewNode2 depth ["TyDatum", []] <| valueAddr ->
+        k valueAddr
+    , ["Type", ["EList", [], [tlExpr]]] |=> 
+        inst sort depth env tlExpr <| tlAddr ->
+        k tlAddr
+    , ["Type", ["EList", [elemExpr,,elemsExpr], tlExpr]] |=> 
+        inst sort depth env elemExpr <| elemAddr ->
+        let loc = nilLoc; -- TODO better location
+        inst sort depth env [ ["EList", elemsExpr, tlExpr], loc ] <| elemsAddr ->
+        heapNewNode2 depth ["TyPair", elemAddr, elemsAddr] <| pairAddr ->
+        k pairAddr
+    , ["Type", ["ETermBrackets", expr]] |=>
+        inst "Term" depth env expr <| exprAddr ->
+        k exprAddr
+    , ["Type", ["ETypeBrackets", expr]] |=>
+        inst "Type" depth env expr <| exprAddr ->
+        k exprAddr
+    -- , ["Type", ["EAs", name, ty]] |=>
+    --     -- TODO handle binding of name
+    --     inst "Type" depth env ty <| typeAddr ->
+    --     k exprAddr
+    , ["Type", ["EType", term, ty]] |=>
+        inst "Term" depth env term <| termAddr ->
+        -- TODO instantiate types
+        --   we can't readback type-annotations yet, so, not instantiating them for now
+        -- inst "Type" depth env ty   <| typeAddr ->
+        -- heapNewNode [[depth, "Weak", "None", []], ["TyTermAnnot", termAddr, typeAddr]] <| annotAddr ->
+        -- k annotAddr
+        k termAddr
+
+
+    , _ |=> error ["instantiate", "missing case", sort, expr0]
+
+    ];
+
+let instantiateLoc : { PtsSort -> Int -> HEnv -> ExprLoc -> (HeapA Addr) } =
+    heapFunc4 <|
+    (sort : PtsSort) -> (depth : Depth) -> (env : HEnv) -> (exprLoc : ExprLoc) -> (k : K @ HeapK Addr) ->
+    instantiateLoc1 sort depth env exprLoc <| addr ->
+    -- heapCheckValidity addr <| _ ->
+    k addr;
+
+
+
+let instantiate : { PtsSort -> Int -> HEnv -> Expr -> (HeapA Addr) } =
+    heapFunc4 <|
+    (sort : PtsSort) -> (depth : Depth) -> (env : HEnv) -> (expr : Expr) -> (k : K @ HeapK Addr) ->
+    let expr2 = exprAddNilLoc expr;
+    instantiateLoc sort depth env expr2 k;
+
+let instantiateTermLoc : { Int -> HEnv -> ExprLoc -> (HeapA Addr) } =
+    instantiateLoc "Term";
+
+-- let instantiateTerm : { Int -> HEnv -> Expr -> (HeapA Addr) } =
+--     instantiate "Term";
+
+
+
+

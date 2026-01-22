@@ -1,0 +1,350 @@
+language ferrum/0.1
+
+-- let drDebug = debug;
+let drDebug = _ -> [];
+
+let drTraceHeap = traceHeap;
+-- let drTraceHeap = msg -> (addr : Addr) -> heapSkip;
+
+
+-- ----
+-- Test Code for Instantiation
+-- ----
+
+
+let instantiateStrToNodes : { Str -> (List Node) } =
+    input ->
+    let instNodes : { Expr -> (List Node) } =
+        expr ->
+        let action : HeapA Addr = instantiate "Term" 0 [] expr;
+        let [h1, addr] : {[Heap, Any]} = heapDo Addr action (heapMk []);
+        let [_,t1] = heapToList h1;
+        let nodes = for t1 <| [_, [_, _, n]] -> n;
+        nodes;
+    instNodes (parseExpr (scan input));
+ 
+
+-- --------
+--  Test Code for Graph Reduction
+-- --------
+
+
+-- let graphReduceExprLoc : { InstantiateBuiltins -> ExprLoc -> Expr } =
+--     instBuiltins -> expr ->
+-- 
+--     let action : HeapA Expr = 
+--         (k : K @ HeapK Expr) ->
+--         instBuiltins <| henv ->
+--         instantiateLoc "Term" 0 henv expr <| addr1 ->
+--         reduceAll addr1 <| _ ->
+--         readbackAddr [] "Term" addr1 <| expr2 -> 
+--         let _ = debug ["Readback", expr2];
+--         k expr2;
+--     
+--     let [heap2, expr1] = heapDo Expr action (heapMk []);
+--     expr1;
+
+-- let graphReduceExpr : { InstantiateBuiltins -> Expr -> Expr } =
+--     instBuiltins -> expr ->
+--     let expr2 = exprAddNilLoc expr;
+--     graphReduceExprLoc instBuiltins expr2;
+
+-- let graphReduceExprLoc2 : { Bool -> [Heap, HEnvTy, ExprLoc] -> [Heap, ExprLoc] } =
+--     doGr -> [heap, henv, expr] ->
+-- 
+--     let action : HeapA ExprLoc =
+--         heapFunc0 <|
+--         (k : K @ HeapK ExprLoc) ->
+--         instantiateTermLoc 0 henv expr <| addr ->
+--         let _ = drDebug ["graphReduceExprLoc2", addr];
+--         if doGr
+--         [ -> reduceAll addr
+--         , -> heapSkip
+--         ] <| _ ->
+--         -- readbackAddr henv "Term" addr <| expr -> 
+--         readbackAddr [] "Term" addr <| expr -> 
+--         let expr2 = exprAddNilLoc expr;
+--         k expr2;
+--     
+--     let [heap2, expr2] = heapDo { ExprLoc } action heap;
+--     [heap2, expr2];
+
+-- let graphReduceExpr2 : { Bool -> [Heap, HEnvTy, Expr] -> [Heap, Expr] } =
+--     doGr -> [heap, henv, expr] ->
+--     let exprLoc = exprAddNilLoc expr;
+--     let [heap2, expr2Loc] = graphReduceExprLoc2 doGr [heap, henv, exprLoc];
+--     let expr2 = stripExprLoc expr2Loc;
+--     [heap2, expr2];
+
+
+let instExpr : { Heap -> HEnvTy -> ExprLoc -> [Heap, Addr, ExprTy] } =
+    heap -> env -> expr ->
+    let action : HeapA ExprTy =
+        heapFunc0 <|
+        (k : K @ HeapK ExprTy) ->
+        let depth = 0;
+        instOpTypes <| opTypes ->
+        heapNewNode2 depth ["TyOper", "Any", []] <| todoTy ->
+        instantiateTy opTypes "Term" 0 env todoTy expr <| exprET ->
+        k exprET;
+    
+    let [heap2, exprET] = heapDo ExprTy action heap;
+    let [_, _, exprAddr ,, _] = exprET;
+    [heap2, exprAddr, exprET];
+
+let instDecls : { Heap -> HEnvTy -> DeclLocs -> [Heap, HEnvTy, DeclTys] } =
+    heap -> env -> decls ->
+    let action : HeapA { [HEnvTy, DeclTys] } =
+        heapFunc0 <|
+        (k : K @ HeapK { [HEnvTy, DeclTys] }) ->
+        instOpTypes <| opTypes ->
+        instantiateDeclsTy (instantiateTy opTypes) 0 env [] decls <| [env, declsEnv, declTEs] ->
+        k [declsEnv, declTEs];
+    
+    let [heap2, [declsEnv, declTEs]] = heapDo { [HEnvTy, (List DeclTy)] } action heap;
+    [heap2, declsEnv, declTEs];
+
+
+let graphReduceAddrs : { (List Addr) -> Heap -> Heap } =
+    addrs -> heap ->
+
+    let action : HeapA { [] } =
+        heapFunc0 <|
+        (k : K @ HeapK { [] }) ->
+        heapMap ( (addr : Addr) -> (k : K @ HeapK Nil) -> 
+            reduceAll addr <| ->
+            k []
+        ) addrs <| _ ->
+        k [];
+    
+    let [heap2, []] = heapDo { [] } action heap;
+    heap2;
+
+let readbackExpr : { Heap -> HEnvTy -> Addr -> [Heap, ExprLoc] } =
+    heap -> knownHEnv -> addr ->
+
+    let action : HeapA ExprLoc =
+        heapFunc0 <|
+        (k : K @ HeapK ExprLoc) ->
+        readbackAddr knownHEnv "Term" addr <| expr -> 
+        let exprLoc = exprAddNilLoc expr;
+        k exprLoc;
+    
+    let [heap2, exprLoc] = heapDo ExprLoc action heap;
+    [heap2, exprLoc];
+
+let readbackExpr2 : { Heap -> HEnvTy -> Addr -> [Heap, ExprLoc] } =
+    heap -> knownHEnv -> addr -> 
+
+    let action : HeapA ExprLoc =
+        heapFunc0 <|
+        (k : K @ HeapK ExprLoc) ->
+        heapDeref addr <| [nc, node] ->
+        let rootDepth = ncDepth nc;
+        readbackAddr1 rootDepth knownHEnv "Term" addr <| expr -> 
+        let exprLoc = exprAddNilLoc expr;
+        k exprLoc;
+    
+    let [heap2, exprLoc] = heapDo ExprLoc action heap;
+    [heap2, exprLoc];
+
+let readbackDecls1 : { Heap -> HEnvTy -> HEnvTy -> [Heap, (List DeclLoc)] } =
+    heap -> knownHEnv -> rbHEnv ->
+
+    let knownHEnv = append rbHEnv knownHEnv;
+
+    let action : HeapA (List DeclLoc) =
+        heapFunc0 <|
+        (k : K @ HeapK (List DeclLoc)) ->
+        heapMap ( [name: Str, [addr: Addr, _]] -> (k : K @ HeapK DeclLoc) -> 
+            -- TODO pass a growing environment into readback, so that newer read-back decls can reference older ones
+            let knownEnv2 = filter ([name2: Str, [addr2: Addr, _]] -> not (addr == addr2)) knownHEnv;
+            readbackAddr knownEnv2 "Term" addr <| expr -> 
+            let decl = [["EVar", name], expr];
+            let declLoc = declAddNilLoc decl;
+            k declLoc
+        ) rbHEnv <| decls2 ->
+        k decls2;
+    
+    let [heap2, decls2] = heapDo (List DeclLoc) action heap;
+    [heap2, decls2];
+
+
+let readbackDecls2 : { Heap -> HEnvTy -> HEnvTy -> [Heap, (List DeclLoc)] } =
+    heap -> knownHEnv -> rbHEnv ->
+
+    let action : HeapA (List DeclLoc) =
+        heapFunc0 <|
+        (k : K @ HeapK (List DeclLoc)) ->
+        let rbDecls = [] : List DeclLoc;
+        heapWhile [rbHEnv, knownHEnv, rbDecls] ( 
+            [ [rbEnvEntry ,, rbHEnv], knownHEnv, rbDecls] |=> 
+            (k : K @ HeapK { [HEnvTy, HEnvTy, (List DeclLoc)] }) -> 
+            let [name, [addr, _]] = rbEnvEntry;
+            -- debug2 ["readbackDecl", name, addr] <| ->
+            -- traceHeap addr <| ->
+            readbackAddr knownHEnv "Term" addr <| expr -> 
+            let decl = [["EVar", name], expr];
+            let declLoc = declAddNilLoc decl;
+            let knownHEnv = [rbEnvEntry ,, knownHEnv];
+            k [rbHEnv, knownHEnv, [declLoc ,, rbDecls]]
+        ) <| [_, _, rbDecls] ->
+        let rbDecls = reverse rbDecls;
+        k rbDecls;
+    
+    let [heap2, decls2] = heapDo (List DeclLoc) action heap;
+    [heap2, decls2];
+
+let readbackDecls : { Heap -> HEnvTy -> HEnvTy -> [Heap, (List DeclLoc)] } =
+    -- readbackDecls1;
+    readbackDecls2;
+
+
+let graphReduceDeclsLoc : { Bool -> [Heap, HEnvTy, (List DeclLoc)] -> [Heap, HEnvTy, (List DeclLoc)] } =
+    doGr -> [heap, henv, decls] ->
+
+    let action : HeapA { [HEnvTy, (List DeclLoc)] } =
+        heapFunc0 <|
+        (k : K @ HeapK { [HEnvTy, (List DeclLoc)] }) ->
+        -- instantiateDecls instantiateTermLoc 0 henv [] decls <| [env, declsEnv] ->
+        -- TODO
+        instOpTypes <| opTypes ->
+        instantiateDeclsTy (instantiateTy opTypes) 0 henv [] decls <| [env, declsEnv, declTys] ->
+        -- debug2 ["graphReduceDeclsLoc/instantiateDeclsTy", "env", env] <| ->
+        debug2 ["graphReduceDeclsLoc/instantiateDeclsTy", "declsEnv", declsEnv] <| ->
+        heapMap ( [name: Str, [addr: Addr, _]] -> (k2 : K @ HeapK DeclLoc) -> 
+            let _ = drDebug ["graphReduceDeclsLoc/map", name, addr];
+            if doGr
+            [ -> reduceAll addr
+            -- , -> (k : { Nil -> HeapStep }) -> k []
+            , -> heapSkip
+            ] <| _ ->
+            -- TODO pass a growing environment into readback, so that newer read-back decls can reference older ones
+            let rbEnv = filter ([name2: Str, [addr2: Addr, _]] -> not (addr == addr2)) env;
+            readbackAddr rbEnv "Term" addr <| expr -> 
+            let decl = [["EVar", name], expr];
+            let declLoc = declAddNilLoc decl;
+            k2 declLoc
+        ) declsEnv <| decls2 ->
+        k [env, decls2];
+    
+    let [heap2, [henv2, decls2]] = heapDo { [HEnvTy, (List DeclLoc)] } action heap;
+    [heap2, henv2, decls2];
+
+let graphReduceDecls : { Bool -> [Heap, HEnvTy, (List Decl)] -> [Heap, HEnvTy, (List Decl)] } =
+    doGr -> [heap, henv, decls] ->
+    let decls1 = declsAddNilLoc decls;
+    let [heap2, henv2, decls2] = graphReduceDeclsLoc doGr [heap, henv, decls1];
+    let decls3 = declsStripLoc decls2;
+    [heap2, henv2, decls3];
+
+
+let graphReduceInit : { InstantiateBuiltins -> [Heap, HEnvTy] } =
+    instBuiltins -> 
+    let action : HeapA HEnvTy = 
+        heapFunc0 <|
+        (k : K @ HeapK HEnvTy) ->
+        instBuiltins <| henv ->
+        k henv;
+    let [heap2, env] = heapDo HEnvTy action (heapMk []);
+    [heap2, env];
+
+
+let graphReduceStr : { Str -> Str } =
+    input ->
+
+    let action : HeapA Str =
+        (k : K @ HeapK Str) ->
+        let expr = parseExpr (scan input);
+        instantiate "Term" 0 [] expr <| addr ->
+        drTraceHeap "graphReduceStr/before" addr <| _ ->
+        reduceAll addr <| _ ->
+        drTraceHeap "graphReduceStr/after" addr <| _ ->
+        readbackAddr [] "Term" addr <| expr2 -> 
+        k (showExpr expr2);
+
+    let [_, result] = heapDo Str action (heapMk []);
+    result;  
+
+let graphReduceStr2 : { Str -> Str } =
+    input ->
+
+    -- let heap = heapMk [];
+    -- let henv = [] : HEnv;
+    let [heap, henv] = graphReduceInit instantiateBuiltins;
+
+    let decls = builtinDecls [];
+    let declsLoc = declsAddNilLoc decls;
+
+    let action : HeapA Str =
+        (k : K @ HeapK Str) ->
+        let expr = parseExprLoc (scan input);
+        instOpTypes <| opTypes ->
+        instantiateDeclsTy (instantiateTy opTypes) 0 henv [] declsLoc <| [henv, declsEnv, declTEs] ->
+        heapNewNode2 0 ["TyOper", "Any", []] <| anyTy ->
+        instantiateTy opTypes "Term" 0 henv anyTy expr <| exprTy ->
+        let [exp, loc, addr, ty1, ty2, ti] = exprTy;
+        -- traceHeap "graphReduceStr2/before" addr <| _ ->
+        reduceAll addr <| _ ->
+        -- traceHeap "graphReduceStr2/after" addr <| _ ->
+        readbackAddr [] "Term" addr <| expr2 -> 
+        k (showExpr expr2);
+
+    let [_, result] = heapDo Str action heap;
+    result;  
+
+let graphReduceStrToExpr : { Str -> Expr } =
+    input ->
+    let expr = parseExprStr input;
+    let action : HeapA Expr =
+        (k : K @ HeapK Expr) ->
+        instantiate "Term" 0 [] expr <| addr1 ->
+        reduceAll addr1 <| _ ->
+        readbackAddr [] "Term" addr1 <| expr2 -> 
+        k expr2;
+         
+    -- let hEmpty = heapMk [];
+    let [heap2, expr1] = heapDo Expr action (heapMk []);
+    expr1;
+
+
+-- --------
+--  Test Code for Readback
+-- --------
+
+let instantiateReadBack : { Str -> Expr } =
+    input ->
+    let expr = parseExpr (scan input);
+    let action : HeapA Expr = 
+        (k : K @ HeapK Expr) ->
+        instantiate "Term" 0 [] expr <| addr ->
+        -- let _ = debug [addr];
+        readbackAddr [] "Term" addr <| expr2 ->
+        k expr2;
+    
+    let [heap2, expr1] = heapDo Expr action (heapMk []);
+    expr1;
+
+
+-- --------
+--  Test Code for Type-checking
+-- --------
+
+let calcExprType : { [Heap, HEnvTy, ExprLoc] -> [Heap, Expr] } =
+    [heap, henv, expr] ->
+
+    let action : HeapA Expr =
+        heapFunc0 <|
+        (k : K @ HeapK Expr) ->
+        heapNewNode2 0 ["TyOper", "Any", []] <| tyCtxAddr ->
+        instOpTypes <| opTypes ->
+        let _ = drDebug ["calcExprType/in", expr];
+        instantiateTy opTypes "Term" 0 henv tyCtxAddr expr <| exprTy ->
+        let [exp, loc, val, ty1, ty2, ti] = exprTy;
+        drTraceHeap "calcExprType" ty1 <| ->
+        readbackAddr [] "Term" ty1 <| tyExpr ->
+        let _ = drDebug ["calcExprType/rb", tyExpr];
+        k tyExpr;
+    
+    let [heap2, tyExpr] = heapDo { Expr } action heap;
+    [heap2, tyExpr];

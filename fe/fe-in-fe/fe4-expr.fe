@@ -1,0 +1,466 @@
+language ferrum/0.1
+
+let Fixity = { "Prefix" | "Infix" | "Postfix" };
+
+let TmTyCtx = { "Term" | "Type" };
+
+let ExprAnnot : { { Type -> Type } -> Type } = 
+    Annot -> 
+    Rec <| (ExprA : Type) ->
+    let Expr = 
+        { ["EVar",     Str                            ]
+        | ["ELambda",         ExprA, ExprA            ]
+        | ["ELambdaMaybe",    ExprA, ExprA            ]
+        | ["ELambdaNo",       ExprA, ExprA            ] 
+        | ["ELambdaYes",      ExprA, ExprA            ] 
+        | ["EApply",   ExprA, ExprA                   ]
+        | ["ELit",     Datum                          ]
+        | ["ELet",     ExprA, ExprA, ExprA            ]
+        | ["ELets",    (List {[ExprA, ExprA]}), ExprA ]
+        | ["EPair",    ExprA, ExprA                   ]
+        | ["EList",    (List ExprA), (Maybe ExprA)    ]
+        | ["EType",    ExprA, ExprA                   ]
+        | ["EAs",      Str, ExprA                     ]
+        | ["EOper",    Str, (List ExprA)              ]
+        | ["ESym",     Str                            ]
+        | ["ETypeBrackets",     ExprA                 ]
+        | ["ETermBrackets",     ExprA                 ]
+        };
+    Annot Expr;
+
+-- TODO term/type/specialize/residualize brackets
+
+-- let Expr = ExprAnnot ((e: E @ Type) -> e);
+let Expr = ExprAnnot <| Exp -> Exp;
+
+let ExprVar = { Expr & ["EVar" ,, Any] };
+let ExprTag = Hd Expr;
+
+-- let Exp = ExprAnnot ((Exp : Type) -> { [Exp, [Loc, TypeType, TypeType]] });
+
+-- let expExp   = ([exp, [loc, syn, con]]: Exp)-> exp;
+-- let expLoc   = ([exp, [loc, syn, con]]: Exp)-> loc;
+-- let expSynTy = ([exp, [loc, syn, con]]: Exp)-> syn;
+-- let expCtxTy = ([exp, [loc, syn, con]]: Exp)-> con;
+
+let ExprLoc = ExprAnnot (Exp2 -> { [Exp2, Loc] });
+let ExprLocMb = Maybe ExprLoc;
+
+let Decl = { [Expr, Expr] };
+let Decls = List Decl;
+
+let DeclLoc = { [ExprLoc, ExprLoc] };
+let DeclLocs = List DeclLoc;
+
+
+
+let stripExprLoc : { ExprLoc -> Expr } =
+    rec <| (sel : { ExprLoc -> Expr}) ->
+    let stripDeclsLoc : { DeclLocs -> Decls } =
+        decls -> forMap decls <| [pat, defn] -> [sel pat, sel defn];
+    [expr0, loc] ->
+    match expr0
+    [ ["EVar",            name                    ] |=> ["EVar", name]
+    , ["ELambda",        pat, body                ] |=> ["ELambda"        , sel pat, sel body] 
+    , ["ELambdaMaybe",   pat, body                ] |=> ["ELambdaMaybe"   , sel pat, sel body] 
+    , ["ELambdaNo",      pat, body                ] |=> ["ELambdaNo"      , sel pat, sel body] 
+    , ["ELambdaYes",     pat, body                ] |=> ["ELambdaYes"     , sel pat, sel body] 
+    , ["EApply",   func, arg                      ] |=> ["EApply", sel func, sel arg] 
+    , ["ELit",     datum                          ] |=> ["ELit", datum] 
+    , ["ELet",     pat, defn, expr                ] |=> ["ELet", sel pat, sel defn, sel expr]
+    , ["ELets",    decls, expr                    ] |=> ["ELets", stripDeclsLoc decls, sel expr] 
+    , ["EList",    elems, []                      ] |=> ["EList", map sel elems, []] 
+    , ["EList",    elems, [listTl]                ] |=> ["EList", map sel elems, [sel listTl]] 
+    , ["EType",    expr, ty                       ] |=> ["EType", sel expr, sel ty] 
+    , ["EAs",      name, expr                     ] |=> ["EAs", name, sel expr] 
+    , ["EOper",    name, args                     ] |=> ["EOper", name, map sel args] 
+    , ["ESym",     name                           ] |=> ["ESym", name] 
+    , ["ETypeBrackets",     expr                  ] |=> ["ETypeBrackets", sel expr] 
+    , ["ETermBrackets",     expr                  ] |=> ["ETermBrackets", sel expr] 
+    , _ |=> error ["stripExprLoc", "missing case", expr0]
+    ];
+
+let exprStripLoc : { ExprLoc -> Expr } = stripExprLoc;
+
+
+let declsStripLoc : { DeclLocs -> Decls } =
+    decls ->
+    let sl = stripExprLoc;
+    forMap decls <| [pat, defn] -> [sl pat, sl defn];
+
+
+let exprAddNilLoc : { Expr -> ExprLoc } =
+    rec <| (anl : { Expr -> ExprLoc }) ->
+    let declsAddNilLoc : { Decls -> DeclLocs } =
+        decls -> forMap decls <| [pat, defn] -> [anl pat, anl defn];
+    expr1 ->
+    let expr2 = 
+        match expr1
+        [ ["EVar",            name                    ] |=> ["EVar", name]
+        , ["ELambda",        pat, body                ] |=> ["ELambda"        , anl pat, anl body] 
+        , ["ELambdaMaybe",   pat, body                ] |=> ["ELambdaMaybe"   , anl pat, anl body] 
+        , ["ELambdaNo",      pat, body                ] |=> ["ELambdaNo"      , anl pat, anl body] 
+        , ["ELambdaYes",     pat, body                ] |=> ["ELambdaYes"     , anl pat, anl body] 
+        , ["EApply",   func, arg                      ] |=> ["EApply", anl func, anl arg] 
+        , ["ELit",     datum                          ] |=> ["ELit", datum] 
+        , ["ELet",     pat, defn, expr                ] |=> ["ELet", anl pat, anl defn, anl expr] 
+        , ["ELets",    decls, expr                    ] |=> ["ELets", declsAddNilLoc decls, anl expr] 
+        , ["EList",    elems, []                      ] |=> ["EList", map anl elems, []] 
+        , ["EList",    elems, [listTl]                ] |=> ["EList", map anl elems, [anl listTl]] 
+        , ["EType",    expr, ty                       ] |=> ["EType", anl expr, anl ty] 
+        , ["EAs",      name, expr                     ] |=> ["EAs", name, anl expr] 
+        , ["EOper",    name, args                     ] |=> ["EOper", name, map anl args] 
+        , ["ESym",     name                           ] |=> ["ESym", name] 
+        , ["ETypeBrackets",     expr                  ] |=> ["ETypeBrackets", anl expr] 
+        , ["ETermBrackets",     expr                  ] |=> ["ETermBrackets", anl expr] 
+        , [tag ,, _] |=> error ["stripExprLoc", "missing case", tag]
+        ];
+    [ expr2, nilLoc ];
+
+let declAddNilLoc : { Decl -> DeclLoc } =
+    let anl = exprAddNilLoc;
+    [pat, defn] -> [anl pat, anl defn];
+
+let declsAddNilLoc : { Decls -> DeclLocs } =
+    map declAddNilLoc;
+
+-- TODO capture commonality between adding and stripping expression locations
+
+
+-- let exprConvertListToPairs : { ExprLoc -> ExprLoc } =
+--     [expr, loc] ->
+--     error "TODO";
+
+
+
+-- let showExpr1 = rec ( (se: {Expr->Str}) -> (expr: Expr)->
+--     let parts = 
+--         match expr
+--         [ ["EVar",    v             ] |=> [v]
+--         , ["ELambda", arg, body     ] |=> ["(", se arg, "->", se body, ")"]
+--         , ["EApply",  func, arg     ] |=> [se func, " ", se arg]
+--         , ["ELit",    val           ] |=> ["" ^ val]
+--         , ["ELet",    pat, def, exp ] |=> ["let ", se pat, "=", se def, ";", se exp]
+--         , ["EPair",   h, t          ] |=> ["(", se h, ",,", se t, ")"]
+--         , ["EType",   exp, typ      ] |=> [se exp, ":", se typ]
+--         , ["EAs",     name, exp     ] |=> [name, "@", se exp]
+--         ];
+--     strCat parts
+-- );
+
+let subExprs : { Expr -> (List Expr) } = 
+    expr ->
+    match expr
+    [ ["EVar",    v              ] |=> []
+    , ["ELambda", arg, body      ] |=> [arg, body]
+    , ["ELambdaMaybe", arg, body ] |=> [arg, body]
+    , ["EApply",  func, arg      ] |=> [func, arg]
+    , ["ELit",    val            ] |=> []
+    , ["ELet",    pat, def, exp  ] |=> [pat, def, exp]
+    -- , ["ELets",   decls, exp     ] |=> append (for decls ([pat,defn]->defn)) [exp]
+    , ["ELets",   decls, exp     ] |=> append (concat decls) [exp]
+    , ["EPair",   h, t           ] |=> [h, t]
+    , ["EList",   elems, t       ] |=> append elems t
+    , ["EAs",     name, exp      ] |=> [exp]
+    , ["EOper",   name, exps     ] |=> exps
+    , ["ETermBrackets", exp      ] |=> [exp]
+    , ["ETypeBrackets", exp      ] |=> [exp]
+    , ["EType", exp, ty          ] |=> [exp, ty]
+    , _ |=> error ["subExprs", "missing case", expr]
+    ];
+
+let subExprLocs : { ExprLoc -> (List ExprLoc) } = 
+    [expr, loc] ->
+    match expr
+    [ ["EVar",    v              ] |=> []
+    , ["ELambda",       arg, body ] |=> [arg, body]
+    , ["ELambdaMaybe",  arg, body ] |=> [arg, body]
+    , ["ELambdaNo",     arg, body ] |=> [arg, body]
+    , ["ELambdaYes",    arg, body ] |=> [arg, body]
+    , ["EApply",  func, arg      ] |=> [func, arg]
+    , ["ELit",    val            ] |=> []
+    , ["ELet",    pat, def, exp  ] |=> [pat, def, exp]
+    -- , ["ELets",   decls, exp     ] |=> append (for decls ([pat,defn]->defn)) [exp]
+    , ["ELets",   decls, exp     ] |=> append (concat decls) [exp]
+    , ["EPair",   h, t           ] |=> [h, t]
+    , ["EList",   elems, t       ] |=> append elems t
+    , ["EAs",     name, exp      ] |=> [exp]
+    , ["EOper",   name, exps     ] |=> exps
+    , ["ETermBrackets", exp      ] |=> [exp]
+    , ["ETypeBrackets", exp      ] |=> [exp]
+    , ["EType", exp, ty          ] |=> [exp, ty]
+    , _ |=> error ["subExprs", "missing case", expr]
+    ];
+
+
+
+-- let showExpr2 = rec ( (se: {Expr->Str}) -> (expr: Expr) ->
+--     let parts = 
+--         match expr
+--         [ ["EVar",    v             ] |=> [v]
+--         , ["ELambda", arg, body     ] |=> ["(", se arg, "->", se body, ")"]
+--         , ["EApply",  func, arg     ] |=> [se func, " ", se arg]
+--         , ["ELit",    []            ] |=> ["[]"]
+--         -- , ["ELit",    val           ] |=> ["" ^ val]
+--         , ["ELit",    val           ] |=> [showDatum val]
+--         , ["ELet",    pat, def, exp ] |=> ["let ", se pat, "=", se def, ";", se exp]
+--         , ["ELets",   decls, exp    ] |=> 
+--             let showDecl : { Decl -> (List Str) } =
+--                 [pat, defn] -> ["let ", se pat, "=", se defn, ";"];
+--             append (concat (map showDecl decls)) [se exp]
+--         -- , ["EPair",   h, t          ] |=> ["[", se h, ",,", se t, "]"]
+--         , ["EPair",   h, t          ] |=> 
+--             let [elems, t3] = 
+--                 loop1 ( [elems: List Expr, ex: Expr] ->
+--                     match ex
+--                     [ ["EPair", h2, t2] |=> continue [ [h2,,elems], t2 ]
+--                     , _ |=> break [reverse elems, ex]
+--                     ]
+--                 ) [[h], t];
+--             match t3
+--             [ ["ELit", []] |=>
+--                 concat [ ["["], intersperse "," (map se elems), ["]"] ]
+--             , _ |=>
+--                 concat [ ["["], intersperse "," (map se elems), [",,", se t3, "]"] ]
+--             ]
+--         , ["EType",   exp, typ      ] |=> [se exp, ":", se typ]
+--         , ["EAs",     name, exp     ] |=> [name, "@", se exp]
+--         , ["EOper", opName, [op1, op2]] |=> [se op1, opName, se op2]
+--         , ["EOper", opName, [op1]] |=> [se op1, opName] -- TODO check pre/post-fix operator
+--         -- TODO term/type brackets
+--         , ["EList", elems, [["EList", elems2, t]]] |=>
+--             [se ["EList", concat [elems, elems2], t]]
+--         , ["EList", elems, []] |=>
+--             concat [ ["["], intersperse "," (map se elems), ["]"] ]
+--         , ["EList", elems, [["ELit", []]]] |=>
+--             [ se ["EList", elems, []] ]
+--         , ["EList", elems, [t]] |=>
+--             concat [ ["["], intersperse "," (map se elems), [",,", se t, "]"] ]
+--         , ["ETypeBrackets", ty] |=>    
+--             [ "{ ", se ty, " }" ]
+--         , ["ETermBrackets", exp] |=>    
+--             [ "( ", se exp, " )" ]
+--         , _ |=> error ["showExpr2: missing case", expr]
+--         ];
+--     strCat parts
+-- );
+
+
+let showExpr3 : { TmTyCtx -> Expr -> Str } = 
+    rec <| (se: { TmTyCtx -> Expr -> Str }) -> 
+    ctx -> expr ->
+    let sc = se ctx;
+    let stm = se "Term";
+    let sty = se "Type";
+
+    -- let showTypeOpsAll : { Str -> Expr -> Expr -> Str } =
+    --     opName -> lhs -> rhs ->
+
+    let showTypeOpsLeft0 : { Str -> Expr -> Expr -> Str } =
+        opName -> lhs -> rhs ->
+        let s1 = strCat ["{ ", sc lhs];
+        let [lastExpr, s3] = 
+            while [rhs: Expr, s1: Str] <|
+            [ ["EOper", opName2, [lhs2, rhs2]], s2 ] |->
+            guardEq [opName2,opName] <| _ =>
+            [ rhs2, strCat [s2, " ", opName, " ", sc lhs2] ];
+        strCat [s3, " ", opName, " ", sc lastExpr, " }"];
+
+    let showTypeOpsLeft : { Str -> Expr -> Expr -> Str } =
+        opName -> lhs -> rhs ->
+        let s1 = strCat [sc rhs, " }"];
+        let [firstExpr, s3] = 
+            while [lhs: Expr, s1: Str] <|
+            [ ["EOper", opName2, [lhs2, rhs2]], s2 ] |->
+            guardEq [opName2,opName] <| _ =>
+            [ lhs2, strCat [sc rhs2, " ", opName, " ", s2] ];
+        strCat ["{ ", sc firstExpr, " ", opName, " ", s3];
+
+    let showTypeOpsAll : { Str -> Expr -> Expr -> Str } =
+        opName -> lhs -> rhs ->
+        let todo : List Expr = [lhs, rhs];
+        let s1 : List Str = [];
+        let [_, s3] = 
+            while [todo, s1] <|
+            [ [exp ,, exps], s2 ] |=>
+            match exp
+            [ ["EOper", opName2, [lhs2, rhs2] ] |->
+              guardEq [opName2,opName] <| _ =>
+                [ [lhs2, rhs2 ,, exps], s2 ]
+            , _ |=>
+                [ exps, [sc exp ,, s2] ]
+            ];
+        strCat ["{ ", strJoin (strCat [" ", opName, " "]) (reverse s3), " }"];
+
+    let collectArgs : { Expr -> [Expr, (List Expr)] } =
+        exp ->
+        while [exp, []: List Expr] <|
+        [["EApply", func2, arg2], args] |=>
+        -- let _ = debug ["collectArgs", arg2];
+        [func2, [arg2 ,, args]];
+
+
+    let parts = 
+        match [ctx,expr]
+        [ [ _, ["EVar",    v             ] ] |=> [v]
+        , [ "Term", ["ELambda", arg, body     ] ] |=> ["(", sc arg, "->", sc body, ")"]
+        , [ "Type", ["ELambda", arg, body     ] ] |=> ["{ ", sc arg, " -> ", sc body, " }"]
+        , [ "Term", ["EApply",  func, arg     ] ] |=> [sc func, " ", sc arg]
+        , [ "Type", ["EApply",  func, arg     ] ] |=> 
+            let [func2, args] = collectArgs expr;
+            concat [ ["{ "], intersperse " " (map sc [func2 ,, args]), [" }"] ]
+        , [ "Term", ["ELit",    []            ] ] |=> ["[]"]
+        , [ "Type", ["ELit",    []            ] ] |=> ["{[]}"]
+        -- , ["ELit",    val           ] ] |=> ["" ^ val]
+        , [ "Term", ["ELit",    val           ] ] |=> [showDatum val]
+        , [ "Type", ["ELit",    val           ] ] |=> ["{",showDatum val,"}"]
+        , [ _, ["ELet",    pat, def, exp ] ] |=> ["let ", sc pat, "=", sc def, ";", sc exp]
+        , [ _, ["ELets",   decls, exp    ] ] |=> 
+            let showDecl : { Decl -> (List Str) } =
+                [pat, defn] -> ["let ", sc pat, "=", sc defn, ";"];
+            append (concat (map showDecl decls)) [sc exp]
+        -- , ["EPair",   h, t          ] ] |=> ["[", sc h, ",,", sc t, "]"]
+        , [ _, ["EPair",   h, t          ] ] |=> 
+            let [elems, t3] = 
+                loop1 ( [elems: List Expr, ex: Expr] ->
+                    match ex
+                    [ ["EPair", h2, t2] |=> continue [ [h2,,elems], t2 ]
+                    , _ |=> break [reverse elems, ex]
+                    ]
+                ) [[h], t];
+            match t3
+            [ ["ELit", []] |=>
+                concat [ ["["], intersperse "," (map sc elems), ["]"] ]
+            , _ |=>
+                concat [ ["["], intersperse "," (map sc elems), [",,", sc t3, "]"] ]
+            ]
+        , [ _, ["EType",   exp, typ      ] ] |=> [sc exp, ":", sc typ]
+        , [ _, ["EAs",     name, exp     ] ] |=> [name, "@", sc exp]
+        , [ "Type", ["EOper", "|",  [op1, op2]] ] |=> [ showTypeOpsAll "|"  op1 op2 ]
+        , [ "Type", ["EOper", "&",  [op1, op2]] ] |=> [ showTypeOpsLeft "&"  op1 op2 ]
+        , [ "Type", ["EOper", "\\", [op1, op2]] ] |=> [ showTypeOpsLeft "\\" op1 op2 ]
+        , [ _, ["EOper", opName, [op1, op2]] ] |=> [sc op1, opName, sc op2]
+        -- , [ _, ["EOper", opName, [op1]] ] |=> [sc op1, opName] -- TODO check pre/post-fix operator
+        , [ _, ["EOper", opName, [op1]] ] |=> 
+            if (isAlpha opName)
+            [ -> [opName, " ", sc op1]
+            , -> [sc op1, " ", opName]
+            ]
+        , [ _, ["EOper", opName, []] ] |=> [opName]
+        , [ "Term", ["EOper", opName, args] ] |=> [ strJoin " " <| concat [ ["(", opName], map sc args, [")"] ] ]
+        , [ "Type", ["EOper", opName, args] ] |=> [ strJoin " " <| concat [ ["{", opName], map sc args, ["}"] ] ]
+
+        -- TODO term/type brackets
+        , [ _, ["EList", elems, [["EList", elems2, t]]] ] |=>
+            [sc ["EList", concat [elems, elems2], t]]
+        , [ _, ["EList", elems, []] ] |=>
+            concat [ ["["], intersperse "," (map sc elems), ["]"] ]
+        , [ _, ["EList", elems, [["ELit", []]]] ] |=>
+            [ sc ["EList", elems, []] ]
+        , [ _, ["EList", elems, [t]] ] |=>
+            concat [ ["["], intersperse "," (map sc elems), [",,", sc t, "]"] ]
+        -- , [ _, ["ETypeBrackets", ty] ] |=>    
+        --     [ "{ ", sc ty, " }" ]
+        , [ _, ["ETypeBrackets", ty] ] |=>    
+            [ sty ty ]
+            -- [ "{ ", sty exp, " }" ]
+        , [ _, ["ETermBrackets", exp] ] |=>    
+            [ "( ", stm exp, " )" ]
+        , _ |=> error ["showExpr3: missing case", ctx, expr]
+        ];
+    strCat parts;
+
+
+
+-- let showExpr = showExpr2;
+let showExpr = showExpr3 "Term";
+
+
+let displayExpr : { Expr -> DisplayTree } =
+    rec <| (de : { Expr -> DisplayTree }) ->
+    expr ->
+    match expr
+    [ ["EVar",    v              ] |=> 
+        dtLeaf v
+    , ["ELambda", arg, body      ] |=> 
+        dtBranch [ ["(", de arg], ["->", de body], [")", dtLeaf ""] ]
+    , ["ELambdaMaybe", arg, body ] |=> 
+        dtBranch [ ["(", de arg], ["|->", de body], [")", dtLeaf ""] ]
+    , ["EApply",  func, arg      ] |=>
+        dtBranch [ ["(", de func], [" ", de arg], [")", dtLeaf ""] ]
+    , ["ELit",    val            ] |=>
+        dtLeaf (show val)
+    , ["ELet",    pat, def, exp  ] |=>
+        dtBranch [ ["let ", de pat], ["=", de def], [";", de exp] ]
+    , ["ELets",   decls, exp     ] |=> 
+        let declParts = 
+            for decls <|
+            [pat, defn] ->
+            ["", dtBranch [ ["let ", de pat], ["=", de defn], [";", dtLeaf ""]]];
+        let expParts = [ ["", de exp] ];
+        dtBranch (append declParts expParts)
+    , ["EPair",   h, t           ] |=>
+        dtBranch [ ["[", de h], [",,", de t], ["]", dtLeaf ""] ]
+    , ["EList",   elems, t       ] |=> 
+        match elems
+        [ [] |=> 
+            match t
+            [ [] |=> dtLeaf "[]"
+            , [t2] |=> de t2 
+            ]
+        , [elem1,, elems2] |=>
+            let elemParts: List {[Str, DisplayTree]} = [ ["[", de elem1],, for elems2 (elem -> [",", de elem])];
+            let tailParts: List {[Str, DisplayTree]} = 
+                match t
+                [ [] |=> 
+                    [ ["]", dtLeaf ""] ]
+                , [t2] |=>
+                    [ [",,", de t2], ["]", dtLeaf ""] ]
+                ];
+            dtBranch (append elemParts tailParts)
+        ]
+    , ["EType",   exp, typ       ] |=> 
+        dtBranch [ ["(", de exp], [":", de typ], [")", dtLeaf ""] ]
+    , ["EAs",     name, exp      ] |=>
+        dtBranch [ ["(", dtLeaf name], ["@", de exp], [")", dtLeaf ""] ]
+    , ["EOper",   name, [exp1, exp2] ] |=>
+        dtBranch [ ["(", de exp1], [name, de exp2], [")", dtLeaf ""] ]
+    , ["EOper",   name, exps     ] |=> 
+        dtBranch [ ["(", dtLeaf name],, for exps (exp -> ["", de exp]) ]
+    , ["ETermBrackets", exp      ] |=>
+        dtBranch [ ["(", de exp], [")", dtLeaf ""] ]
+    , ["ETypeBrackets", exp      ] |=>
+        dtBranch [ ["{", de exp], ["}", dtLeaf ""] ]
+    , _ |=>
+        error ["displayExpr", "missing case", expr]
+    ];
+
+let ePair : { Expr -> Expr -> Expr } =
+    a -> b ->
+    match b
+    [ ["EList", bElems, bTail] |=>
+        ["EList", [a,,bElems], bTail]: Expr
+    , _ |=>
+        ["EList", [a], [b]]: Expr
+    ];
+
+
+-- TODO strip redundant details
+-- TODO this would make the for smaller and more robust pattern-match patterns in the codegen stage
+
+-- TODO make these functions mixins, and use them together in a single traversal
+let exprStripBrackets : { Expr -> Expr } =
+    expr ->
+    error "TODO";
+
+let exprStripTypeAnnots : { Expr -> Expr } = 
+    expr ->
+    error "TODO";
+
+-- TODO bring the above two mixins together here
+-- TODO a variant of this that maintains location or other expr-annotation ?
+let declsStripBracketsAndTypeAnnots : { Decls -> Decls } =
+    decls ->
+    error "TODO";
+
+

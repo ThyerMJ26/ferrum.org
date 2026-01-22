@@ -1,0 +1,267 @@
+language ferrum/0.1
+
+
+let textHighlight : { Str -> Int -> Int -> (HtmlA Nil) } =
+    textId -> from -> to -> k ->
+    printLn ["textHighlight", textId, from, to] <| ->
+    elemObjCall ["Id", textId] "setSelectionRange" [from, to] <| _ ->
+    elemObjCall ["Id", textId] "focus" [] <| _ ->
+    k [];
+
+let setToggleState : { Str -> Str -> { "show" | "hide" } -> (HtmlA Nil) } =
+    tabId -> buttonId -> showHide -> k ->
+    let buttonStyle = if (showHide == "hide") [ -> "outset", -> "inset"];
+    let buttonColor = if (showHide == "hide") [ -> "lightgray", -> "darkgray"];
+    let tabDisplay = if (showHide == "show") [ -> "grid", -> "none"];
+    setElemProperty buttonId ["style", "borderStyle"] buttonStyle <| ->
+    setElemProperty buttonId ["style", "background"] buttonColor <| ->
+    setElemProperty tabId ["style", "display"] tabDisplay <| ->
+    -- printLn (show ["toggleTab", tabId, tabDisplay, tabDisplay2, buttonId, buttonStyle, buttonColor]) <| ->
+    k [];
+
+-- handle sub-tabs
+let setToggleState2 : { Str -> { "show" | "hide" } -> (HtmlA Nil) } =
+    name -> showHide -> k ->
+    let tabId    = strAdd "tab"    name;
+    let buttonId = strAdd "button" name;
+    let buttonStyle = if (showHide == "hide") [ -> "outset", -> "inset"];
+    let buttonColor = if (showHide == "hide") [ -> "lightgray", -> "darkgray"];
+    let tabDisplay = if (showHide == "show") [ -> "block", -> "none"];
+    setElemProperty buttonId ["style", "borderStyle"] buttonStyle <| ->
+    setElemProperty buttonId ["style", "background"] buttonColor <| ->
+    setElemProperty tabId ["style", "display"] tabDisplay <| ->
+    printLn (show ["toggleTab2", name, tabId, tabDisplay, buttonId, buttonStyle, buttonColor]) <| ->
+    k [];
+
+
+-- TODO separate out generic table-populating functionality
+let textClickResponse : { Str -> (List { [Str, Str, Int] }) -> (HtmlA Nil) } = 
+    data -> tokens -> k ->
+    let data2 = data;
+    let tokens2 = concat tokens;
+    -- let lines = strJoin "\n" (map show [data,,tokens2]);
+    -- let lines = strJoin "\n" (map show [data,tokens2]);
+    let lines = strJoin "\n" [data2, show tokens2];
+    setElemProperty "text2" ["value"] lines <| ->
+    htmlWhile tokens2 (
+        [token,,tokens3] |=>
+        -- (k : { (List Str) -> HtmlStep }) ->
+        k2 ->
+        printLn token <| ->
+        k2 tokens3
+    ) <| _ ->
+    htmlForEach 0 tokens2 (
+        num -> token ->
+        (k2 : { [Int, Int] -> HtmlStep }) ->
+        printLn [num, token] <| ->
+        -- TODO add each token as a new element to a grid / table
+        createHtml ["p", [], show [num, token]] <| textRef ->
+        appendChild ["Id", "tableMisc2"] textRef <| ->
+        dropRef textRef <| ->
+        -- createHtml ["p", [["style", "background-color: lightgray; margin: 0px;"]], show [num, token]] <| textRef ->
+        -- -- createHtml ["p", [], show [num, token]] <| textRef ->
+        -- appendChild ["Id", "tableMisc2b"] textRef <| ->
+        -- dropRef textRef <| ->
+        k2 [num + 1, 0]
+        -- TODO use updateHtml instead of appendChild
+    ) <| _ ->
+    let gridStyle = 
+        strCat
+        [ "display: grid;"
+        , "grid-template-columns: auto 1fr;"
+        , "grid-auto-rows: auto;"
+        , "grid-gap: 1px;"
+        -- , "grid-gap: 0.1em;"
+        , "background-color: white;"
+        , "border: 1px solid black;"
+        ];
+    let itemStyle = 
+        strCat
+        [ "background-color: lightgray;"
+        , "margin: 0px;"
+        ];
+    let newHtml = 
+        [ "div", [["id", "tableMisc2b"], ["style", gridStyle]]
+        ,, concat <| forMap tokens <| [tag,val,_] -> 
+            [ [ "p", [["style", itemStyle]], tag ] 
+            , [ "p", [["style", itemStyle]], val ]
+            ]
+        ];
+    let newHtml2 = 
+        [ "div", [["id", "tableMisc2b"], ["style", gridStyle]]
+        ,,  let [_, elems2] = 
+                forEach 0 tokens <| 
+                num -> [tag,val,pos] -> 
+                let elems = 
+                    [ [ "p", [["style", itemStyle], ["onclick", strCat ["tokenClick(", show pos, ")"]]], tag ] 
+                    , [ "p", [["style", itemStyle], ["onclick", strCat ["tokenClick(", show pos, ")"]]], val ]
+                    ];
+                [num + 1, elems];
+            concat elems2
+        ];
+    updateHtml ["Id", "tableMisc2b"] newHtml2 <| ->
+    k [];
+
+
+let handleOneResponse : { WiResponse -> (HtmlA Nil) } =
+    response -> k ->
+    match response
+    [ ["ok", "tabSelect", tabId, buttonId, action] |=>
+        setToggleState tabId buttonId action <| ->
+        k []
+    , ["ok", "tabSelect2", name, action] |=>
+        setToggleState2 name action <| ->
+        k []
+    , ["ok", "textHighlight", textId, from, to] |=>
+        textHighlight textId from to <| ->
+        k []
+    , ["ok", "src", srcText] |=>
+        setElemProperty "textSrc" ["value"] srcText <| ->
+        setElemProperty "tabSrc2Text" ["value"] srcText <| ->
+        k []
+    , ["ok", "proj", projText, heapEnv, jsCode] |=>
+        setElemProperty "textProj" ["value"] projText <| ->
+        setElemProperty "textHeap" ["value"] heapEnv <| ->
+        setElemProperty "textRbJs" ["value"] jsCode <| ->
+        k []
+    , ["ok", "binding", bindingText, heapText, rbJsText] |=>
+        setElemProperty "textBinding" ["value"] bindingText <| ->
+        setElemProperty "textHeap" ["value"] heapText <| ->
+        setElemProperty "textRbJs" ["value"] rbJsText <| ->
+        k []
+    , ["ok", "miscTokens", data, tokens] |=>
+        textClickResponse data tokens <| ->
+        k []
+    , ["ok", "setText", name, text] |=>
+        setElemProperty name ["value"] text <| ->
+        k []
+    , ["ok", "setElemProp", elemId, path, value] |=>
+        setElemProperty elemId path value <| ->
+        k []
+    , ["ok", "setTableRows", tableId, rows] |=>
+        -- remove existing rows, add new rows
+        let itemStyle = 
+            strCat
+            [ "background-color: white;"
+            , "margin: 0px;"
+            ];
+        -- TODO add onclick actions
+        -- let newRows = forMap (concat rows) <| content -> ["p", [["style", itemStyle]], content];
+
+        let [_, newRows0] = 
+            forEach 0 rows <|
+            rowNum -> row ->
+            [   rowNum + 1
+            ,   let [_, newCols] =
+                    forEach 0 row <|
+                    colNum -> col ->
+                    let onclick = ["onclick", strCat ["tableCellClick(", strJoin ", " (map show [tableId, rowNum, colNum]) ,")"]];
+                    let idAttr = ["id", strJoin "-" [tableId, show rowNum, show colNum]];
+                    [   colNum + 1 
+                    ,   ["p", [idAttr, ["style", itemStyle], onclick], col ]
+                    ];
+                newCols
+            ];
+
+        let newRows = concat newRows0;
+
+        replaceChildren "exprList" newRows <| ->
+        k []
+    , _ |=> 
+        let _ = debug ["UNHANDLED Response", response];
+        -- setElemProperty "textProj" ["value"] (strCat ["ERROR", response]) <| ->
+        k []
+    ];
+
+let handleResponse : { (List WiResponse) -> (HtmlA Nil) } =
+    response -> k ->
+    htmlWhile response (
+        [response ,, responses] |=>
+        k ->
+        handleOneResponse response <| ->
+        k responses
+    ) <| _ ->
+    k [];
+
+-- toggle the top-most tabs
+let toggleTab : { Str -> Str -> (HtmlA Nil) } =
+    tabId -> buttonId -> k ->
+    let _ = debug ["toggleTab", tabId, buttonId];
+    wiServerCall ["tabSelect", tabId, buttonId] <| response ->
+    handleResponse response <| ->
+    k [];
+
+-- toggle the sub-tabs within the top-most tabs
+let toggleTab2 : { Str -> (HtmlA Nil) } =
+    name -> k ->
+    let _ = debug ["toggleTab2", name];
+    wiServerCall ["tabSelect2", name] <| response ->
+    handleResponse response <| ->
+    k [];
+
+let textClick : { Str -> (HtmlA Nil) } =
+    tabId -> k ->
+    let _ = debug ["textClick"];
+    printLn "textClick printLn" <| ->
+    getElemProperty "text1" ["selectionDirection"] <| dir ->
+    getElemProperty "text1" ["selectionStart"] <| start ->
+    getElemProperty "text1" ["selectionEnd"] <| end ->
+    printLn (show ["textClick", dir, start, end]) <| ->
+    htmlTryInt start k <| start2 ->
+    htmlTryInt end k <| end2 ->
+    wiServerCall ["textClick", tabId, start2, end2] <| response ->
+    printLn (show ["textClick", response]) <| ->
+    setElemProperty "text2" ["value"] response <| ->
+    handleResponse response <| ->
+    k [];
+
+
+let projSelect : { Str -> (HtmlA Nil) } =
+    projVal -> k ->
+    let _ = debug ["projSelect", projVal];
+    setElemProperty "textProj" ["value"] "Loading..." <| ->
+    wiServerCall ["projSelect", projVal] <| response ->
+    handleResponse response <| ->
+    k [];
+
+
+let choiceChange : { Str -> (HtmlA Nil) } =
+    choiceId -> k ->
+    getElemProperty choiceId ["value"] <| choiceVal ->
+    htmlTryStr choiceVal k <| choiceVal ->
+    match (readInt choiceVal)
+    [ [choiceNum] |=>
+        wiServerCall ["choiceChange", choiceId, choiceNum] <| response ->
+        handleResponse response <| ->
+        k []
+    , _ |=>
+        let _ = debug ["CHOICE CHANGE", "failed to readInt", choiceVal];
+        k []
+    ];
+
+let tokenClick : { Int -> (HtmlA Nil) } =
+    row -> k ->
+    wiServerCall ["tokenClick", row] <| response ->
+    handleResponse response <| ->
+    k [];
+    
+let tableCellClick : { Str -> Int -> Int -> (HtmlA Nil) } =
+    tableId -> row -> col -> k ->
+    wiServerCall ["tableCellClick", tableId, row, col] <| response ->
+    handleResponse response <| ->
+    k [];
+    
+let rowSelected : { Str -> Int -> (HtmlA Nil) } =
+    tableId -> rowNum -> k ->
+    -- wiServerCall ["srcSelect", rowNum] <| response ->
+    -- wiServerCall ["choiceChange", "srcChoiceId", rowNum] <| response ->
+    wiServerCall ["choiceChange", tableId, rowNum] <| response ->
+    handleResponse response <| ->
+    k [];
+
+let loadContents : (HtmlA Nil) =
+    k ->
+    wiServerCall ["loadContents"] <| response ->
+    handleResponse response <| ->
+    k [];
+

@@ -1,0 +1,512 @@
+language ferrum/0.1
+
+
+let JsStmt = Rec <| JsStmt ->
+
+    let JsStmts = List JsStmt;
+
+    let JsExpr = Rec <| JsExpr ->
+        { ["JsVar", Str]
+        | ["JsDatum", Datum]
+        | ["JsOp", Str, (List JsExpr)]
+        | ["JsInstanceOf", JsExpr, Str]
+        | ["JsAssignExpr", JsExpr, JsExpr]  -- TODO ? could just use JsOp for this ?
+        | ["JsIndex", JsExpr, JsExpr]       -- TODO ? ditto
+        | ["JsList", (List (Maybe JsExpr))]
+        | ["JsCall", JsExpr, (List JsExpr)]
+        | ["JsMethod", JsExpr, Str]
+        | ["JsLambdaExpr", (List JsExpr), JsExpr]
+        | ["JsLambdaStmt", (List JsExpr), JsStmts]
+        | ["JsSeq", (List JsExpr)]
+        | ["JsCommentExpr", Str, JsExpr]
+        | ["JsParens", JsExpr]
+        | ["JsObject", (List { [Str, JsExpr] })]
+        };
+
+    -- { ["JsLet", JsExpr, JsExpr] 
+    { ["JsLet", JsExpr, (Maybe JsExpr)] -- TODO ? make definition optional ?
+    | ["JsLetUndefined", (List Str)]
+    | ["JsExpr", JsExpr]
+    | ["JsAssign", JsExpr, JsExpr]  -- TODO make assignment an expression
+    | ["JsIf", JsExpr, JsStmts]
+    | ["JsIfElse", JsExpr, JsStmts, JsStmts]
+    | ["JsWhile", JsExpr, JsStmts]
+    | ["JsDoWhile", JsStmts, JsExpr]
+    | ["JsReturn", JsExpr]
+    | ["JsCommentStmt", Str]
+    | ["JsBreak"]
+    | ["JsContinue"]
+    };
+
+let JsStmts = List JsStmt;
+let JsExpr = Hd (Tl { JsStmt & ["JsExpr", Any] });
+let JsVar = { JsExpr & ["JsVar", Any] };
+
+
+-- Expressions --
+
+let jsCommentExpr : { Str -> JsExpr -> JsExpr } =
+    msg -> expr ->
+    ["JsCommentExpr", msg, expr];
+
+let jsVar : { Str -> JsExpr } =
+    var ->
+    ["JsVar", var];
+
+let jsDatum : { Datum -> JsExpr } =
+    datum ->
+    ["JsDatum", datum];
+
+let jsNil = jsDatum [];
+
+let jsOp : { Str -> (List JsExpr) -> JsExpr } =
+    op -> args ->
+    ["JsOp", op, args];
+
+let jsInstanceOf : { JsExpr -> Str -> JsExpr } =
+    expr -> className ->
+    ["JsInstanceOf", expr, className];
+
+let jsAssignExpr : { JsExpr -> JsExpr -> JsExpr } =
+    lhs -> rhs ->
+    ["JsAssignExpr", lhs, rhs];
+
+
+let jsLambdaStmt : { (List JsExpr) -> JsStmts -> JsExpr } =
+    pats -> body ->
+    ["JsLambdaStmt", pats, body];
+    
+let jsLambdaExpr : { (List JsExpr) -> JsExpr -> JsExpr } =
+    pats -> body ->
+    ["JsLambdaExpr", pats, body];
+    
+let jsCall : { JsExpr -> (List JsExpr) -> JsExpr } =
+    func -> args ->
+    ["JsCall", func, args];
+
+let jsSeq : { (List JsExpr) -> JsExpr } =
+    args ->
+    ["JsSeq", args];
+
+let jsMethod : { JsExpr -> Str -> JsExpr } =
+    obj -> method ->
+    ["JsMethod", obj, method];
+
+let jsIndex : { JsExpr -> JsExpr -> JsExpr } =
+    array -> key ->
+    ["JsIndex", array, key];
+
+
+
+let jsList : { (List (Maybe JsExpr)) -> JsExpr } =
+    elems ->
+    ["JsList", elems];
+
+let jsObject : { (List { [Str, JsExpr] }) -> JsExpr } =
+    fields ->
+    ["JsObject", fields];
+
+
+
+
+
+-- Statements --
+
+let jsCommentStmt : { Str -> JsStmt } =
+    msg ->
+    ["JsCommentStmt", msg];
+
+let jsReturn : { JsExpr -> JsStmt } =
+    expr ->
+    ["JsReturn", expr];
+
+let jsAssign : { JsExpr -> JsExpr -> JsStmt } =
+    lhs -> rhs ->
+    ["JsAssign", lhs, rhs];
+
+let jsExpr : { JsExpr -> JsStmt } = 
+    expr -> 
+    ["JsExpr", expr];
+
+let jsLet : { JsExpr -> JsExpr -> JsStmt } =
+    pat -> defn ->
+    ["JsLet", pat, [defn]];
+
+let jsLetUndefined : { JsExpr -> JsStmt } =
+    pat -> 
+    ["JsLet", pat, []];
+
+let jsLetUndefined3 : { (List Str) -> JsStmt } =
+    vars -> 
+    ["JsLetUndefined", vars];
+
+let jsIf : { JsExpr -> JsStmts -> JsStmt } =
+    cond -> then ->
+    ["JsIf", cond, then];
+
+let jsIfElse : { JsExpr -> JsStmts -> JsStmts -> JsStmt } =
+    cond -> then -> else ->
+    ["JsIfElse", cond, then, else];
+
+let jsWhile : { JsExpr -> JsStmts -> JsStmt } =
+    cond -> body ->
+    ["JsWhile", cond, body];
+
+let jsDoWhile : { JsStmts -> JsExpr -> JsStmt } =
+    body -> cond ->
+    ["JsDoWhile", body, cond];
+
+let jsBreak : JsStmt =
+    ["JsBreak"];
+
+let jsContinue : JsStmt =
+    ["JsContinue"];
+
+let JsCtx = { [JsExpr, Int] };
+
+let jsDefaultCtx = [["JsParens",["JsDatum", []]], 1];
+
+
+
+
+-- let JsDisplay = { JsCtx -> { JsExpr | JsStmt } -> DisplayTree };
+let JsDisplayExpr0 = { JsCtx -> JsExpr -> DisplayTree };
+let JsDisplayExpr = { JsExpr -> DisplayTree };
+-- let JsDisplayStmt0 = { JsDisplayExpr -> JsStmt -> DisplayTree };
+let JsDisplayStmt = { JsStmt -> DisplayTree };
+
+let needsParens : { JsCtx -> JsExpr -> Bool } =
+    ctx -> [childTag,,_] ->
+    match [ctx, childTag]
+    [ [[["JsParens",,_], 1], _] |=>
+        false
+    , [[["JsList",,_], 1], _] |=>
+        false
+    , [[["JsLambdaExpr",,_], 2], "JsLambdaExpr"] |=>
+        false
+    , [[["JsLambdaExpr",,_], 2], "JsLambdaStmt"] |=>
+        false
+    , [[["JsLambdaExpr",,_], 1], _] |=>
+        false
+    , [[["JsLambdaStmt",,_], 1], _] |=>
+        false
+    , [[["JsObject",,_], 1], "JsLambdaStmt"] |=>
+        false
+    , [[["JsCall",,_], 1], "JsCall"] |=>
+        false
+    , [[["JsCall",,_], 2], "JsCall"] |=>
+        false
+    , [[["JsCall",,_], 2], "JsList"] |=>
+        false
+    , [[["JsCall",,_], 2], "JsLambdaExpr"] |=>
+        false
+    , [[["JsCall",,_], 2], "JsLambdaStmt"] |=>
+        false
+    , [[["JsOp",,_], 1], "JsCall"] |=>
+        false
+    , [_, "JsVar"] |=>
+        false
+    , [_, "JsDatum"] |=>
+        false
+    , _ |=>
+        true
+    ];
+
+let paren : { JsCtx -> JsExpr -> DisplayTree -> DisplayTree } =
+    ctx -> expr -> dt ->
+    if (needsParens ctx expr)
+    [ ->
+        dtBranch [ ["(", dt], [")", dtNil] ]
+    , ->
+        dt
+    ];
+
+let jsCollectCurriedArgs : { JsExpr -> [(List JsExpr), JsExpr] } =
+    exprJs ->
+    let [args, body] = 
+        while [ [] : List JsExpr, exprJs : JsExpr ] <|
+        [ args, ["JsLambdaExpr", [pat], body] ] |=>
+        [ [pat,,args], body];
+    let result = [reverse args, body];
+    result;
+
+
+let jsDisplayStmts0 : { JsDisplayStmt -> JsStmts -> DisplayTree } = 
+    dispS -> stmts ->
+    dtBranch <| forMap stmts <| stmt -> ["", dispS stmt];
+
+let jsDisplayStmtBlock0 : { JsDisplayStmt -> JsStmts -> DisplayTree } = 
+    dispS -> stmts ->
+    dtZipBrackets ["{ ", " ", " }"] <| map dispS stmts;
+
+-- TODO ? add context/parens ?
+let jsDisplayMaybe0 : { JsDisplayExpr0 -> JsCtx -> (Maybe JsExpr) -> DisplayTree } =
+    dispE -> ctx -> exprMaybe ->
+    match exprMaybe
+    [ [] |=>
+        dtNil
+    , [expr] |=>
+        dispE ctx expr
+    ];
+
+
+let jsDisplayStmt0 : { JsDisplayExpr0 -> JsStmt -> DisplayTree } =
+    dispE0 ->
+    rec <| ( dispS : { JsStmt -> DisplayTree } ) -> 
+    let dispE = dispE0 jsDefaultCtx;
+    let dispSS = jsDisplayStmts0 dispS;
+    let dispSB = jsDisplayStmtBlock0 dispS;
+    js ->
+    match js
+    [ ["JsCommentStmt", msg] |=>
+        -- TODO quote the msg in a way that ensures the comment doesn't terminate prematurely
+        let comment = dtLeaf <| strCat ["/* ", msg, " */"];
+        dtBranch [ ["", comment] ]
+    , ["JsReturn", expr] |=>
+        dtBranch [ ["", dtLeaf "return ("], ["  ", dispE expr], [");", dtNil] ]
+    , ["JsAssign", lhs, rhs] |=>
+        dtBranch [ ["", dispE lhs], [" = ", dispE rhs], ["; ", dtNil] ]
+    , ["JsExpr", expr] |=>
+        dtBranch [ ["", dispE expr], [";", dtNil] ]
+    , ["JsLet", pat, [defn]] |=>
+        dtBranch [ ["let ", dispE pat], [" = ", dispE defn], ["; ", dtNil] ]
+    , ["JsLet", pat, []] |=>
+        dtBranch [ ["let ", dispE pat], ["; ", dtNil] ]
+    , ["JsLetUndefined", vars] |=>
+        dtBranch [ ["let ", dtLeaf <| strJoin ", " vars], ["; ", dtNil] ]
+    , ["JsIf", cond, then] |=>
+        dtBranch [ ["if (", dispE cond], [")", dispSB then] ]
+
+    , ["JsIfElse", cond, then, else] |=>
+        let [elseFinal, condThens] = 
+            while [[js] : JsStmts, [] : List ({ [JsExpr, JsStmts] })] <|
+            [[["JsIfElse", cond2, then2, else2]], condThens] |=>
+            [else2, [[cond2, then2] ,, condThens]];
+
+        let [condThenFirst, condThenRest] =
+            match (reverse condThens)
+            [ [f ,, r] |=> [f , r]
+            , _ |=> error ["impossible"]
+            ];
+
+        let ifThenFirstDt : DisplayParts = 
+            let [cond3, then3] = condThenFirst;
+            [ ["if", dtZipBrackets ["(", "", ")"] [dtNil, dispE cond3] ]
+            , ["", dispSB then3]
+            ];
+
+        let ifThenRestDt : DisplayParts = 
+            concat <|
+            forMap condThenRest <| 
+            [cond4, then4] ->
+            [ ["else if", dtZipBrackets ["(", "", ")"] [dtNil, dispE cond4] ]
+            , ["", dispSB then4]
+            ];
+
+        let elseFinalDt : DisplayParts = [ ["else", dispSB elseFinal] ];
+
+        dtBranch <| concat [ifThenFirstDt, ifThenRestDt, elseFinalDt]
+
+    , ["JsIfElse", cond, then, else] |=>
+        -- dtBranch [ ["if (", dispE cond], [")", dispSB then], ["else", dispSB else] ]
+        dtBranch
+        [ ["if", dtZipBrackets ["(", "", ")"] [dtNil, dispE cond] ]
+        , ["", dispSB then]
+        , ["else", dispSB else]
+        ]
+    , ["JsWhile", cond, body] |=>
+        -- dtBranch [ ["while (", dispE cond], [")", dispSB body] ]
+        dtConcat 
+        -- [ dtConcat [ dtLeaf "while (", dispE cond, dtLeaf ")" ]
+        -- [ dtBranch [ ["while (", dtNil], ["", dispE cond], [")", dtNil] ]
+        [ dtZipBrackets ["while (", "", ")"] [ dtNil, dispE cond ]
+        , dispSB body
+        ]
+    , ["JsDoWhile", body, cond] |=>
+        dtConcat [ dtLeaf "do", dispSB body, dtLeaf "while (", dispE cond, dtLeaf ")" ]
+    , ["JsBreak"] |=>
+        dtLeaf "break;"
+    , ["JsContinue"] |=>
+        dtLeaf "continue;"
+    ];
+
+
+let jsDisplayExpr0 : { JsCtx -> JsExpr -> DisplayTree } =
+    rec <| ( dispE : { JsCtx -> JsExpr -> DisplayTree } ) -> 
+    ctx -> js ->
+    let dispS = jsDisplayStmt0 dispE;
+    let dispSS = jsDisplayStmts0 dispS;
+    let dispSB = jsDisplayStmtBlock0 dispS;
+    let dispM = jsDisplayMaybe0 dispE;
+    let result = 
+        match js
+        [ ["JsCommentExpr", msg, expr] |=>
+            -- TODO quote the msg in a way that ensures the comment doesn't terminate prematurely
+            let comment = dtLeaf <| strCat ["/* ", msg, " */"];
+            -- let comment = dtLeaf "";
+            dtBranch [ ["", comment], ["", dispE ctx expr] ]
+        , ["JsVar", "if"] |=>
+            dtLeaf "_.if2"
+        , ["JsVar", var] |=>
+            dtLeaf var
+        , ["JsDatum", datum] |=>
+            dtLeaf <|
+            ifNil datum 
+            [ -> "null"
+            , _ -> show datum
+            ]
+    
+        -- TODO non-shadow shadowing
+        -- TODO see comments in readback2.js/ctxAddr2, either need smarter var-checks or smarter codegen
+        , js2 @ ["JsLambdaExpr", [pat], body] |=>
+            let [args, body2] = jsCollectCurriedArgs js2;
+            let [argsD, bodyD] =
+                match body2
+                [ ["JsLambdaStmt", [pat2], body3] |=>
+                    let argsD = concat <| for (concat [args,[pat2]]) <| arg -> [ ["(", dispE [js, 1] arg], [") => ", dtNil] ];
+                    let bodyD = dtBranch [ ["{ ", dispSS body3], [" }", dtNil] ];
+                    [argsD, bodyD]
+                , _ |=>
+                    let argsD = concat <| for args <| arg -> [ ["(", dispE [js, 1] arg], [") => ", dtNil] ];
+                    let bodyD = dtBranch [ ["", dispE [js, 2] body2] ];
+                    [argsD, bodyD]
+                ];
+            let result = dtBranch [ ["", dtBranch argsD], ["", bodyD] ];
+            result
+    
+        -- , js2 @ ["JsLambdaExpr", [pat], body] |=>
+        --     let [args, body2] = jsCollectCurriedArgs js2;
+        --     let [argsD, bodyD] =
+        --         match body2
+        --         [ ["JsLambdaStmt", [pat2], body3] |=>
+        --             let argsD2 = concat <| for (concat [args,[pat2]]) <| arg -> [ ["(", dispE [js, 1] arg], [") => ", dtNil] ];
+        --             let bodyD2 = dtBranch [ ["{ ", dispSS body3], [" }", dtNil] ];
+        --             [argsD2, bodyD2]
+        --         , _ |=>
+        --             let argsD2 = concat <| for args <| arg -> [ ["(", dispE [js, 1] arg], [") => ", dtNil] ];
+        --             let bodyD2 = dtBranch [ ["", dispE [js, 2] body2] ];
+        --             [argsD2, bodyD2]
+        --         ];
+        --     let result3 = dtBranch [ ["", dtBranch argsD], ["", bodyD] ];
+        --     result3
+    
+        , ["JsLambdaExpr", pats, body] |=>
+            let paramsDt = dtZipBrackets ["(", ",", ") =>"] <| forMap pats <| pat -> dispE [js, 1] pat;
+            let bodyDt = dispE [js, 2] body;
+            dtBranch [ ["", paramsDt], ["", bodyDt] ]
+    
+        , ["JsLambdaStmt", pats, body] |=>
+            let paramsDt = dtZipBrackets ["(", ",", ") =>"] <| forMap pats <| pat -> dispE [js, 1] pat;
+            let bodyDt = dispSB body;
+            dtBranch [ ["", paramsDt], ["", bodyDt] ]
+    
+        , ["JsSeq", exprs @ [_ ,, _]] |=>
+            dtZipBrackets ["(", ", ", ")"] <| map (dispE [js, 1]) exprs
+    
+            
+        , ["JsOp", op, [arg1, arg2]] |=>
+            dtBranch [ ["", dispE [js, 1] arg1], [op, dispE [js, 2] arg2] ]
+        , ["JsOp", "?:", [arg1, arg2, arg3]] |=>
+            dtBranch [ ["", dispE [js, 1] arg1], ["?", dispE [js, 2] arg2], [":", dispE [js, 3] arg3] ]
+        , ["JsOp", op, args] |=>
+            error ["TODO", "JsOp", op, length args]
+        , ["JsInstanceOf", expr, className] |=>
+            dtConcat [dispE [js, 1] expr, dtLeaf " instanceof ", dtLeaf className]
+        , ["JsAssignExpr", arg1, arg2] |=>
+            dtBranch [ ["", dispE [js, 1] arg1], [" = ", dispE [js, 2] arg2] ]
+        , ["JsIndex", arg1, arg2] |=>
+            dtBranch [ ["", dispE [js, 1] arg1], [" [", dispE [js, 2] arg2], ["]", dtNil] ]
+        , ["JsCall", func, []] |=>
+            dtBranch [ ["", dispE [js, 1] func], ["(", dtNil], [")", dtNil] ]
+        , ["JsCall", func, [arg]] |=>
+            dtBranch [ ["", dispE [js, 1] func], ["(", dispE [js, 2] arg], [")", dtNil] ]
+        , ["JsCall", func, [arg1,,args]] |=>
+            dtBranch <| concat
+            [ [ ["", dispE [js, 1] func] ]
+            , [ ["(", dispE [js, 2] arg1] ]
+            , forMap args <| arg -> [",", dispE [js, 2] arg]
+            , [ [")", dtNil] ]
+            ]
+        , ["JsMethod", obj, method] |=>
+            dtBranch [ ["", dispE [js, 1] obj], [".", dtLeaf method] ]
+
+
+        , ["JsList", []] |=>
+            dtLeaf "[]"
+
+        , ["JsList", elems] |=>
+            let [elemFinalTl, elems2] = 
+                while [[js] : Maybe JsExpr, [] : List JsExpr] <|
+                [ [ ["JsList", [[elem], elems] ] ], elems3] |=>
+                [ elems, [elem ,, elems3] ];
+
+            let elems3 = reverse elems2;
+
+            match elemFinalTl
+            [ [ ["JsDatum", []] ] |=>
+                let elemsDt : DisplayParts = 
+                    concat <| forMap elems3 <| elem -> [ ["[ ", dispM [js, 1] [elem]], [", ", dtNil] ];
+                let elemFinalDt : DisplayPart = ["", dtLeaf "null"];
+                let closeDt : DisplayPart = 
+                    ["", dtLeaf <| strCat <| forMap elems3 <| _ -> " ]"];
+                dtBranch <| concat [elemsDt, [elemFinalDt], [closeDt]]
+            , _ |=>
+                match js
+                [ ["JsList", []] |=>
+                    dtLeaf "[]"
+                , ["JsList", [elem1,,elems]] |=>
+                    dtBranch <| concat
+                    [ [ ["[", dispM [js, 1] elem1] ]
+                    , forMap elems <| elem ->
+                        [",", dispM [js, 1] elem]
+                    , [ ["]", dtNil] ]
+                    ]
+                ]
+            ]
+
+        , ["JsList", [elem1,,elems]] |=>
+            dtBranch <| concat
+            [ [ ["[", dispM [js, 1] elem1] ]
+            , forMap elems <| elem ->
+                [",", dispM [js, 1] elem]
+            , [ ["]", dtNil] ]
+            ]
+        ];
+    let result2 = paren ctx js result;
+    result2;
+
+
+
+let jsDisplayExpr : { JsExpr -> DisplayTree } =
+    expr ->
+    jsDisplayExpr0 jsDefaultCtx expr;
+
+    
+
+let jsDisplayStmt : { JsStmt -> DisplayTree } =
+    stmt ->
+    jsDisplayStmt0 jsDisplayExpr0 stmt;
+
+let jsDisplayStmts : { JsStmts -> DisplayTree } =
+    stmts ->
+    jsDisplayStmts0 jsDisplayStmt stmts;
+
+
+-- takes a pattern, 
+-- returns a list of variables that will be assigned to when the pattern is assigned to.
+let jsFlatVars : { JsExpr -> (List Str) } = 
+    rec <| (fv: { JsExpr -> (List Str) }) -> 
+    (pat: JsExpr) ->
+    match pat
+    [ ["JsVar", var]    |=> 
+        [var]
+    , ["JsDatum", _]    |=> 
+        []
+    , ["JsList", elemMbs] |=>
+        concat <| 
+        forMap elemMbs <| eMb -> 
+        ifNil eMb [ -> [], [elem] -> fv elem]
+    , _ |=> 
+        error ["missing case jsFlatVars", pat]
+    ];
+    

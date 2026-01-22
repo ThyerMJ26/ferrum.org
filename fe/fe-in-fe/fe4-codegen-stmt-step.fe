@@ -1,0 +1,440 @@
+language ferrum/0.1
+
+let CGEnv = List { [Str, Str] };
+
+let CodeGenState = {
+    [ Int          -- name-source, value of next unique id
+    , (List Str)   -- statements
+    , Int          -- indent
+    ] };
+-- let CGState = CodeGenState;
+
+let initCgState = [1, [], 0];
+
+let CodeGenStep = Fix <| CGS -> 
+    { [ ["Skip"]          , []  -> CGS ]
+    | [ ["AddStmt", Str]  , []  -> CGS ]
+    | [ ["FreshVar"]      , Str -> CGS ]
+    | [ ["Inc"]           , []  -> CGS ]
+    | [ ["Dec"]           , []  -> CGS ]
+    | [ ["Stop", Any] ]
+    };
+let CGStep = CodeGenStep;
+
+let CGK : { Type -> Type } = T -> { T -> CodeGenStep };
+
+
+let spaces : { Int -> Str } =
+    indent ->
+    loop1 ( [num: Int, result: Str] -> 
+        if (num==0) 
+        [ -> break result
+        , -> continue [num-1, strAdd result "    "]
+        ]
+    ) [indent, ""];
+
+let codeGenStepper : { CodeGenState -> CodeGenStep -> [CodeGenState, Any] } = 
+    cgState -> step0 ->
+    let [resultState, resultStep] = 
+        while [initCgState : CodeGenState, step0 : CodeGenStep] <|
+            [state, step @ [_, _]] |=>
+            let [ns, stmts, indent] = state;
+            match step
+            [ [ ["Skip"], respK] |=> 
+                [ state, respK [] ]
+            , [ ["AddStmt", stmt], respK] |=>
+                let stmt2 = strCat [spaces indent, stmt];
+                [ [ns, [stmt2,, stmts], indent], respK [] ]
+            -- , [ ["AddStmts", stmts2], respK] |=>
+            --     [ [ns, reverseOnto stmts2 stmts], respK [] ]
+            , [ ["FreshVar"], respK] |=>
+                let var = "v_" ^ ns;
+                [ [ns+1, stmts, indent], respK var ]
+            , [ ["Inc"], respK] |=>
+                [ [ns, stmts, indent + 1], respK [] ]
+            , [ ["Dec"], respK] |=>
+                if (indent == 0)
+                [ -> 
+                    error "cannot decrease indent below zero"
+                , ->
+                    [ [ns, stmts, indent - 1], respK [] ]
+                ]
+            ];
+    match resultStep
+    [ [ ["Stop", result] ] |=>
+        [resultState, result]
+    , _ |=>
+        error ["unexpected resultStep", resultStep]
+    ];
+
+let cgSkip : { (CGK Nil) -> CGStep } = 
+    k -> [ ["Skip"], k ];
+
+let cgAddStmt : { Str -> (CGK Nil) -> CGStep } = 
+    stmt -> k ->
+    [ ["AddStmt", stmt], k];
+
+let cgFreshVar : { (CGK Str) -> CGStep } = 
+    k ->
+    [ ["FreshVar"], k];
+
+let cgInc : { (CGK Nil) -> CGStep } =
+    k ->
+    [ ["Inc"], k];
+    
+let cgDec : { (CGK Nil) -> CGStep } =
+    k ->
+    [ ["Dec"], k];
+    
+
+let cgStop : { Any -> CGStep } = 
+    result -> [ ["Stop", result] ];
+
+
+-- let cgWhile : { A @ Any -> { A -> (Maybe { { A -> CGStep } -> CGStep }) } -> { A -> CGStep } -> CGStep } =
+--     rec ( (cgw : { A @ Any -> { A -> (Maybe { { A -> CGStep } -> CGStep }) } -> { A -> CGStep } -> CGStep }) -> 
+--     (val: A @ Any) -> (body: { A -> (Maybe { { A -> CGStep } -> CGStep }) }) -> (k: { A -> CGStep }) ->
+--     let goMaybe = body val;
+--     match goMaybe
+--     [ [] |=>
+--         k val
+--     , [go] |=>
+--         go <| val2 ->
+--         cgw val2 body k
+--     ] );
+
+-- let cgLoop : { A @ Any -> B @ { A -> { Any -> CGStep } -> { A -> CGStep } -> CGStep } -> (Domain (Codomain B)) -> CGStep } =
+--     (val: A @ Any) -> (body : B @ { A -> { Any -> CGStep } -> { A -> CGStep } -> CGStep }) -> (k : Domain (Codomain B) ) ->
+--     let kBreak = k;
+--     let kContinue = fix <| (kContinue: { A -> CGStep }) -> val2 -> body val2 kBreak kContinue;
+--     body val kBreak kContinue;
+
+let cgForEach :    { A @ Any -> B @ (List Any) -> { A -> (Elem B) -> { A -> CGStep } -> CGStep } -> { A -> CGStep } -> CGStep } = 
+    fix <| (cgfe : { A @ Any -> B @ (List Any) -> { A -> (Elem B) -> { A -> CGStep } -> CGStep } -> { A -> CGStep } -> CGStep }) ->
+    (val: A @ Any) -> (items: B @ (List Any)) -> body -> k -> 
+    match items
+    [ [] |=> 
+        k val
+    , [item,, items2] |=>
+        body val item <| val2 ->
+        cgfe (val2: A) items2 body <| val3 ->
+        k val3
+    ];
+
+let CgMap = { F @ { Void -> { Any -> CGStep } -> CGStep } -> (List (Domain F)) -> { (List (Domain (Domain (Codomain F)))) -> CGStep } -> CGStep };
+let cgMap : CgMap =
+    rec <| (cgm : CgMap) ->
+    (f: F @ { Void -> { Any -> CGStep } -> CGStep }) -> elems -> k ->
+    match elems
+    [ [] |=> 
+        k []
+    , [elem,, elems2] |=>
+        f elem <| y ->
+        cgm f elems2 <| ys ->
+        k [y,,ys]
+    ];
+
+let CgFor = { A @ (List Any) -> F @ { (Elem A) -> { Any -> CGStep } -> CGStep } -> { (List (Domain (Domain (Codomain F)))) -> CGStep } -> CGStep };
+let cgFor : CgFor =
+    rec <| ( cgf : CgFor ) ->
+    (elems: A @ (List Any)) -> (f: F @ { (Elem A) -> { Any -> CGStep } -> CGStep }) -> k ->
+    match elems
+    [ [] |=> 
+        k []
+    , [elem,, elems2] |=>
+        f elem <| y ->
+        cgf elems2 f <| ys ->
+        k [y,,ys]
+    ];
+
+
+let needsLetBindings : { Expr -> Bool } =
+    fix <| (clb : { Expr -> Bool }) ->
+    expr ->
+    match expr
+    [ ["ELet", _, _, _] |=> true
+    , ["ELets", _, _] |=> true
+    , ["EAs", _, _] |=> true
+    , _ |=>
+        let exprs = subExprs expr;
+        let [_, result]  = 
+            while [exprs, false] <|
+                [ [e,,es], _ ] |=> 
+                    if (clb e)
+                    [ -> [ [], true ]
+                    , -> [ es, false ]
+                    ];
+        result
+    ];
+
+
+let cgExprExpr = fix <| (cg: { Expr -> Str }) -> (expr: Expr) -> 
+    match expr
+    [ ["EVar", "if"] |=> 
+        "_.if2"
+    , ["EVar", var] |=> 
+        cgPat expr
+    , ["ELambda", arg, body] |=> 
+        ifNil (cgPatStmt arg)
+        [ -> "(" ^ cgPatBind arg ^ ") => (" ^ cg body ^ ")"
+        , stmts -> error ["pattern requires let bindings / contains as-patterns", stmts]
+        ]
+    , ["ELambdaMaybe", arg, body] |=> 
+        ifNil (cgPatStmt arg)
+        [ -> strCat ["rt.lambdaMaybe (", cgPatValue2 arg, ", (", cgPatBind arg, ") => (" ^ cg body ^ ") )"]
+        , stmts -> error ["pattern requires let bindings / contains as-patterns", stmts]
+        ]
+    , ["EApply", ["EApply", ["EApply", ["EVar", "if"], c], t], f] |=>
+          "(" ^ cg c ^ "?" ^ cg t ^ ":" ^ cg f ^ ")"
+    , ["EApply", ["EApply", ["EVar", "&&"], a], b] |=> 
+        "(" ^ cg a ^ "&&" ^ cg b ^ ")"
+    , ["EApply", ["EApply", ["EVar", "||"], a], b] |=> 
+        "(" ^ cg a ^ "||" ^ cg b ^ ")"
+    , ["EApply", func, arg] |=> 
+        "((" ^ cg func ^ ")(" ^ cg arg ^ "))"
+    , ["ELit", val] |=> 
+        quoteAtomic val
+    , ["EPair", h, t] |=> 
+        "[" ^ cg h ^ "," ^ cg t ^ "]"
+    , ["ELets", letDecls, letExpr] |=> 
+          error "LET not permitted here"  
+          -- let declsStr = concatStrs (map ([pat:Expr,exp:Expr] -> "let " ^ cgPatBind pat ^ " = " ^ cg exp ^ ";" ^ cgPatStmts pat) letDecls);
+          -- let exprStr = cg letExpr;
+          -- "(()=>{" ^ declsStr ^ "return " ^ exprStr ^ "})()"
+    , ["EType", exp, ty] |=> 
+        cg exp
+    , ["ETermBrackets", exp] |=>
+        "(" ^ cg exp ^ ")"
+    , ["ETypeBrackets", ty] |=>
+        -- TODO use _.Type, as Type and [] are distinct values
+        "null"
+    , ["EOper", "|=", [a, b]] |=>
+        "((" ^ cg a ^ ") ? [" ^ cg b ^ ", null] : null)"
+    , ["EOper", "|-", [a, b]] |=>
+        "((" ^ cg a ^ ") ? " ^ cg b ^ " : null)"
+    , ["EOper", "^", [a, b]] |=>
+        "(" ^ cg a ^ "+" ^ cg b ^ ")"
+    , ["EOper", opName, [a, b]] |=>
+        "(" ^ cg a ^ opName ^ cg b ^ ")"
+    , ["EOper", opName, [a]] |=>
+        "(" ^ opName ^ " (" ^ cg a ^ "))"
+    , ["EList", elems, maybeTail] |=>
+        let tlCode = 
+            match maybeTail
+            [ [] |=> "null"
+            , [t] |=>
+                cg t
+            ];
+        let [_, result] = 
+            while [reverse elems: List Expr, tlCode: Str] <|
+                [[x,,xs], code] |=> [xs, "[" ^ cg x ^ "," ^ code ^ "]" ];
+        result
+    , _ |=> error ["cgExpr", show(expr)]
+    ];
+
+
+let letStr = "let ";
+-- let letStr = "const ";
+
+let cgAssign : { Str -> Str -> { [] -> CGStep } -> CGStep } = 
+    lhs -> rhs -> k ->
+    match lhs
+    [ "" |=>
+        cgSkip k
+    , _ |=>
+        cgAddStmt (strCat [letStr, lhs, " = ", rhs, ";"]) k
+    ];
+
+let cgsExprStep : { CGEnv -> Expr -> { Str -> CGStep } -> CGStep } = 
+    fix <| ( cg : { CGEnv -> Expr -> { Str -> CGStep } -> CGStep } ) ->
+    env -> expr -> k ->
+    match expr
+    [ ["EVar", "if"] |=>
+        k "_.if2"
+    , ["EVar", var] |=>
+        -- TODO lookup var in env
+        -- k (strCat ["v_", var])
+        k (cgPat expr)
+
+    , ["ELit", val] |=> 
+        k (quoteAtomic val)
+    , ["EPair", h, t] |=> 
+        cg env h <| hR ->
+        cg env t <| tR ->
+        -- k "[" ^ hR ^ "," ^ tR ^ "]"
+        k (strCat [ "[", hR, ",", tR, "]" ])
+
+    , ["EList", elems, maybeTail] |=>
+
+        cgFor elems ( (elem) -> (k1 : { Str -> CGStep } ) ->
+            cg env elem k1
+        ) <| (elemsR: List Str) ->
+
+        match maybeTail
+        [ [] |=> 
+            (k1 : { Str -> CGStep }) -> k1 "null"
+        , [t] |=>
+            cg env t
+        ] <| tailR ->
+
+        cgForEach tailR (reverse elemsR) (
+            listR -> elemR -> k1 ->
+            k1 (strCat ["[", elemR, ",", listR, "]"])
+        ) <| listR ->
+        k listR
+
+    -- , ["ELambda", arg, body] |=> 
+    --     cgFreshVar <| name ->
+    --     cgAddStmt (strCat ["let ", name, " = (", cgPatBind arg, ") => {"]) <| _ ->
+    --     cgInc <| _ ->
+    --     let patStmts = cgPatStmt arg;
+    --     cgMap cgAddStmt patStmts <| _ ->
+    --     cg env body <| bodyR ->
+    --     cgAddStmt (strCat ["return ", bodyR, "; }"]) <| _ ->
+    --     cgDec <| _ ->
+    --     k name
+
+    -- TODO ? only let-bind things bound in a ELet node ?
+    -- TODO inspect lambda-body to see if it contains let-expressions
+    -- TODO inspect lambda-body to see if it contains control-flow (if/loop/while)
+    -- TODO only use the ()=>{} form of expressions if either let or control is needed, otherwise we can use ()=>().
+
+    , ["ELambda", arg, body] |=> 
+        if (needsLetBindings expr)
+        [ ->
+            cgFreshVar <| name ->
+            let [args, body2] = splitFuncBody expr;
+            cgAddStmt (letStr ^ name ^ " = (" ^ strJoin ") => (" (map cgPatBind args) ^ ") => {") <| _ ->
+            cgInc <| _ ->
+            let patStmts =  (concat (map cgPatStmt args));
+            cgMap cgAddStmt patStmts <| _ ->
+            cg env body2 <| bodyR ->
+            cgAddStmt (strCat ["return ", bodyR, "; }"]) <| _ ->
+            cgDec <| _ ->
+            k name
+        , ->
+            k (cgExprExpr expr)
+        ]
+
+
+    , ["ELambdaMaybe", arg, body] |=> 
+        if (needsLetBindings expr)
+        [ ->
+            cgFreshVar <| name ->
+            cgAddStmt (strCat [letStr, name, " = (v) => {"]) <| _ ->
+            cgInc <| _ ->
+            cgAddStmt (strCat ["if (!(", cgPatMatch "v" arg, ")) return null;"]) <| _ ->
+            cgAssign (cgPatBind arg) "v" <| _ ->
+            let patStmts = cgPatStmt arg;
+            cgMap cgAddStmt patStmts <| _ ->
+            cg env body <| bodyR ->
+            cgAddStmt (strCat ["return [", bodyR, ", null]; }"]) <| _ ->
+            cgDec <| _ ->
+            k name
+        , ->
+            k (cgExprExpr expr)
+        ]
+
+    , ["EOper", "|=", [a, b]] |=>
+        cg env a <| aR ->
+        cg env b <| bR ->
+        let c = strCat ["((", aR, ") ? [", bR, ", null] : null)"];
+        k c
+
+    , ["EOper", "|-", [a, b]] |=>
+        cg env a <| aR ->
+        cg env b <| bR ->
+        let c = strCat ["((", aR, ") ?", bR, ": null)"];
+        k c
+
+    , ["EOper", "^", [a, b]] |=>
+        cg env a <| aR ->
+        cg env b <| bR ->
+        let c = strCat ["(", aR, " + ", bR, ")"];
+        k c
+
+    , ["EOper", opName, [a, b]] |=>
+        cg env a <| aR ->
+        cg env b <| bR ->
+        let c = strCat ["(", aR, " ", opName, " ", bR, ")"];
+        k c
+
+    , ["EApply", f, x] |=>
+        cg env f <| fR ->
+        cg env x <| xR ->
+        let c = strCat ["((", fR, ") ( ", xR, "))"];
+        k c
+
+    , ["EType", a, ty] |=>
+        cg env a k
+    , ["ETermBrackets", a] |=>
+        cg env a k
+    , ["ETypeBrackets", a] |=>
+        k "null" -- TODO don't conflate null with type
+        -- k "_.Type"
+
+    , ["ELets", decls, expr2] |=>
+        cgForEach (env: CGEnv) decls ( 
+            env2 -> [pat,exp] -> k1 ->
+                if (needsLetBindings exp)
+                [ ->
+                    match exp
+                    [ ["ELambda", _, _] |=> 
+                        let name = cgPatBind pat;    
+                        let [args, body2] = splitFuncBody exp;
+                        cgAddStmt (letStr ^ name ^ " = (" ^ strJoin ") => (" (map cgPatBind args) ^ ") => {") <| _ ->
+                        cgInc <| _ ->
+                        let patStmts =  (concat (map cgPatStmt args));
+                        cgMap cgAddStmt patStmts <| _ ->
+                        cg env body2 <| bodyR ->
+                        cgAddStmt (strCat ["return ", bodyR, "; }"]) <| _ ->
+                        cgDec <| _ ->
+                        k1 env2
+                    , _ |=>
+                        cgFreshVar <| name ->
+                        cg env exp <| expR ->
+                        cgAddStmt (strCat [letStr, name, " = ", expR, ";"]) <| _ ->
+                        cgAssign (cgPatBind pat) name <| _ ->
+                        let patStmts = cgPatStmt pat;
+                        cgMap cgAddStmt patStmts <| _ ->
+                        let env3 = env2; -- TODO
+                        k1 env3
+                    ]
+                , ->
+                    let expR = cgExprExpr exp;
+                    cgAssign (cgPatBind pat) expR <| _ ->
+                    let patStmts = cgPatStmt pat;
+                    cgMap cgAddStmt patStmts <| _ ->
+                    k1 env2
+                ]
+
+        ) <| env4 ->
+        cg env expr2 <| exprR ->
+        k exprR
+
+    ];
+
+
+let cgExprStmt : { Expr -> Str } = 
+    expr ->
+    let initEnv3 : CGEnv = [];
+    let [ [_, stmtLines, _], exprStr] = 
+        codeGenStepper initCgState (
+            cgsExprStep initEnv3 expr <| (result: Str) ->
+            cgStop result
+        );
+    let jsCode = 
+        match stmtLines 
+        [ [] |=>
+            " "
+        , _ |=>
+            strCat ["\n\n", strJoin "\n" (reverse stmtLines), "\n\n"]
+        ];
+    let exprStr2 = cast Any Str exprStr;
+    let jsCode2 = strCat ["( () => {", jsCode, "return (", exprStr2, ") } )()"];
+    -- let _ = debug jsCode2; 
+    jsCode2;
+
+-- let evalJsCgExprStmt : { Expr -> Any } = 
+--     expr -> jsEval (cgExprStmt expr);
+

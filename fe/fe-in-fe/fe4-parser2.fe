@@ -1,0 +1,481 @@
+language ferrum/0.1
+
+-- let Fixity = { "Prefix" | "Infix" | "Postfix" };
+let OpDefn2 = { [Str, Fixity] };
+let OpCompare = { "Left" | "Right" | "None" };
+
+-- TODO add an operator definitions table
+-- TODO  and define a partial precedence relationship more declaratively
+
+let compareOperators : { OpDefn2 -> OpDefn2 -> OpCompare }
+    = [lName, lFixity] -> [rName, rFixity] ->
+    match [lName, rName]
+    [ [ "@"    , _     ] |=> "Left"
+    , [ _      , "@"   ] |=> "Right"
+    , [ _      , "->"  ] |=> "Right"
+    , [ _      , "|->" ] |=> "Right"
+    , [ _      , "|=>" ] |=> "Right"
+    , [ _      , "=>"  ] |=> "Right"
+    , [ _      , "<|"  ] |=> "Right"
+    , [ "->"   , _     ] |=> "Right"
+    , [ "|=>"  , _     ] |=> "Right"
+    , [ "|->"  , _     ] |=> "Right"
+    , [ "=>"   , _     ] |=> "Right"
+    , [ "+"    , "*"   ] |=> "Right"
+    , [ "*"    , "+"   ] |=> "Left"
+    , _ |=>
+        if (lName==rName) -- TODO check fixity
+        [ -> 
+            match lName
+            [ "<|" |=> "Right"
+            , _    |=> "Left" 
+            ]
+        , -> "None"
+        ]
+    ];
+
+let lookupOp2 : { Str -> OpDefn2 }
+    = name ->
+    [ name, "Infix" ];
+
+let lookupPrefixOp2 : { Str -> OpDefn2 }
+    = name ->
+    [ name, "Prefix" ];
+
+let mkApplyOp : { OpDefn2 -> Loc -> Expr -> Expr -> Expr }
+    = [opName, opFixify] -> loc -> arg1 -> arg2 ->
+    match opName
+    [ "->" |=> ["ELambda", arg1, arg2]
+    , "|=>" |=> ["ELambdaMaybe", arg1, arg2]
+    , "|->" |=> ["ELambdaMaybe", arg1, arg2] -- TODO ELambdaNo
+    -- , "=>" |=> ["ELambdaMaybe", arg1, arg2] -- TODO ELambdaYes
+    , ":" |=> ["EType", arg1, arg2]
+    , "@" |=> 
+        match arg1
+        [ ["EVar", name] |=> ["EAs", name, arg2]
+        , _ |=> error ["mkApplyOp", "expected name"]
+        ]
+    , "|>" |=> ["EApply", arg2, arg1]
+    , "<|" |=> ["EApply", arg1, arg2]
+    , _ |=> ["EOper", opName, [arg1, arg2]]
+    ];
+
+let mkApplyOpPrefix : { OpDefn2 -> Loc -> Expr -> Expr }
+    = [ opName , opFixity ] -> loc -> arg1 ->
+    match opName
+    [ "->" |=> 
+        ["ELambda", ["ELit", []], arg1]
+    , _ |=> ["EOper", opName, [arg1]]
+    ];
+
+let mkApplyOpPostfix : { OpDefn2 -> Loc -> Expr -> Expr }
+    = [ opName , opFixity ] -> loc -> arg1 ->
+    match opName
+    [ _ |=> ["EOper", opName, [arg1]]
+    ];
+
+-- TODO update code to handle a prefix operator immediately after an infix operator
+let foldOpArgs2 : { (List {[Expr, OpDefn2]}) -> (List Expr) -> (Maybe OpDefn2) -> [ (List {[Expr, OpDefn2]}) , (List Expr) ]  }
+    = opStack -> argStack -> opDefnOpt ->
+    loop ( [opStack: List {[Expr, OpDefn2]}, argStack: List Expr, precedence: OpCompare ] ->
+        -- let _ = debug ["fold loop 2", opStack, argStack, precedence];
+        match [opStack, precedence]
+        [ [ [[prevOpExpr, prevOpDefn@[prevOpName, prevOpFixity]],,opStack2], "Left" ] |=>
+            let precedence2 = 
+                match opDefnOpt
+                [ [] |=> "Left"
+                , [defn] |=>
+                    compareOperators prevOpDefn defn
+                ];
+            match precedence2
+            [ "Left" |=>
+                match prevOpFixity
+                [ "Prefix" |=>
+                    match argStack
+                    [ [arg1,,argStack2] |=>
+                        let arg = mkApplyOpPrefix prevOpDefn nilLoc arg1;
+                        continue [opStack2, [arg,,argStack2], precedence2]
+                    , _ |=>
+                        error "impossible 1"
+                    ]
+                , "Infix" |=>
+                    match argStack
+                    [ [arg1, arg2,,argStack2] |=>
+                        let arg = mkApplyOp prevOpDefn nilLoc arg2 arg1;
+                        continue [opStack2, [arg,,argStack2], precedence2]
+                    , _ |=>
+                        error ["impossible 2", argStack]
+                    ]
+                , "Postfix" |=>
+                    error "impossible 3"
+                ]
+            , "Right" |=>
+                break [opStack, argStack]
+            , "None" |=>
+                error ["no precedence relationship exists between operators", prevOpDefn, opDefnOpt]
+            ]
+        , _ |=> break [opStack, argStack] 
+        ]
+    ) [opStack, argStack, "Left"];
+
+
+let foldOpArgs : { (List Expr) -> Expr }
+    = opArgs ->
+    -- TODO rewrite this as a fold
+    -- TODO can we merge opStack and argStack and eliminate the juxtaposed flag ?
+    loop ( [opArgs: List Expr, opStack: List {[Expr, OpDefn2]}, argStack: List Expr, juxtaposedApplyPossible: Bool] ->
+        -- let _ = debug ["fold loop opArgs", opArgs];
+        -- let _ = debug ["fold loop opStack", opStack];
+        -- let _ = debug ["fold loop argStack", argStack];
+        -- let _ = debug ["fold loop juxt", juxtaposedApplyPossible];
+        match opArgs
+        [ [opArg,,opArgs2] |=>
+            match opArg
+            [ ["ESym", name] |=>
+                match argStack
+                [ [] |=>
+                    let opDefn = lookupPrefixOp2 name;
+                    continue [opArgs2, [[opArg, opDefn],,opStack], argStack, false]
+                , [arg1,,argStack2] |=>
+                    let opDefn@[opName, opFixity] = lookupOp2 name;
+                    match opFixity
+                    [ "Prefix" |=>
+                        error "impossible 4"
+                    , "Infix" |=>
+                        let [opStack3, argStack3] = foldOpArgs2 opStack argStack [opDefn];
+                        let opStack4 = [ [opArg, opDefn],,opStack3 ];
+                        continue [opArgs2, opStack4, argStack3, false]
+                    , "Postfix" |=>
+                        error "TODO?"
+                    ]
+                ]
+            , _ |=>
+                if juxtaposedApplyPossible
+                [ -> 
+                    match argStack
+                    [ [] |=> error "impossible 5"
+                    , [arg1,,argStack2] |=>
+                        let arg2 = ["EApply", arg1, opArg];
+                        let argStack3 = [arg2,,argStack2];
+                        continue [opArgs2, opStack, argStack3, true]
+                    ]
+                , ->
+                    continue [opArgs2, opStack, [opArg,,argStack], true]
+                ]
+            ]
+        , [] |=>
+            -- let _ = debug ["fold result 1 opStack", opStack];
+            -- let _ = debug ["fold result 1 argStack", argStack];
+            let [opStack3, argStack3] = foldOpArgs2 opStack argStack [];
+            -- let _ = debug ["fold result 2 opStack", opStack3];
+            -- let _ = debug ["fold result 2 argStack", argStack3];
+            match [opStack3, argStack3]
+            [ [ [], [arg1] ] |=>
+                break arg1
+            , _ |=>
+                error ["failed to fold opArgs", opArgs]
+            ]
+        ]
+    ) [opArgs, [], [], false];
+
+
+-- TODO represent failure in the parse state, record furthest point reached and failed token
+let ParseState = { [(List Token)] };
+
+let showPsLoc : { ParseState -> Str }
+    = [tokens] ->
+    match tokens
+    [ [] |=> "EOF"
+    , [ [_, _, loc],, _ ] |=>
+        -- showLoc loc
+        -- "" ^ loc
+        "<LOC>"
+    ];
+
+let parseToken : { ParseState -> [TokenTag, Str] -> [ParseState, Token] }
+    = ps@[tokens] -> tok@[tag, val] ->
+    match tokens
+    [  [ tok1@[tag1, val1, _],,tokens2 ] |=>
+        if ((tag==tag1) && (val==val1))
+        [ -> 
+            -- let _ = debug ["parseToken ok", tok1];
+            [[tokens2], tok1]
+        , -> error ["parseToken failed", "expected", tok, "not", tok1] 
+        ]
+    , _ |=>
+        error ["parseToken failed", "expected token", tok, "not", tokens]
+    ];
+
+let tryParseToken : { ParseState -> [TokenTag, Str] -> (Maybe {[ParseState, Token]}) }
+    = ps@[tokens] -> tok@[tag, val] ->
+    match tokens
+    [  [ tok1@[tag1, val1, _],,tokens2 ] |=>
+        if ((tag==tag1) && (val==val1))
+        [ -> 
+            -- let _ = debug ["tryParseToken ok", tok1];
+            [ [[tokens2], tok1] ]
+        , -> 
+            -- let _ = debug ["tryParseToken fail", tok, tok1];
+            [] 
+        ]
+    , _ |=>
+        error ["parseToken failed", "expected token", tok, "not", tokens]
+    ];
+
+let ParseExpr = { ParseState -> [ParseState, Expr] };
+
+let parseDecls2 : { ParseExpr -> ParseState -> [ParseState, (List {[Expr, Expr]})] }
+    = parseExpr -> ps ->
+    loop ( [ps2: ParseState, decls: List {[Expr, Expr]}] ->
+        match (tryParseToken ps2 ["KEYWORD", "let"])
+        [ [] |=> break [ps2, reverse decls]
+        , [ [ps3, _] ] |=>
+            let [ps4, pat] = parseExpr ps3;
+            let [ps5, _] = parseToken ps4 ["KEYOPER", "="];
+            let [ps6, defn] = parseExpr ps5;
+            let [ps7, _] = parseToken ps6 ["PUNCT", ";"];
+            continue [ ps7, [ [pat, defn],,decls] ]
+        ]
+    ) [ps, []];
+
+let tryParseExpr3 : { ParseExpr -> ParseState -> (Maybe {[ParseState,  Expr]}) }
+    = parseExpr -> ps ->
+    -- let _ = debug ["tryParse", ps];
+    let [tokens] = ps;
+    match tokens
+    [ [] |=> []
+    , [tok1,,tokensRest] |=>
+        -- let _ = debug ["tryParseExpr3", tok1];
+        let ps2 = [tokensRest];
+        match tok1
+        [ ["NUMBER",  val, loc] |=> [ [ ps2, ["ELit", val] ] ]
+        , ["STRING",  val, loc] |=> [ [ ps2, ["ELit", val] ] ]
+        , ["WORD",    val, loc] |=> [ [ ps2, ["EVar", val] ] ]
+        , ["KEYWORD", "let", loc] |=> 
+            let [ps3, decls] = parseDecls2 parseExpr ps;
+            let [ps4, expr] = parseExpr ps3;
+            [ [ ps4, ["ELets", decls, expr] ] ]
+        -- , _ |=> error "missing case 1"
+        , ["PUNCT", "(", loc] |=> 
+            let [ps3, expr] = parseExpr ps2;
+            let [ps4, _] = parseToken ps3 ["PUNCT",")"];
+            -- TODO add term-brackets
+            let expr2 = ["ETermBrackets", expr];
+            [ [ps4, expr] ]
+            -- [ [ps4, expr2] ]
+        , ["PUNCT", "{", loc] |=> 
+            let [ps3, expr] = parseExpr ps2;
+            let [ps4, _] = parseToken ps3 ["PUNCT","}"];
+            -- TODO add type-brackets
+            let expr2 = ["ETypeBrackets", expr];
+            -- [ [ps4, expr] ]
+            [ [ps4, expr2] ]
+
+
+        , ["PUNCT", "[", loc] |=> 
+            match (tryParseToken ps2 ["PUNCT","]"])
+            [ [[ps3, _]] |=> [ [ps3, ["ELit", []]] ]
+            , [] |=>
+                loop ( [ps4: ParseState, elems: List Expr] ->
+                    -- let _ = debug ["list pos", showPsLoc ps4];
+                    -- let _ = debug ["list elems", elems];
+                    let [ps4a, elem] = parseExpr ps4;
+                    let elems2 = [elem,,elems];
+                    match (tryParseToken ps4a ["PUNCT", "]"])
+                    [ [[ps5, _]] |=>
+                        break [ [ps5, ["EList", reverse elems2, []]] ]
+                    , [] |=>
+                        let [ps6, _] = parseToken ps4a ["PUNCT", ","];
+                        match (tryParseToken ps6 ["KEYOPER", "..."])
+                        [ [ [ps7, _] ] |=> 
+                            let [ps8, restExpr] = parseExpr ps7;
+                            let [ps9, _] = parseToken ps8 ["PUNCT", "]"];
+                            break [ [ps9, ["EList", reverse elems2, [restExpr]]] ]
+                        , [] |=>
+                            -- let [ps10, elemExpr] = parseExpr ps6;
+                            -- continue [ps10, [elemExpr,,elems]]
+                            continue [ps6, elems2]
+                        ]
+                    ]
+                ) [ps2, []]
+            ]
+
+        -- , ["PUNCT", "[", loc] |=> 
+        --     -- ps2 |> cpsDo <|
+        --     cpsDo ps2 <|
+        --     cpsMatch (cps (tryParseToken ["PUNCT","]"]))
+        --     [ [ _ ] |=> 
+        --         cpsDone [ [ ["ELit", []] ] ]
+        --     , [] |=>
+        --         [] |>
+        --         cpsLoop ( [elems: List Expr] ->
+        --             cpsMatch (cpsCall (tryParseToken ["PUNCT", "]"]))
+        --             [ [ _ ] |=>
+        --                 cpsBreak [ [["EList", reverse elems, []]] ]
+        --             , [] |=>
+        --                 cpsCall parseToken ["PUNCT", ","] <| ->
+        --                 cpsMatch (cpsCall (tryParseToken ["KEYOPER", "..."]))
+        --                 [ [ _ ] ] |=> 
+        --                     cpsCall parseExpr <| restExpr ->
+        --                     cpsCall (parseToken ["PUNCT", "]"]) <| ->
+        --                     cpsBreak [ ["EList", reverse elems, [restExpr]]]
+        --                 , [] |=>
+        --                     cpsCall parseExpr <| elemExpr ->
+        --                     cpsContinue [ [elemExpr,,elems] ]
+        --                 ]
+        --             ]
+        --         ) 
+        --     ] 
+
+        -- , ["PUNCT", "[", loc] |=> 
+        --     -- ps2 |> cpsDo <|
+        --     -- rrpsDo ps2 <|
+        --     -- opsDo ps2 <|
+        --     objDo ps2 <|
+        --     objMatch ["tryParseToken", ["PUNCT","]"]]
+        --     [ [ _ ] |=> 
+        --         objDone [ [ ["ELit", []] ] ]
+        --     , [] |=>
+        --         [] |>
+        --         objLoop ( [elems: List Expr] ->
+        --             objMatch ["tryParseToken", ["PUNCT", "]"]]
+        --             [ [ _ ] |=>
+        --                 objBreak [ [["EList", reverse elems, []]] ]
+        --             , [] |=>
+        --                 ["parseToken", ["PUNCT", ","]] :: ->
+        --                 objMatch ["tryParseToken", ["KEYOPER", "..."]]
+        --                 [ [ _ ] ] |=> 
+        --                     -- ["parseExpr"] :: restExpr ->
+        --                     objCall parseExpr :: restExpr ->
+        --                     objCall parseExpr <| restExpr ->
+        --                     -- TODO ? make the objCall implicit ? 
+        --                     -- if we see a function rather than a "messaage" tuple, 
+        --                     -- then pass the object to the function, rather than the message to the object ?
+        --                     parseExpr :: restExpr -> 
+        --                     ["parseToken", ["PUNCT", "]"]] :: ->
+        --                     objBreak [ ["EList", reverse elems, [restExpr]]]
+        --                 , [] |=>
+        --                     ["parseExpr"] :: elemExpr ->
+        --                     objContinue [ [elemExpr,,elems] ]
+        --                 ]
+        --             ]
+        --         ) 
+        --     ] 
+
+        , ["OPER", val, _] |=> 
+            [ [ps2, ["ESym", val]] ]
+        , ["KEYOPER", val, _] |=>
+            -- TODO change definitions of KEYOPER in the scanner
+            match val
+            [ "=" |=> []
+            , _ |=>
+                [ [ps2, ["ESym", val]] ]
+            ]
+        , ["WILD", val, _] |=> 
+            -- TODO ? do we want an explicit wildcard expression type ?
+            [ [ps2, ["EVar", "_"]] ]
+        , ["EOF", _, _] |=> []
+        , ["PUNCT", _, _] |=> []
+        , _ |=> error "missing case 2"
+        ]
+    , _ |=> error "missing case 3"
+    ];
+
+let parseExpr2 : { ParseState -> [ParseState, Expr] }
+    = rec ( (parseExpr: { ParseState -> [ParseState, Expr] }) -> ps ->
+    -- let _ = debug ["parseExpr2", hd (hd (castT ps))];
+    let [ps2, parts] = 
+        loop ( [ps3: ParseState, parts: List Expr] ->
+            -- let _ = debug ["parse loop", ps3];
+            match (tryParseExpr3 parseExpr ps3)
+            [ [] |=> 
+                break [ps3, parts] 
+            , [ [ps4, part] ] |=>
+                continue [ps4, [part,,parts]]
+            , _ |=> error "missing case 4"
+            ]
+        ) [ps, []];
+    -- let _ = debug ["parseExpr2 parts", parts];
+    match parts
+    [ [] |=> 
+        -- TODO set failure in parse state, 
+        -- TODO return dummy placeholder expression 
+        error "failed to parse expression"
+    , _ |=>
+        let expr = foldOpArgs (reverse parts);
+        [ps2, expr]
+    ] );
+
+
+let testParse4Scan : { Str -> Expr }
+    = input ->
+    let tokens = scan input;
+    let ps1 = [tokens];
+    let [ps2, expr] = parseExpr2 ps1;
+    expr;
+
+
+let parseExpr : { (List Token) -> Expr } =
+    tokens ->
+    let [_, expr] = parseExpr2 [tokens];
+    expr;
+
+let parseDecls : { (List Token) -> (List {[Expr,Expr]}) } =
+    tokens ->
+    let [_, decls] = parseDecls2 parseExpr2 [tokens];
+    decls;
+
+
+ --
+ -- for drop-in compatibility with previous parser, so as to re-use tests
+ -- TODO tidy-up names and functionality
+ -- TODO extend ParseState with failure mode, update tests to account for this
+ --
+
+let testParse : { Str -> (List Token) -> Any }
+    = ruleName -> tokens ->
+    match ruleName
+    [ "TOP" |=>
+        let [ps2, decls] = parseDecls2 parseExpr2 [tokens];
+        "Test PASSED"
+    , "EXP" |=>
+        let [ps2, decls] = parseExpr2 [tokens];
+        "Test PASSED"
+    , _ |=> 
+        error ["TODO", "testParse", ruleName]
+    ];
+
+
+let testParse3 : { Str -> (List Token) -> Expr }
+    = ruleName -> tokens ->    
+    match ruleName
+    [ "EXP" |=>
+        let [ps2, expr] = parseExpr2 [tokens];
+        expr
+    , _ |=> 
+        error ["TODO", "testParse3", ruleName]
+    ];
+
+let testParse2 : { Str -> (List Token) -> Any }
+    = ruleName -> tokens ->
+    match ruleName
+    [ "EXP" |=>
+        let [ps2, expr] = parseExpr2 [tokens];
+        expr
+    , _ |=> 
+        error ["TODO", "testParse2", ruleName]
+    ];
+
+
+let testConvert : { Str -> (List Token) -> Any }
+    = ruleName -> tokens ->
+    match ruleName
+    [ "TOP" |=>
+        let [ps2, decls] = parseDecls2 parseExpr2 [tokens];
+        "Test PASSED"
+--    , "EXP" |=>
+--        let [ps2, expr] = parseExpr2 [tokens];
+--        "Test PASSED"
+    , _ |=> 
+        error ["TODO", "testConvert", ruleName]
+    ];

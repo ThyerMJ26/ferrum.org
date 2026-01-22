@@ -1,0 +1,391 @@
+language ferrum/0.1
+
+
+let heapDeref : { Addr -> (HeapA {[NodeCommon,Node]}) } =
+    heapFunc1 <|
+    (addr0 : Addr) -> (k : K @ (HeapK { [NodeCommon,Node] })) -> 
+    heapWhile [addr0, []: Maybe NcNode] (
+        [addr, []] |=>
+        (k2 : K @ (HeapK { [Addr, (Maybe NcNode)] })) ->
+        heapGet addr <| indirect ->
+        let [nextAddrMb, nc, node] = indirect;
+        match nextAddrMb
+        [ [] |=> k2 [addr, [ [nc, node] ] ]
+        , [nextAddr] |=> k2 [nextAddr, []]
+        ]
+    ) <| [_, ncNodeMb] ->
+    match ncNodeMb
+    [ [] |=> error "impossible" -- TODO use heapLoop instead of heapWhile so as not to need this
+    , [ncNode] |=> k ncNode
+    ];
+
+let heapDerefInd : { Addr -> (HeapA AddrInd) } =
+    heapFunc1 <|
+    (addr0 : Addr) -> (k : K @ (HeapK AddrInd)) ->
+    heapWhile [addr0, []: Maybe AddrInd] (
+        [addr, []] |=>
+        (k2 : K @ (HeapK { [Addr, (Maybe AddrInd)] })) ->
+        heapGet addr <| indirect ->
+        let [nextAddrMb, nc, node] = indirect;
+        match nextAddrMb
+        [ [] |=> k2 [addr, [ [addr, indirect] ] ]
+        , [nextAddr] |=> k2 [nextAddr, []]
+        ]
+    ) <| [_, indMb] ->
+    match indMb
+    [ [] |=> error "impossible" -- TODO use cpsLoop / heapLoop instead of cpsWhile so as not to need this
+    , [ind] |=> k ind
+    ];
+
+let heapRef : { Addr -> (HeapA Addr) } =
+    heapFunc1 <|
+    (addr : Addr) -> (k : K @ (HeapK Addr)) ->
+    heapDerefInd addr <| [addr2, [_, _, _]] ->
+    k addr2;
+
+-- let heapRef : { Addr -> (HeapA Addr) } =
+--     heapFunc1 <|
+--     (addr0 : Addr) -> (k : K @ (HeapK Addr)) ->
+--     heapWhile [addr0, []: Maybe Addr] (
+--         [addr, []] |=>
+--         (k2 : K @ (HeapK { [Addr, (Maybe Addr)] })) ->
+--         heapGet addr <| indirect ->
+--         let [nextAddrMb, nc, node] = indirect;
+--         match nextAddrMb
+--         [ [] |=> k2 [addr, [ addr ] ]
+--         , [nextAddr] |=> k2 [nextAddr, []]
+--         ]
+--     ) <| [_, indMb] ->
+--     match indMb
+--     [ [] |=> error "impossible"
+--     , [addr] |=> k addr
+--     ];
+
+
+let heapLink : { Addr -> Addr -> (HeapA Nil) } =
+    heapFunc2 <|
+    (from : Addr) -> (to : Addr) -> 
+    (returnK : K @ HeapK Nil) ->
+    heapLoop2 from ( addr -> 
+        (breakK : KB @ HeapK Nil) -> 
+        (continueK : KC @ HeapK Addr) ->
+        -- heapGet addr <| [ addr1, addrInd, nc, node] ->
+        -- heapSet addr [addr1, [to], nc, node] <| _ ->  -- TODO conditionally drop old nodes
+        heapGet addr <| [nextAddrMb, nc, node] ->
+        heapSet addr [[to], nc, node] <| _ ->  -- TODO conditionally drop old nodes
+        match nextAddrMb
+        [ [] |=> breakK []
+        , [nextAddr] |=>
+            continueK nextAddr
+        ]
+    ) returnK;
+
+-- update a node in-place
+-- currently only used when updating TI nodes
+-- let heapUpdateNode : { Addr -> NcNode -> (HeapA Nil) } =
+--     hpsAction2 <|
+--     (addr : Addr) -> ([nc,node] : NcNode) -> 
+--     (k : K @ HeapK Addr) ->
+--     heapRef addr <| addr2 ->
+--     heapSet addr [addr2, [], nc, node] <| ->
+--     k [];
+
+
+let heapUpdateTiEdges : { Addr -> TiVal -> (List TiEdge) -> (HeapA Nil) } =
+    hpsAction2 <|
+    (addr : Addr) -> (newTiVal : TiVal) -> (newTiEdges : List TiEdge) -> 
+    (k : K @ HeapK Nil) ->
+    heapDerefInd addr <| ind ->
+    match ind
+    [ [_, [[], nc, ["TI", tyAddr, oldTiVal, oldTiEdges]]] |=>
+        heapSet addr [[], nc, ["TI", tyAddr, newTiVal, newTiEdges]] <| ->
+        k []
+    , _ |=>
+        error ["heapUpdateTiEdges", "unexpected TI node form"]
+    ];
+
+
+let heapSetReducedForm : { ReducedForm -> Addr -> (HeapA Nil) } =
+    heapFunc2 <|
+    (newForm : ReducedForm) -> (addr : Addr) -> (k : K @ (HeapK Nil)) ->
+    heapDerefInd addr <| [addr2, [ind, nc, node]] ->
+    let nc = nc |> ncSetReducedForm newForm;
+    heapSet addr2 [ind, nc, node] <| _ ->
+    k [];
+
+let heapSetReducedWeak : { Addr -> (HeapA Nil) } =
+    heapFunc1 <|
+    (addr : Addr) -> (k : K @ (HeapK Nil)) ->
+    heapSetReducedForm "Weak" addr k;
+
+-- let heapSetReducedStrong : { Addr -> (HeapA Nil) } =
+--     addr ->
+--     heapSetReducedForm "Strong" addr;
+
+
+let heapDumpIsDone : { Addr -> (List Addr) -> Bool } =
+    addr -> done ->
+    -- listExists ((a: Addr) -> a==addr) done;
+    listAnyTrue done (a -> a == addr);
+
+
+
+-- TODO improve the order in which nodes are dumped, 
+--   so as to avoid node depths jumping around so much
+--   i.e. finish outputing the inside of a lambda body, 
+--   before eagerly depth-first traversing through anything referenced from that lambda body.
+
+let heapDumpAll : { (List Addr) -> (HeapA (List AddrInd)) } =
+    heapFunc1 <|
+    (roots : List Addr) -> (k : K @ (HeapK (List AddrInd))) ->
+    heapLoop2 [roots, [] : List Addr, [] : List AddrInd] (
+        [todo, done, result] ->
+        (kBreak : KB @ (HeapK (List AddrInd))) ->
+        (kContinue : KC @ (HeapK { [(List Addr), (List Addr), (List AddrInd)] })) ->
+        -- let _ = debug ["DumpLoop1", todo];
+        -- let _ = debug ["DumpLoop2", map hd result];
+        match todo
+        [ [] |=> kBreak result
+        , [todo1 ,, todos] |=> 
+            if (heapDumpIsDone todo1 done)
+            [ -> kContinue [todos, done, result]
+            , -> 
+                heapGet todo1 <| ind @ [nextAddrMb, nc, node] ->
+                -- let _ = if (addr == todo1) [ -> [], -> error ["addr mismatch", addr, todo1]];
+                let done2 = [todo1 ,, done];
+                match nextAddrMb
+                [ [] |=> 
+                    let children = nodeChildren node;
+                    let todo2 = append children todos;
+                    kContinue [todo2, done2, [[todo1, ind] ,, result]]
+                , [nextAddr] |=> 
+                    kContinue [ [nextAddr ,, todos], done2, [[todo1, ind] ,, result]]
+                ]
+            ]
+        ]
+    ) <| indirects ->
+    k indirects;
+
+let heapDump : { Addr -> (HeapA (List AddrInd)) } =
+    heapFunc1 <|
+    (root : Addr) -> (k : K @ (HeapK (List AddrInd))) ->
+    heapDumpAll [root] k;
+
+let heapDumpAllShow : { (List Addr) -> Heap -> [Heap, Str] } = 
+    roots -> heap -> 
+    -- let [heap2, indirects] = heapDumpAll roots (inds -> heap2 -> [heap2, inds]) heap;
+    let [heap2, indirects] = heapDo (List AddrInd) (heapDumpAll roots) heap;
+    let heapStr = strCat <| forMap (reverse indirects) <| a -> strCat [showIndirect a, "\n"];
+    [heap2, heapStr];
+
+
+let showNode : { Int -> TmTyCtx -> Addr -> (HeapA Str) } =
+    rec <| (showNode : { Int -> TmTyCtx -> Addr -> (HeapA Str) }) ->
+    maxRecurDepth -> tmTy -> addr ->
+    (k : K @ HeapK Str) ->
+    if (maxRecurDepth == 0)
+    [ ->
+        k (strCat ["#", show addr])
+    , ->
+        heapDeref addr <| [_, node] ->
+        let [tag ,, _] = node;
+        let addrs = nodeChildren node;
+        heapMap (showNode (maxRecurDepth - 1) tmTy) addrs <| subShows ->
+        let out = strJoin ", " (concat [["[", show tag], subShows, ["]"]]);
+        k out
+    ];
+
+
+let readbackVarName : { Int -> (Maybe Expr) -> Str } =
+    depth -> srcAnnot ->
+    match srcAnnot
+    [ [] |=> strCat ["v", show depth]
+    , [srcAnnot2] |=> 
+        match srcAnnot2
+        [ ["EVar", name] |=> strCat ["v", show depth, "_", name]
+        , ["EAs", name, _] |=> strCat ["v", show depth, "_", name]
+        , _ |=> strCat ["v", show depth]
+        ]
+    ];
+
+let bracket : { PtsSort -> PtsSort -> Expr -> Expr } =
+    ctx -> sort -> expr ->
+    match [ctx, sort]
+    [ ["Term", "Term"] |=> expr
+    , ["Type", "Type"] |=> expr
+    , ["Term", "Type"] |=> ["ETypeBrackets", expr]
+    , ["Type", "Term"] |=> ["ETermBrackets", expr]
+    ];
+
+-- very simplistic read-back
+-- completely ignores sharing and already let-bound addresses
+-- limits recursive descent to prevent explosive tree sizes
+let readbackTree :  { Int -> TmTyCtx -> Addr -> (HeapA Expr) } =
+    rec <| (rbt : { Int -> TmTyCtx -> Addr -> (HeapA Expr) }) ->
+    maxRecurDepth -> tmTy -> addr ->
+    (k : K @ HeapK Expr) ->
+    if (maxRecurDepth == 0)
+    [ ->
+        k ["EVar", strCat ["#", show addr]]
+    , ->
+        let rbt1 = rbt (maxRecurDepth - 1);
+        heapDeref addr <| [nc, node] ->
+        let depth = nc |> ncDepth;
+        match node
+        [ [ "HValue", val] |=>
+            k (bracket tmTy "Term" ["ELit", val])
+        , [ "HOper", opName, args ] |=>
+            heapMap (rbt1 "Term") args <| argExprs ->
+            k (bracket tmTy "Term" ["EOper", opName, argExprs])
+        , [ "HVar" ] |=>
+            let varName = readbackVarName depth [];
+            k ["EVar", varName]
+        , [ "HLambda", body ] |=>
+            let varDepth = depth + 1;
+            let varName = readbackVarName varDepth [];
+            rbt1 "Term" body <| bodyExp -> 
+            k (bracket tmTy "Term" ["ELambda", ["EVar", varName], bodyExp])
+        , [ "HApply", func, arg ] |=>
+            rbt1 "Term" func <| funcExp -> 
+            rbt1 "Term" arg <| argExp -> 
+            k (bracket tmTy "Term" ["EApply", funcExp, argExp])
+        , [ "HPair", hdAddr, tlAddr ] |=>
+            rbt1 "Term" hdAddr <| hdExp -> 
+            rbt1 "Term" tlAddr <| tlExp -> 
+            -- k (bracket tmTy "Term" ["EPair", hdExp, tlExp])
+            k (bracket tmTy "Term" (ePair hdExp tlExp))
+        , ["HTypeAnnot", termA, typeA] |=>
+            rbt1 "Term" termA <| termExp -> 
+            rbt1 "Term" typeA <| typeExp -> 
+            k (bracket tmTy "Term" ["EType", termExp, typeExp])
+        
+        -- types
+        , ["TyFun", patA, bodyA] |=>
+            rbt1 "Type" patA <| patExp ->
+            rbt1 "Type" bodyA <| bodyExp ->
+            k (bracket tmTy "Type" ["ELambda", patExp, bodyExp])
+        , ["TyDatum", datum] |=>
+            k (bracket tmTy "Type" ["ELit", datum])
+        , ["TyOper", name, args] |=>
+            heapMap (rbt1 "Type") args <| argExprs ->
+            k (bracket tmTy "Type" ["EOper", name, argExprs])
+        
+        , ["TyVar"] |=>
+            -- TODO handle type-vars correctly, 
+            --   the name of a type-var at a given depth will be different from the name of the term-var at that same depth
+            let varName = readbackVarName depth [];
+            k ["EVar", varName]
+        
+        , ["TyPair", hdA, tlA] |=>
+            rbt1 "Type" hdA <| hdExp -> 
+            rbt1 "Type" tlA <| tlExp -> 
+            -- k (bracket tmTy "Type" ["EPair", hdExp, tlExp])
+            k (bracket tmTy "Type" (ePair hdExp tlExp))
+        
+        , [ "TyApp", func, arg ] |=>
+            rbt1 "Type" func <| funcExp -> 
+            rbt1 "Type" arg <| argExp -> 
+            k (bracket tmTy "Type" ["EApply", funcExp, argExp])
+        
+        , ["TySingle", valA] |=>
+            rbt1 "Term" valA <| valExp -> 
+            k (bracket tmTy "Type" valExp)
+        
+        , ["TyTermAnnot", termA, typeA] |=>
+            error ["TODO"]
+
+        , ["TI", tyAddr, tiVal, tiEdges] |=>
+            -- we shouldn't really get here, as readbackTree isn't inteneded to be used on a TI node, but just in case it is:
+            rbt1 "Term" tyAddr <| tyExp -> 
+            k ["EApply", ["EVar", "TI"], tyExp]
+        
+        , other |=> panic ["readbackTree", "missing case", other]
+        ]
+    ];
+
+
+let showIndirect2 : { Int -> TmTyCtx -> AddrInd -> (HeapA Str) } =
+    maxRecurDepth -> tmTy -> ind @ [addr, _] ->
+    (k : K @ HeapK Str) ->
+    -- showNode maxRecurDepth tmTy addr <| nodeStr ->
+    readbackTree 10 "Term" addr <| expr ->
+    let exprStr = showExpr expr;
+    let out = strCat [strPadEnd 60 (showIndirect0 0 ind), "  ", exprStr];
+    k out;
+
+let heapDumpAllShow2 : { TmTyCtx -> (List Addr) -> (HeapA Str) } = 
+    tmTy -> roots -> (k : K @ HeapK Str) ->
+    heapDumpAll roots <| inds ->
+    heapWhile [inds, [] : List Str] (
+        [ [ind ,, inds], out] |=>
+        (k : K @ HeapK { [(List AddrInd), (List Str)]}) ->
+        let maxRecurDepth = 2;
+        showIndirect2 maxRecurDepth tmTy ind <| line ->
+        k [inds, [line ,, out]]
+    ) <| [_, out] ->
+    let out = reverse out;
+    k (strJoin "\n" out);
+
+
+-- let traceHeap : { Addr -> K @ (HeapK Nil) -> Heap -> K Nil Heap } =
+--     addr -> (k: K @ (HeapK Nil)) ->
+--     -- let [heap2, snapshot] = heapSnapshot heap;
+--     -- let heap3 = snapshot [];
+--     -- let dump = heapDump addr heap3;
+--     heapDump addr <| dump ->
+--     let dump2 = map ((a: Indirect) -> showIndirect a ^ "\n") (reverse dump);
+--     -- let _ = debug ["Dump", dump];
+--     -- let _ = debug ["Root", addr];
+--     let _ = debug (strCat ["Dump2\n",,dump2]);
+--     k [];   
+    
+let traceHeap : { Str -> Addr -> (HeapA Nil) } =
+    heapFunc2 <|
+    (msg : Str) -> (addr : Addr) -> (k: K @ (HeapK Nil)) ->
+    heapDump addr <| dump ->
+    let dump2 = map ((a: AddrInd) -> strCat [showIndirect a, "\n"]) (reverse dump);
+    let _ = debug (strCat ["TraceHeap ", msg, "\n" ,, dump2]);
+    k [];   
+    
+
+-- let heapCheckValidity : { Addr -> (HeapA Bool) } =
+--     addr ->
+--     (k : K @ HeapK Bool) ->
+--     -- let _ = debug ["heapCheckValidity", "started"];
+--     heapDeref addr <| [ [depth, _, _, _], node ] ->
+--     heapWhile [ [[depth,addr]] : List { [Int, Addr] }, true : Bool ] (
+--         [ [ [expectedDepth, addr] ,, todo], ok ] |=>
+--         (k : K @ HeapK { [ (List { [Int, Addr] }) , Bool ] }) ->
+--         -- let _ = debug ["heapCheckValidity", "loop", addr, length todo];
+--         heapDeref addr <| [ [depth, _, _, _], node ] ->
+--         let ok2 = 
+--             if (depth > expectedDepth)
+--             [ ->
+--                 let _ = debug ["heapCheckValidity", "depth error", addr, depth, expectedDepth];
+--                 false
+--             , -> 
+--                 ok    
+--             ];
+--         let more = 
+--             match node
+--             [ ["HLambda", body] |=>
+--                 [ [addr + 1, body] ]
+--             , ["TyFun", pat, body] |=>
+--                 [ [addr + 1, pat], [addr + 1, body] ]
+--             , _ |=>
+--                 forMap (nodeChildren node) <| childAddr -> [depth, childAddr]
+--             ];
+--         -- let _ = debug ["heapCheckValidity", "more", more];
+-- 
+--         k [ append more todo, ok2 ]
+--     ) <| [_, ok] ->
+--     -- let _ = debug ["heapCheckValidity", "finished"];
+--     if (not ok)
+--     [ ->
+--         traceHeap addr <| _ ->
+--         k ok
+--     , ->
+--         k ok
+--     ];
+
+    

@@ -1,0 +1,227 @@
+language ferrum/0.1
+
+-- -- requests
+--         [ ["textClick", tabId, start, end] |->
+--         , ["projSelect", projVal] |->
+--         , ["srcSelect", srcVal] |->
+--         , ["bindingSelect", bindingVal] |->
+-- 
+-- 
+-- -- response textClick
+--     [ ["ok", data, tokens] |=>
+-- 
+-- 
+-- -- response handleResponse
+--     [ ["ok", "src", srcText] |=>
+--     , ["ok", "proj", projText, heapEnv, jsCode] |=>
+--     , ["ok", "binding", bindingText, heapText, rbJsText] |=>
+
+
+let Protocol = Any; -- TODO
+
+
+-- let wiProtocol : Protocol = 
+--     [ [ ["textClick", "Str", "Int", "Int"] , ["ok", "Str", "Str"]                   ]
+--     , [ ["projSelect", "Str"]              , ["ok", "src", "Str"]                   ]
+--     , [ ["srcSelect", "Int"]               , ["ok", "proj", "Str", "Str", "Str"]    ]
+--     , [ ["bindingSelect", "Int"]           , ["ok", "binding", "Str", "Str", "Str"] ]
+--     ];
+
+let ProtocolType : { Protocol -> Type } =
+    protocol -> 
+    Any;
+    -- error ["TODO"];
+
+-- let protocolGuard : { P @ Protocol -> Any -> (Maybe (ProtocolType P)) } =
+--     protocol ->
+--     error ["TODO"];
+
+-- let WiProtocol = ProtocolType wiProtocol;
+-- let WiRequest = Hd WiProtocol;
+-- let WiResponse = Hd (Tl WiProtocol);
+
+-- TODO ? allow a list of requests ?
+-- TODO   We don't want client-requests (or server-responses) overtaking each other across the network on their way to the server (or client).
+-- TODO   Best to batch any subsequent user-requests that occur while waiting for an in-flight request to complete.
+-- TODO could still process the backlog one at a time, a server-call for each,
+-- TODO   but batching reduces potential additive-roundtrip-latency issues 
+-- TODO   and keeps the server better informed, giving it potential opportunities to process a btach in one go
+let WiRequest = 
+    { ["loadContents"]
+    | ["textClick", Str, Int, Int]
+    | ["projSelect", Str]
+    -- | ["srcSelect", Int]
+    -- | ["bindingSelect", Int]
+    | ["tokenClick", Int]
+    | ["tableCellClick", Str, Int, Int]
+    | ["tabSelect", Str, Str]
+    | ["tabSelect2", Str]
+    | ["choiceChange", Str, Int]
+    };
+
+-- TODO ? send a list of responses ?
+-- TODO responding to a list of requests will require a list of responses
+-- TODO   it might also be sensible for a single request to generate multiple responses, 
+-- TODO   depending on where the responsility lies for decomposing updates which result in multiple UI changes
+let WiResponse =
+    { ["ok", "miscTokens", Str, (List { [Str, Str, Int] })]
+    | ["ok", "src", Str]
+    | ["ok", "proj", Str, Str, Str]   
+    | ["ok", "binding", Str, Str, Str]
+    | ["ok", "textHighlight", Str, Int, Int]
+    | ["ok", "tabSelect", Str, Str, "show" | "hide"]
+    | ["ok", "tabSelect2", Str, "show" | "hide"]
+    | ["ok", "setText", Str, Str]
+    | ["ok", "setElemProp", Str, (List Str), Str]
+    | ["ok", "setTableRows", Str, (List (List Str))]
+    | ["fail",, (List Any)]
+    };
+
+let wiTryCoerceResponse : { Any -> (Maybe WiResponse) } =
+    response ->
+    match response
+    [ ["ok", "src", srcText] |->
+        guardStr srcText <| srcText2 =>
+        yes (["ok", "src", srcText2] : WiResponse)
+    , ["ok", "proj", projText, heapEnv, jsCode] |->
+        guardStr projText <| projText2 ->
+        guardStr heapEnv <| heapEnv2 ->
+        guardStr jsCode <| jsCode2 =>
+        yes (["ok", "proj", projText2, heapEnv2, jsCode2] : WiResponse)
+    , ["ok", "binding", bindingText, heapText, rbJsText] |->
+        guardStr bindingText <| bindingText2 ->
+        guardStr heapText <| heapText2 ->
+        guardStr rbJsText <| rbJsText2 =>
+        yes (["ok", "binding", bindingText2, heapText2, rbJsText2] : WiResponse)
+    , ["ok", "miscTokens", data, tokens] |->
+        guardStr data <| data2 ->
+        -- guardList guardStr tokens <| tokens2 =>
+        guardList (guardPair guardStr (guardPair guardStr (guardPair guardInt guardNil))) tokens <| tokens2 =>
+        -- TODO -- guardTuple [guardStr, guardStr] tokens <| tokens2 =>
+        yes (["ok", "miscTokens", data2, tokens2] : WiResponse)
+    , ["ok", "textHighlight", textId, from, to] |->
+        guardStr textId <| textId2 ->
+        guardInt from <| from2 ->
+        guardInt to <| to2 =>
+        yes ["ok", "textHighlight", textId2, from2, to2]
+    , ["ok", "tabSelect", tabId, buttonId, action] |->
+        guardStr tabId <| tabId ->
+        guardStr buttonId <| buttonId ->
+        -- TODO refine the type of action with a guard
+        -- guardIsElem action ["hide", "show"] <| action =>
+        match action
+        [ "hide" |=>
+            yes <| yes ["ok", "tabSelect", tabId, buttonId, "hide"]
+        , "show" |=>
+            yes <| yes ["ok", "tabSelect", tabId, buttonId, "show"]
+        , _ |=>
+            no
+        ]
+    , ["ok", "tabSelect2", name, action] |->
+        guardStr name <| name ->
+        match action
+        [ "hide" |=>
+            yes <| yes ["ok", "tabSelect2", name, "hide"]
+        , "show" |=>
+            yes <| yes ["ok", "tabSelect2", name, "show"]
+        , _ |=>
+            no
+        ]
+    , ["ok", "setText", name, text] |->
+        guardStr name <| name ->
+        guardStr text <| text =>
+        yes ["ok", "setText", name, text]
+
+    , ["ok", "setElemProp", elemId, path, value] |->
+        guardStr elemId <| elemId ->
+        guardList guardStr path <| path ->
+        guardStr value <| value =>
+        yes ["ok", "setElemProp", elemId, path, value]
+
+    , ["ok", "setTableRows", parentId, childrenHtml] |->
+        guardStr parentId <| parentId2 ->
+        -- guardList (guardList guardHtml) childrenHtml <| childrenHtml2 =>
+        guardList (guardList guardStr) childrenHtml <| childrenHtml2 =>
+        yes ["ok", "setTableRows", parentId2, childrenHtml2]
+
+    , _ |=> 
+        let _ = debug ["wiTryCoerceResponse", "failed", response];
+        no
+    ];
+
+let wiServerCall : { WiRequest -> { (List WiResponse) -> HtmlStep } -> HtmlStep } =
+    request -> k ->
+    serverCall2 request <| rawResponse ->
+    htmlWhile [rawResponse, [] : List WiResponse] (
+        [ [rawResponse ,, rawResponses], wiResponses ] |=>
+        k ->
+        let wiResponseMb = wiTryCoerceResponse rawResponse;
+        match wiResponseMb
+        [ [] |=>
+            printLn ["response coercion failed", rawResponse] <| ->
+            -- just carry on regardless
+            -- k response
+            -- TODO ? 
+            htmlStop ["fail", "response coercion failed", rawResponse]
+        , [wiResponse] |=>
+            k [rawResponses, [wiResponse ,, wiResponses] ]
+        ]
+    ) <| [_, wiResponsesRev] ->
+    let wiResponses = reverse wiResponsesRev;
+    k wiResponses;
+
+
+
+-- -- TODO
+-- -- the "guard" name doesn't fit with the type signatures
+-- let wiRequestGuard : { Any -> (Maybe WiRequest) } = -> error ["TODO"];
+-- let wiResponseGuard : { Any -> (Maybe WiResponse) }  = -> error ["TODO"];
+
+
+
+
+
+let mkTableHtml : { Str -> (List {[Str,Str]}) -> (List (List Str)) -> Html } =
+    id -> columns -> contents ->
+    let gridStyle = 
+        strCat
+        [ "display: grid;"
+        -- , "grid-template-columns: auto 1fr;" -- TODO compute this from the columns
+        , strCat ["grid-template-columns: ", strJoin " " (forMap columns <| [name, width] -> width), ";"] 
+        , "grid-auto-rows: auto;"
+        , "grid-gap: 1px;"
+        -- , "grid-gap: 0.1em;"
+        -- , "background-color: black;"
+        , "border: 1px solid black;"
+        ];
+    let itemStyle = 
+        strCat
+        -- [ "background-color: lightgray;"
+        [ "background-color: white;"
+        , "margin: 0px;"
+        ];
+    -- let id = strAdd "table-" name;
+    [ "div", [["id", id], ["style", gridStyle]]
+    ,,  let [_, contentHtmls : List (List Html)] = 
+            forEach 0 contents <| 
+            rowNum -> elems -> 
+            let rowId = strCat ["row", id, "-", show rowNum];
+            let [_, rowHtmls : List Html] =
+                forEach 0 elems <|
+                colNum -> elem ->
+                -- let elemIdMb = if (colNum == 0) [ -> yes ["id", rowId], -> no];
+                let elemIdMb = yes ["id", strCat ["row", id, "-", show rowNum, "-", show colNum]];
+                let elemHtml : Html = 
+                    [ "p"
+                    , [ ["style", itemStyle]
+                      -- , ["onclick", strCat ["console.log('SRC2', ", show rowNum, ",", show colNum, ",", htmlEscapeCData2 (show elem), ")"]]
+                      -- , ["onclick", strCat ["rowSelected('SRC2', ", show rowNum, ")"]]
+                      , ["onclick", strCat ["rowSelected(", show id, ", ", show rowNum, ")"]]
+                      ,, elemIdMb
+                      ]
+                    , elem
+                    ];
+                [colNum + 1, elemHtml];
+            [rowNum + 1, rowHtmls : List Html];
+        concat contentHtmls
+    ];

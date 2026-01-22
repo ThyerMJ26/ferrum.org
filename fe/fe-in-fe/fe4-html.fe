@@ -1,0 +1,327 @@
+language ferrum/0.1
+
+
+let HtmlTag = { "html" | "body" | "div" | "meta" | "div" | "input" | "li" | "script" | "textarea" | "pre" | "style" | "select" | "option" };
+
+let HtmlAttrs = List {[Str, Str]};
+
+let Html = Rec <| Html -> 
+    { [ HtmlTag, HtmlAttrs ,, (List { Str | Html }) ] };
+
+let htmlSelfClosingTags : (List HtmlTag) =
+    ["meta", "input"];
+
+let htmlVerbatimCDataTags : (List HtmlTag) =
+    ["script"];
+
+let htmlIsSelfClosingTag : { HtmlTag -> Bool } =
+    tag ->
+    -- listExists (t -> t == tag) htmlSelfClosingTags;
+    listAnyTrue htmlSelfClosingTags (t -> t == tag);
+
+let htmlCDataTranslation : List {[Str, Str]} =
+    [ [">", "&gt;"]
+    , ["<", "&lt;"]
+    , ["&", "&amp;"]
+    ];
+
+let htmlEscape : { (List {[Str,Str]}) -> Str -> Str } =
+    table -> x ->
+    let xLen = strLen x;
+    let [_, result] =
+        while [0 : Int, "" : Str] <| 
+        [pos, y] ->
+        if (pos == xLen)
+        [ -> 
+            []
+        , ->
+            let x1 = strCharAt x pos;
+            let x2 =
+                match (lookup x1 table)
+                [ [] |=> x1
+                , [x2] |=> x2
+                ];
+            [ [pos+1, strAdd y x2] ]
+        ];
+    result;
+
+let htmlEscapeCData : { Str -> Str } =
+    htmlEscape htmlCDataTranslation;
+
+let htmlToStr : { Html -> Str } =
+    rec <| (htmlToStr : { Html -> Str }) ->
+    html @ [tag, attrs ,, elems] ->
+    let elemToStr : { { Str | Html } -> Str } =
+        elem -> 
+        ifStr elem 
+        -- [ elem2 -> elem2 -- TODO escape html characters, e.g. (<), (>), etc
+        [ elem2 -> 
+            -- let _ = debug ["VerbatimTag", parentTag, isElem tag htmlVerbatimCDataTags];
+            if (isElem tag htmlVerbatimCDataTags)
+            [ -> elem2
+            , -> htmlEscapeCData elem2
+            ]
+        , elem2 -> htmlToStr elem2 
+        ];
+    let attrToStr : { [Str, Str] -> Str } =
+        [key, val] ->
+        -- strCat [" ", key, "=\"", val, "\""]; -- TODO escape strings correctly, e.g. ("), (\)
+        strCat [" ", key, "=", show2 val]; -- rely on "show" to do the escaping
+    let attrStr = strJoin "" <| map attrToStr attrs;
+    if (htmlIsSelfClosingTag tag)
+    [ ->
+        strCat ["<", tag, attrStr, ">"]
+    , ->
+        let open = strCat ["<", tag, attrStr, ">"];
+        let elemStr = strJoin "\n" <| map elemToStr elems;
+        let close = strCat ["</", tag, ">"];
+        strJoin "\n" [open, elemStr, close]
+    ];
+
+
+let htmlToStr2 : { Html -> Str } =
+    html ->
+    strAdd "<!DOCTYPE html>\n" <| htmlToStr html;
+
+
+-- TODO change Any to Data / DataN / FeDn / DateFe
+
+let HtmlStep = Rec <| Hs ->
+    { [ ["printLn", Any]                                 , []     -> Hs ]
+    | [ ["getElemProperty", Str, (List Str)]             , Any    -> Hs ]
+    | [ ["setElemProperty", Str, (List Str), Any]        , []     -> Hs ]
+    | [ ["fetch", Str, Str, (List {[Str, Str]}), Any]    , Any    -> Hs ]
+    | [ ["serverCall", Any]                              , Any    -> Hs ]
+    | [ ["serverCall2", Data]                            , Data   -> Hs ]
+    | [ ["done", Any] ]
+    };
+
+let printLn : { Any -> { [] -> HtmlStep } -> HtmlStep } =
+     output -> k ->
+    [ ["printLn", output], k];
+
+let getElemProperty : { Str -> (List Str) -> { Any -> HtmlStep } -> HtmlStep } =
+    elemId -> propPath -> k ->
+    [ ["getElemProperty", elemId, propPath], k];
+
+let setElemProperty : { Str -> (List Str) -> Any -> { [] -> HtmlStep } -> HtmlStep } =
+    elemId -> propPath -> value -> k ->
+    [ ["setElemProperty", elemId, propPath, value], k];
+
+let serverCall : { Any -> { Any -> HtmlStep } -> HtmlStep } =
+    reqData -> k ->
+    [ ["serverCall", reqData], k ];
+
+let serverCall2 : { Data -> { Data -> HtmlStep } -> HtmlStep } =
+    reqData -> k ->
+    [ ["serverCall2", reqData], k ];
+
+let htmlStop : { Any -> HtmlStep } =
+    value ->
+    [ ["done", value] ];
+
+-- let htmlWhile = stepWhile HtmlStep;
+
+let htmlTryInt : { Any -> { [] -> HtmlStep } -> { Int -> HtmlStep } -> HtmlStep } =
+    a -> kFail -> kOkay ->
+    ifInt a 
+    [ a2 -> kOkay a2
+    , _ -> kFail [] -- TODO ? add diagnostic info in call ?
+    ];
+
+
+
+
+let htmlRuntime2 : { -> Html } = 
+    ->
+    ["script", [],
+      strJoin "\n"
+      [ js_runtime_text
+      , strCat ["let js_runtime_text = ", show js_runtime_text, ";"]
+      , "let rt = exports;"
+      , "let _ = rt.primitives;"
+      ,
+       """
+        // let v_printLn = line => k => [["printLn", line], k];
+        // let v_getElemValue = id => k => [["getElemValue", id], k];
+        // let v_setElemValue = id => val => k => [ ["setElemValue", id, val], k];
+        // let v_getElemProperty = id => path => k => [["getElemProperty", id, path], k];
+        // let v_setElemProperty = id => path => val => k => [ ["setElemProperty", id, path, val], k];
+        // let v_fetch = method => url => headers => body => k => [ ["fetch", method, url, headers, body], k];
+        // // let v_serverCall = arg => k => [ ["serverCall", arg], k];
+        // let v_serverCall = arg => k => [ ["serverCall", _.show(arg)], k];
+        // let v_getData = resp => k => [ ["getData", resp], k];
+
+        let dataJsToFe = data => {
+            if (data instanceof Array) {
+                let result = null
+                let data2 = [...data].reverse()
+                data2.forEach(datumJs => {
+                    let datumFe = dataJsToFe(datumJs)
+                    result = [datumFe, result]
+                })
+                return result
+            }
+            else {
+                return data
+            }
+        }
+        let dataFeToJs = data => {
+            if (data === null) {
+                return []
+            }
+            else if (data instanceof Array) {
+                let result = []
+                while (data instanceof Array) {
+                    let datumJs = dataFeToJs(data[0])
+                    result.push(datumJs)
+                    data = data[1]
+                }
+                if (data !== null) {
+                    throw new Error("expected null at the end of a list")
+                }
+                return result
+            }
+            else {
+                return data
+            }
+        }
+
+        let htmlDo = func => htmlDo2 (func (() => null))
+
+        let htmlDo2 = action => {
+            if (action === null) {
+                return
+            }
+            let [req, respK] = action
+            switch (req[0]) {
+                case "printLn": {
+                    console.log(req[1]);
+                    queueMicrotask (() => {
+                        htmlDo2(respK(null))
+                    })
+                    return
+                }
+                // case "getElemValue": {
+                //     let value = document.getElementById(req[1]).value
+                //     queueMicrotask (() => {
+                //         htmlDo2(respK(value))
+                //     })
+                //     return
+                // }
+                // case "setElemValue": {
+                //     document.getElementById(req[1]).value = req[2]
+                //     queueMicrotask (() => {
+                //         htmlDo2(respK(null))
+                //     })
+                //     return
+                // }
+                case "getElemProperty": {
+                    let elemId = req[1]
+                    let path = dataFeToJs(req[2])
+                    let obj = document.getElementById(elemId)
+                    while (path.length > 1) {
+                        obj = obj[path[0]]
+                        path.shift()
+                    }
+                    let value = obj[path[0]]
+                    let value2 = dataJsToFe(value)
+                    queueMicrotask (() => {
+                        htmlDo2(respK(value2))
+                    })
+                    return
+                }
+                case "setElemProperty": {
+                    let elemId = req[1]
+                    let path = dataFeToJs(req[2])
+                    let value = dataFeToJs(req[3])
+                    let obj = document.getElementById(elemId)
+                    while (path.length > 1) {
+                        obj = obj[path[0]]
+                        path.shift()
+                    }
+                    obj[path[0]] = value
+                    queueMicrotask (() => {
+                        htmlDo2(respK(null))
+                    })
+                    return
+                }
+                case "fetch": {
+                    let method = req[1]
+                    let url = req[2]
+                    let headers = {"Content-Type" : "application/json"}
+                    // let headers = dataFeToJsObj (req[3]) // TODO
+                    // let body = dataFeToJs (req[4])
+                    let body = req[4]
+                    fetch(url, { method: method, headers: headers, body: body }).then(httpResp => {
+                        httpResp.json().then(respDataJs => {
+                            let respDataFe = dataJsToFe(respDataJs)
+                            htmlDo2(respK(respDataFe))
+                        })
+                    })
+                    return
+                }
+                case "serverCall":
+                case "serverCall2": {
+                    let method = "POST";
+                    let url = window.location.href;
+                    let headers = {"Content-Type" : "application/json"}
+                    let body = req[1]
+                    fetch(url, { method: method, headers: headers, body: body }).then(httpResp => {
+                        httpResp.json().then(respDataJs => {
+                            let respDataFe = dataJsToFe(respDataJs)
+                            htmlDo2(respK(respDataFe))
+                        })
+                    })
+                    return
+                }
+                case "getData": {
+                }
+                default: {
+                    console.log("Unknown HTML Action Request", req[0])
+                    return
+                }
+            }
+        }
+       """
+      ]
+    ];
+
+
+-- generate code suitable for direct reference from Html (eg. in onclick)
+let htmlCodegen : { Str -> (List Str) -> Str -> Html } =
+    funcName -> argNames -> src ->
+    let expr = parseExpr <| scan src;
+    let exprStr = dtShowJoin  <| displayExpr expr;
+    let exprJs = dtShowJoin (jsDisplayExpr (cgExprJs expr));
+    let bodyJs = cgExprJs expr;
+    let bodyJs2 = jsCall (jsVar "htmlDo") [bodyJs];
+    let funcJs = jsLambdaExpr (map ((v: Str) -> jsVar (strAdd "v_" v)) argNames) bodyJs2;
+    let defnJs = jsLet (jsVar funcName) funcJs;
+    -- let defnJs = jsLet (jsVar (strCat ["v_", funcName])) funcJs;
+    let defnJsStr = dtShowJoin <| jsDisplayStmt defnJs;
+    ["script", [], defnJsStr];
+
+-- generate code suitable for use by other generated code (assume htmlDo has already been called further up the stack)
+let htmlCodegen2 : { Str -> (List Str) -> Str -> Html } =
+    funcName -> argNames -> src ->
+    let expr = parseExpr <| scan src;
+    let exprStr = dtShowJoin  <| displayExpr expr;
+    let exprJs = dtShowJoin (jsDisplayExpr (cgExprJs expr));
+    let bodyJs = cgExprJs expr;
+    let funcJs = jsLambdaExpr (map ((v: Str) -> jsVar (strAdd "v_" v)) argNames) bodyJs;
+    let defnJs = jsLet (jsVar (strCat ["v_", funcName])) funcJs;
+    let defnJsStr = dtShowJoin <| jsDisplayStmt defnJs;
+    ["script", [], defnJsStr];
+
+
+
+let htmlCodegenDecls : { Str -> Str -> Html } =
+    filename -> src ->
+    -- let _ = debug ["htmlCodegenDecls", src];
+    let decls = parseDecls <| scanFile filename src;
+    -- let declsJsStr = dtShowJoin (jsDisplayStmt (cgDeclsJs cgExprJs decls));
+    let declsJsStr = strJoin "\n" <| for (cgDeclsJs cgExprJs decls) <| jsDecl -> dtShowJoin (jsDisplayStmt jsDecl);
+    ["script", [], declsJsStr];
+
+

@@ -1,0 +1,133 @@
+language ferrum/0.1
+
+-- let WebApp = { A @ [Void, IoId] -> { [(Hd A)] -> Io } -> Io };
+
+-- let WebApp = { W @ Any -> IoId -> { W -> Io } -> Io };
+
+-- let WebApp2State = List {[Str, Str]};
+-- let webApp2 : { WebApp2State -> IoId -> { WebApp2State -> Io } -> Io } =
+--     state -> request -> k ->
+--     io2HttpReqMethod request <| [method] ->
+--     io2HttpReqUrlPathnamne request <| pathname ->
+--     io2HttpReqUrlQueryParams request <| queryParams ->
+--     match method
+--     [ "GET" |=>
+--         let response1 = show [pathname, queryParams];
+--         let response = htmlToStr2 
+--             ["html", []
+--             , ["meta", [["charset","utf-8"]]]
+--             , ["body", []
+--               -- , ["script", [], strJoin "\n" [webApp1GetSrc, webApp1SetSrc]]
+--               , ["li", []], "Key", ["input", [["id", "key"], ["type", "text"]]]
+--               , ["li", []], "Val", ["input", [["id", "val"], ["type", "text"]]]
+--               , ["li", []], "Resp", ["input", [["id", "resp"], ["type", "text"]]]
+--               , ["li", []], ["input", [["type", "submit"], ["value", "Get"], ["onclick", "get()"]]]
+--               , ["li", []], ["input", [["type", "submit"], ["value", "Set"], ["onclick", "set()"]]]
+--               , ["li", []], response1
+--               , ["div", [], "1 2 3 < 4 5 6 > 7 8 9 & 10"]
+--               , htmlRuntime2
+--               -- , testCodeSrcFe []
+--               , webApp1GetSrcFe []
+--               , webApp1SetSrcFe []
+--               ]
+--             ];
+--         io2HttpRespond request [["content-type", "text/html"]] response <| ->
+--         k state
+--     , "POST" |=>
+--         -- let response = "[1,2,3]";
+--         let _ = debug ["State", state];
+--         io2HttpReqData request <| [data] ->
+--         let [response, state2] = 
+--             match data
+--             [ ["get", keyAny] |->
+--                 guardStr keyAny <| key =>
+--                 match (listKvGet state key)
+--                 [ [] |=>
+--                     [["fail"], state]
+--                 , [val] |=>
+--                     [ ["ok", val], state ]
+--                 ]
+--             , ["set", keyAny, valAny] |->
+--                 guardStr keyAny <| key ->
+--                 guardStr valAny <| val =>
+--                 let state2 = listKvSet state key val;
+--                 [ ["ok"], state2 ]
+--             , _ |=>
+--                 [ ["fail"], state]
+--             ];
+--         io2HttpRespond request [["content-type", "application/json"]] (show2 response) <| ->
+--         k state2
+--     , _ |=> 
+--         error ["unknown/unhandled http request method", method]
+--     ];
+
+
+-- let runWebApp : { W @ Any -> { W -> IoId -> { W -> Io } -> Io } -> Io } = 
+--     (initState : W @ Any) ->
+--     (webApp : { W -> IoId -> { W -> Io } -> Io }) -> 
+--     io2Listen "127.0.0.1" 8000 <| [listener, port] ->
+--     io2Loop2B ( (state0 : W) ->
+--         (breakK : { W -> Io }) -> continueK ->
+--         io2Accept listener <| [socket] ->
+--         io2HttpServe socket <| [connection] ->
+--         io2Loop2B ( (state : W) ->
+--             (kBreak : { W -> Io }) -> kContinue ->
+--             io2HttpNext connection <| [requestMb] ->
+--             match requestMb
+--             [ [] |=>
+--                 kBreak state
+--             , [request] |=>
+--                 webApp state request <| (state2: W) ->
+--                 kContinue state2
+--             ]
+--         ) state0 <| state3 ->
+--         continueK state3
+--     ) initState <| _ ->
+--     io2Exit 0;
+
+-- let runWebApp_webApp2 : Io = runWebApp ([]:WebApp2State) webApp2;
+
+-- -- run a web-app with persistence
+-- let runWebApp2_deno : { W @ Any -> { W -> IoId -> { W -> Io } -> Io } -> { W -> { [] -> Io } -> Io } -> Io } = 
+--     (initState : W @ Any) ->
+--     (webApp : { W -> IoId -> { W -> Io } -> Io }) -> 
+--     (persist : { W -> { [] -> Io } -> Io }) ->
+--     io2Listen "127.0.0.1" 8000 <| [listener, port] ->
+--     io2Loop2B ( (state0 : W) ->
+--         (breakK : { W -> Io }) -> continueK ->
+--         io2Accept listener <| [socket] ->
+--         io2HttpServe socket <| [connection] ->
+--         io2Loop2B ( (state : W) ->
+--             (kBreak : { W -> Io }) -> kContinue ->
+--             io2HttpNext connection <| [requestMb] ->
+--             match requestMb
+--             [ [] |=>
+--                 kBreak state
+--             , [request] |=>
+--                 webApp state request <| (state2: W) ->
+--                 persist state2 <| ->
+--                 kContinue state2
+--             ]
+--         ) state0 <| state3 ->
+--         continueK state3
+--     ) initState <| _ ->
+--     io2Exit 0;
+
+
+let runWebApp2_nodejs : { W @ Any -> { W -> IoId -> { W -> Io } -> Io } -> { W -> { [] -> Io } -> Io } -> Io } = 
+    (initState : W @ Any) ->
+    (webApp : { W -> IoId -> { W -> Io } -> Io }) -> 
+    (persist : { W -> { [] -> Io } -> Io }) ->
+    ioHttpServerCreate <| [server] ->
+    ioHttpServerListen server "127.0.0.1" 8000 <| ->
+    io2Loop2B ( (state : W) ->
+        (kBreak : { W -> Io }) -> kContinue ->
+        ioHttpServerRecvRequest server <| [request] ->
+        webApp state request <| (state2 : W) ->
+        persist state2 <| ->
+        kContinue state2
+    ) initState <| _ ->
+    io2Exit 0;
+
+let runWebApp2 = runWebApp2_nodejs;
+

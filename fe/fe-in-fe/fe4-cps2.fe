@@ -1,0 +1,515 @@
+language ferrum/0.1
+
+-- - CPS  - Continuation Passing Style
+-- - CPRS - Continuation Passing and Returning Style
+
+let CPS : { Type -> Type -> Type } =
+    Arg -> State -> 
+    { K @ { Arg -> State -> Any } -> State -> K Arg State };
+
+let CpsK : { Type -> Type -> Type } =
+    State -> Arg -> 
+    { Arg -> State -> Any };
+
+let CpsA : { Type -> Type -> Type } =
+    State -> Arg -> 
+    { K @ (CpsK State Arg) -> State -> K Arg State };
+
+
+-- TODO ? eta-contracted version ?
+-- let CPS2 : { Type -> Type } =
+--     Arg ->
+--     { K @ { Arg -> Any } -> K Arg };
+
+let cpsWhile : 
+    {  { State : Type }
+    -> A @ Any
+    -> { A -> (Maybe (CPS A State)) }
+    -> (CPS A State)
+    } =
+    (State : Type) -> 
+    (initVal : A @ Any) -> 
+    (body : { A -> (Maybe { K @ { A -> State -> Any } -> State -> K A State }) }) -> 
+    (k : K @ { A -> State -> Any }) -> 
+    (initState : State) ->
+    let [finalVal, finalState] =
+        loop2 [initVal, initState] <| 
+        [val, state] ->
+        -- let _ = debug ["cpsWhile", val, state];
+        match (body val)
+        [ [] |=>
+            break [val, state]
+        , [iter] |=>
+            continue <| iter (val2 -> state2 -> [val2, state2]) state
+        ];
+    k finalVal finalState;
+
+let cpsLoop1 : 
+    {  { State : Type } 
+    -> LB @ { Void -> KB @ { Any -> State -> Any } -> KC @ { (Domain LB) -> State -> Any } -> State -> { { KB (Domain KB) State } | { KC (Domain LB) State } } }
+    -> (Domain LB)
+    -> (CPS (Domain (Domain (Codomain LB))) State)
+    } = 
+    (State : Type) ->
+    (body : LB @ { Void -> KB @ { Any -> State -> Any } -> KC @ { (Domain LB) -> State -> Any } -> State -> { { KB (Domain KB) State } | { KC (Domain LB) State } } }) ->
+    (a : (Domain LB)) ->
+    (k : K @ { (Domain (Domain (Codomain LB))) -> State -> Any }) ->
+    (state0 : State) ->
+
+    let kBreak = (breakVal : { (Domain (Domain { LB (Domain LB) })) }) -> (state : State) -> ["break", [breakVal, state]];
+    let kContinue = (continueVal : Domain LB) -> (state : State) -> ["continue", [continueVal, state]];
+
+    let [breakVal, finalState] =
+        loop2 [a : Domain LB, state0 : State] <|
+        [val : Domain LB, state2 : State] ->
+        body val kBreak kContinue state2;
+
+    k breakVal finalState;
+
+
+let cpsLoop2 : 
+    {  { State : Type } 
+    -> LA @ Any 
+    -> LB @ { LA -> KB @ { Any -> State -> Any } -> KC @ { LA -> State -> Any } -> State -> { { KB (Domain (Domain { LB LA })) State } | { KC LA State } } }
+    -> (CPS (Domain (Domain { LB LA })) State)
+    } = 
+    (State : Type) ->
+    (a : LA @ Any) ->
+    (body : LB @ { LA -> KB @ { Any -> State -> Any } -> KC @ { LA -> State -> Any } -> State -> { { KB (Domain (Domain { LB LA })) State } | { KC LA State } } }) ->
+    (k : K @ { (Domain (Domain { LB LA })) -> State -> Any }) ->
+    (state0 : State) ->
+
+    let kBreak = (breakVal : { (Domain (Domain { LB LA })) }) -> (state : State) -> ["break", [breakVal, state]];
+    let kContinue = (continueVal : LA) -> (state : State) -> ["continue", [continueVal, state]];
+
+    let [breakVal, finalState] =
+        loop2 [a : LA, state0 : State] <|
+        [val : LA, state2 : State] ->
+        body val kBreak kContinue state2;
+
+    k breakVal finalState;
+
+
+let cpsMap : 
+    {  { State : Type } 
+    -> F @ { Void -> K @ { Any -> State -> Any } -> State -> K (Domain K) State } 
+    -> (List (Domain F)) 
+    -> (CPS (List (Domain (Domain (Codomain F)))) State)
+    } =
+    ( State : Type ) ->
+    (f : F @ { Void -> K @ { Any -> State -> Any } -> State -> K (Domain K) State }) -> 
+    (elems : List (Domain F)) ->
+    (k : K @ { (List (Domain (Domain (Codomain F)))) -> State -> Any }) ->
+    cpsWhile State [elems : List (Domain F), [] : List (Domain (Domain (Codomain F)))] (
+        [[e1 ,, elems2], ys] |=>
+        (k1 : K @ { [(List (Domain F)), (List (Domain (Domain (Codomain F))))] -> State -> Any }) ->
+        f e1 <| y1 ->
+        k1 [elems2, [y1 ,, ys]]
+    ) <| [_, result] ->
+    k (reverse result);
+
+
+let cpsForMap : 
+    {  { State : Type }
+    -> A @ (List Any)
+    -> B @ { (Elem A) -> K @ { Any -> State -> Any } -> State -> K (List (Domain K)) State }
+    -> (CPS (List (Domain (Domain (Codomain B)))) State)
+    } =
+    (State : Type) ->
+    (elems : A @ List Any) ->
+    (body : B @ { (Elem A) -> K @ { Any -> State -> Any } -> State -> K (List (Domain K)) State }) ->
+    (k : K @ { (List (Domain (Domain (Codomain B)))) -> State -> Any }) ->
+    cpsWhile State [elems : List (Elem A), [] : List (Domain (Domain (Codomain B)))] (
+        [[e1 ,, elems2], ys] |=>
+        (k1 : K @ { [(List (Elem A)), (List (Domain (Domain (Codomain B))))] -> State -> Any }) ->
+        body e1 <| y1 ->
+        k1 [elems2, [y1 ,, ys]]
+    ) <| [_, result] ->
+    k (reverse result);
+
+-- TODO cpsForEach
+
+-- let cpsSkip :
+--     {  { State : Type }
+--     -> (CPS Nil State)
+--     } = 
+--     (State : Type) ->
+--     (k : K @ { Nil -> State -> Any }) ->
+--     (state : State) ->
+--     k [] state;
+
+
+
+let CpsMbK : { Type -> Type -> Type } =
+    State -> Arg -> 
+    { [ Arg -> State -> Any, [] -> State -> Any] };
+
+-- TODO ? there's no real need for the false/failure/no case to take a nil/unit/no argument
+-- TODO ? so change the definition to this ?
+-- let CpsMbK : { Type -> Type -> Type } =
+--     State -> Arg -> 
+--     { [ Arg -> State -> Any, State -> Any] };
+-- this would be more consistent with the maybe/yes/no types+constructors
+
+let CpsMbA : { Type -> Type -> Type } =
+    State -> Arg -> 
+    { K @ (CpsMbK State Arg) -> State -> (Hd K) (Domain (Hd K)) State | (Hd (Tl K)) Nil State };
+    -- { K @ (CpsMbK State Arg) -> State -> { K ^- 0 } (Domain (Hd K)) State | { K ^- 1 } Nil State };
+    -- { K @ (CpsMbK State Arg) -> State -> K.0 (Domain (Hd K)) State | K.1 Nil State };
+
+
+let cpsMatchOk : { { State : Type } -> A @ Any -> (CpsMbA State A) } =
+    (State : Type) ->
+    (a : A @ Any) ->
+    ([kT, kF] : K @ CpsMbK State A) ->
+    (state : State) ->
+    kT a state;
+
+let cpsMatchFail : { { State : Type } -> (CpsMbA State Void) } =
+    (State : Type) ->
+    ([kT, kF] : K @ CpsMbK State Void) ->
+    (state : State) ->
+    kF [] state;
+
+let cpsMatchGuard : 
+    {  { State : Type } 
+    -> A @ (CpsA State Any)
+    -> F @ { (Domain (Domain A)) -> (Maybe (CpsMbA State Any)) } 
+    -> (CpsMbA State (Domain (Hd (Domain (Hd { F (Domain (Domain A)) })))))
+    } =
+    (State : Type) ->
+    (a : A @ (CpsA State Any)) ->
+    (f : F @ { (Domain (Domain A)) -> (Maybe (CpsMbA State Any)) }) ->
+    (k : K @ CpsMbK State (Domain (Hd (Domain (Hd { F (Domain (Domain A)) }))))) ->
+    let [kT, kF] = k;
+    a <| b ->
+    match (f b)
+    [ [c] |=>
+        c k
+    , [] |=>
+        kF []
+    ];
+
+
+let cpsMatch : 
+     {  { State : Type } 
+     -> A @ Any
+     -> C @ (List { A -> (Maybe (CpsMbA State Any)) })
+     -> (CpsA State (Domain (Hd (Domain (Hd (Codomain (Elem C)))))))
+     } =
+     (State : Type) ->
+     (a : A @ Any) ->
+     (conds : C @ (List { A -> (Maybe (CpsMbA State Any)) })) ->
+     (k : K @ CpsK State (Domain (Hd (Domain (Hd (Codomain (Elem C))))))) ->
+     let conds0 : List (Elem C) = conds;
+     let resultMb0 : Maybe (Domain (Hd (Domain (Hd (Codomain (Elem C)))))) = [];
+     cpsWhile State [conds0, resultMb0] (
+         [[c ,, cc], []] |=>
+         (k1 : K @ CpsK State { [(List (Elem C)), (Maybe (Domain (Hd (Domain (Hd (Codomain (Elem C)))))))] }) ->
+         let kT = (result : (Domain (Hd (Domain (Hd (Codomain (Elem C))))))) -> k1 [ [], [result] ];
+         let kF = [] -> k1 [ cc, [] ];
+         match (c a)
+         [ [action] |=>
+             action [kT, kF]
+         , [] |=>
+            kF []
+         ]
+     ) <| cr @ [conds2, resultMb2] ->
+     match cr 
+     [ [ _, [result2] ] |=>
+         k result2
+     , [ [], [] ] |=>
+         error ["cpsMatch", "exhausted all conditions, but nothing succeeded"]
+     , [ [c ,, cc], [] ] |=>
+         error ["cpsMatch", "impossible"]
+     ];
+
+
+-- let cpsFunc1 : { { Step : Type } -> A @ Any -> A } =
+--     (Step : Type) -> (a : A @ Any) -> a;
+
+-- let cpsFunc1 : 
+--     {  { Step : Type } 
+--     -> F @ { Void -> Any } 
+--     -> X @ (Domain F)
+--     -> F X
+--     } =
+--     (Step : Type) -> 
+--     (f : F @ { Void -> Any }) -> 
+--     (x : X @ Domain F) ->
+--     f x;
+
+-- let cpsFunc1 : 
+--     {  { Step : Type } 
+--     -> F @ { Void -> Any } 
+--     -> X1 @ (Domain F)
+--     -> X2 @ (Domain { F (Domain F) })
+--     -> F X1 X2
+--     } =
+--     (Step : Type) -> 
+--     (f : F @ { Void -> Any }) -> 
+--     (x1 : X1 @ Domain F) ->
+--     (x2 : X2 @ Domain { F (Domain F) }) ->
+--     f x1 x2;
+
+-- let cpsFunc1 : 
+--     {  { State : Type } 
+--     -> F @ { Void -> (CpsA State Any) }
+--     -> X1 @ (Domain F)
+--     -> X2 @ (Domain { F X1 })
+--     -> State
+--     -> F X1 X2 State
+--     } =
+--     (State : Type) -> 
+--     (f : F @ { Void -> (CpsA State Any) } ) -> 
+--     (x1 : X1 @ Domain F) ->
+--     (x2 : X2 @ Domain { F X1 }) ->
+--     (state : State) ->
+--     f x1 x2 state;
+
+
+-- let cpsFunc1 : 
+--     {  { State : Type } 
+--     -> F @ { Void -> (CpsA State Any) }
+--     -> A @ (Domain F)
+--     -> K @ (Domain { F A })
+--     -> State
+--     -> F A K State
+--     -- -> K (Domain K) State
+--     } =
+--     (State : Type) ->
+--     (func : F @ { Void -> (CpsA State Any) }) ->
+--     (a : A @ Domain F) ->
+--     (k : K @ Domain { F A }) ->
+--     (state0 : State) ->
+--     func a k state0;
+--     -- let [state1, retVal] = func a (retVal -> state -> [state, retVal]) state0;
+--     -- k retVal state1;
+
+-- let cpsFunc1 : 
+--     {  { State : Type } 
+--     -> F @ { Void -> (CpsA State Any) }
+--     -> (Domain F)
+--     -> (CpsA State (Domain (Domain (Codomain F))))
+--     } =
+--     (State : Type) ->
+--     (func : F @ { Void -> (CpsA State Any) }) ->
+--     (a : Domain F) ->
+--     (k : K @ (CpsK State (Domain (Domain (Codomain F))))) ->
+--     (state0 : State) ->
+--     let [state1, retVal] = func a (retVal -> state -> [state, retVal]) state0;
+--     k retVal state1;
+
+-- let cpsFunc1 : 
+--     {  { State : Type } 
+--     -> F @ { Void -> (CpsA State Any) }
+--     -> A @ (Domain F)
+--     -> (CpsA State (Domain (Domain { F A })))
+--     } =
+--     (State : Type) ->
+--     (func : F @ { Void -> (CpsA State Any) }) ->
+--     (a : A @ Domain F) ->
+--     (k : K @ (CpsK State (Domain (Domain { F A })))) ->
+--     (state0 : State) ->
+--     -- func a k state0;
+--     let [state1, retVal] = func a (retVal -> state -> [state, retVal]) state0;
+--     k retVal state1;
+
+-- let cpsFunc1 : 
+--     {  { State : Type } 
+--     -> F @ { Void -> (CpsA State Any) }
+--     -> (Domain F)
+--     -> (CpsA State (Domain (Domain (Codomain F))))
+--     } =
+--     (State : Type) ->
+--     (func : F @ { Void -> (CpsA State Any) }) ->
+--     (a : Domain F) ->
+--     (k : K @ CpsK State (Domain (Domain (Codomain F)))) ->
+--     (state0 : State) ->
+--     let [state1, retVal] = func a (retVal -> state -> [state, retVal]) state0;
+--     k retVal state1;
+
+
+
+-- these "cpsFunc*" functions are used to make cps functions clear their additions to the stack before returning,
+-- a local trampoline, just as the cpsWhile function does.
+-- this makes the stack behave in a conventional way, and should make it easier to generate conventional code.
+let cpsFunc1 : 
+    {  { State : Type } 
+    -> F @ { Void -> (CpsA State Any) }
+    -> A @ (Domain F)
+    -> (CpsA State (Domain (Domain { F A })))
+    } =
+    (State : Type) ->
+    (func : F @ { Void -> (CpsA State Any) }) ->
+    (a : A @ Domain F) ->
+    (k : K @ (CpsK State (Domain (Domain { F A })))) ->
+    (state0 : State) ->
+    let [state1, retVal] = func a (retVal -> state -> [state, retVal]) state0;
+    k retVal state1;
+
+
+-- -- This looks correct, and looks much like the working single-argument polytype version of cpsFunc1 above.
+-- -- But it causes the type-checking system to seemingly loop forever (> 1 hour, with maxExpansions=20000, it fails quicly at maxExpansions=8000, but not at maxExpansions=9000)
+-- -- fortunately, we probably don't need this to handle polytype arguments at present, so the following version can be used instead.
+-- let cpsFunc2 : 
+--     {  { State : Type } 
+--     -> F @ { Void -> Void -> (CpsA State Any) }
+--     -> A @ (Domain F)
+--     -> B @ (Domain { F A })
+--     -> (CpsA State (Domain (Domain { F A B })))
+--     } =
+--     (State : Type) ->
+--     (func : F @ { Void -> Void -> (CpsA State Any) }) ->
+--     (a : A @ Domain F) ->
+--     (b : B @ Domain { F A }) ->
+--     (k : K @ (CpsK State (Domain (Domain { F A B })))) ->
+--     (state0 : State) ->
+--     let [state1, retVal] = func a b (retVal -> state -> [state, retVal]) state0;
+--     k retVal state1;
+
+let cpsFunc2 : 
+    {  { State : Type } 
+    -> F @ { Void -> Void -> (CpsA State Any) }
+    -> (Domain F)
+    -> (Domain (Codomain F))
+    -> (CpsA State (Domain (Domain (Codomain (Codomain F)))))
+    } =
+    (State : Type) ->
+    (func : F @ { Void -> Void -> (CpsA State Any) }) ->
+    (a : Domain F) ->
+    (b : Domain (Codomain F)) ->
+    (k : K @ (CpsK State (Domain (Domain (Codomain (Codomain F)))))) ->
+    (state0 : State) ->
+    let [state1, retVal] = func a b (retVal -> state -> [state, retVal]) state0;
+    k retVal state1;
+
+let cpsFunc3 : 
+    {  { State : Type } 
+    -> F @ { Void -> Void -> Void -> (CpsA State Any) }
+    -> (Domain F)
+    -> (Domain (Codomain F))
+    -> (Domain (Codomain (Codomain F)))
+    -> (CpsA State (Domain (Domain (Codomain (Codomain (Codomain F))))))
+    } =
+    (State : Type) ->
+    (func : F @ { Void -> Void -> Void -> (CpsA State Any) }) ->
+    (a : Domain F) ->
+    (b : Domain (Codomain F)) ->
+    (c : Domain (Codomain (Codomain F))) ->
+    (k : K @ (CpsK State (Domain (Domain (Codomain (Codomain (Codomain F))))))) ->
+    (state0 : State) ->
+    let [state1, retVal] = func a b c (retVal -> state -> [state, retVal]) state0;
+    k retVal state1;
+
+let cpsFunc4 : 
+    {  { State : Type } 
+    -> F @ { Void -> Void -> Void -> Void -> (CpsA State Any) }
+    -> (Domain F)
+    -> (Domain (Codomain F))
+    -> (Domain (Codomain (Codomain F)))
+    -> (Domain (Codomain (Codomain (Codomain F))))
+    -> (CpsA State (Domain (Domain (Codomain (Codomain (Codomain (Codomain F)))))))
+    } =
+    (State : Type) ->
+    (func : F @ { Void -> Void -> Void -> Void -> (CpsA State Any) }) ->
+    (a : Domain F) ->
+    (b : Domain (Codomain F)) ->
+    (c : Domain (Codomain (Codomain F))) ->
+    (d : Domain (Codomain (Codomain (Codomain F)))) ->
+    (k : K @ (CpsK State (Domain (Domain (Codomain (Codomain (Codomain (Codomain F)))))))) ->
+    (state0 : State) ->
+    let [state1, retVal] = func a b c d (retVal -> state -> [state, retVal]) state0;
+    k retVal state1;
+
+let cpsFunc5 : 
+    {  { State : Type } 
+    -> F @ { Void -> Void -> Void -> Void -> Void -> (CpsA State Any) }
+    -> (Domain F)
+    -> (Domain (Codomain F))
+    -> (Domain (Codomain (Codomain F)))
+    -> (Domain (Codomain (Codomain (Codomain F))))
+    -> (Domain (Codomain (Codomain (Codomain (Codomain F)))))
+    -> (CpsA State (Domain (Domain (Codomain (Codomain (Codomain (Codomain (Codomain F))))))))
+    } =
+    (State : Type) ->
+    (func : F @ { Void -> Void -> Void -> Void -> Void -> (CpsA State Any) }) ->
+    (a : Domain F) ->
+    (b : Domain (Codomain F)) ->
+    (c : Domain (Codomain (Codomain F))) ->
+    (d : Domain (Codomain (Codomain (Codomain F)))) ->
+    (e : Domain (Codomain (Codomain (Codomain (Codomain F))))) ->
+    (k : K @ (CpsK State (Domain (Domain (Codomain (Codomain (Codomain (Codomain (Codomain F))))))))) ->
+    (state0 : State) ->
+    let [state1, retVal] = func a b c d e (retVal -> state -> [state, retVal]) state0;
+    k retVal state1;
+
+let cpsFunc6 : 
+    {  { State : Type } 
+    -> F @ { Void -> Void -> Void -> Void -> Void -> Void -> (CpsA State Any) }
+    -> (Domain F)
+    -> (Domain (Codomain F))
+    -> (Domain (Codomain (Codomain F)))
+    -> (Domain (Codomain (Codomain (Codomain F))))
+    -> (Domain (Codomain (Codomain (Codomain (Codomain F)))))
+    -> (Domain (Codomain (Codomain (Codomain (Codomain (Codomain F))))))
+    -> (CpsA State (Domain (Domain (Codomain (Codomain (Codomain (Codomain (Codomain (Codomain F)))))))))
+    } =
+    (State : Type) ->
+    (func : F @ { Void -> Void -> Void -> Void -> Void -> Void -> (CpsA State Any) }) ->
+    (a : Domain F) ->
+    (b : Domain (Codomain F)) ->
+    (c : Domain (Codomain (Codomain F))) ->
+    (d : Domain (Codomain (Codomain (Codomain F)))) ->
+    (e : Domain (Codomain (Codomain (Codomain (Codomain F))))) ->
+    (f : Domain (Codomain (Codomain (Codomain (Codomain (Codomain F)))))) ->
+    (k : K @ (CpsK State (Domain (Domain (Codomain (Codomain (Codomain (Codomain (Codomain (Codomain F)))))))))) ->
+    (state0 : State) ->
+    let [state1, retVal] = func a b c d e f (retVal -> state -> [state, retVal]) state0;
+    k retVal state1;
+
+let cpsFunc7 : 
+    {  { State : Type } 
+    -> F @ { Void -> Void -> Void -> Void -> Void -> Void -> Void -> (CpsA State Any) }
+    -> (Domain F)
+    -> (Domain (Codomain F))
+    -> (Domain (Codomain (Codomain F)))
+    -> (Domain (Codomain (Codomain (Codomain F))))
+    -> (Domain (Codomain (Codomain (Codomain (Codomain F)))))
+    -> (Domain (Codomain (Codomain (Codomain (Codomain (Codomain F))))))
+    -> (Domain (Codomain (Codomain (Codomain (Codomain (Codomain (Codomain F)))))))
+    -> (CpsA State (Domain (Domain (Codomain (Codomain (Codomain (Codomain (Codomain (Codomain (Codomain F))))))))))
+    } =
+    (State : Type) ->
+    (func : F @ { Void -> Void -> Void -> Void -> Void -> Void -> Void -> (CpsA State Any) }) ->
+    (a : Domain F) ->
+    (b : Domain (Codomain F)) ->
+    (c : Domain (Codomain (Codomain F))) ->
+    (d : Domain (Codomain (Codomain (Codomain F)))) ->
+    (e : Domain (Codomain (Codomain (Codomain (Codomain F))))) ->
+    (f : Domain (Codomain (Codomain (Codomain (Codomain (Codomain F)))))) ->
+    (g : Domain (Codomain (Codomain (Codomain (Codomain (Codomain (Codomain F))))))) ->
+    (k : K @ (CpsK State (Domain (Domain (Codomain (Codomain (Codomain (Codomain (Codomain (Codomain (Codomain F))))))))))) ->
+    (state0 : State) ->
+    let [state1, retVal] = func a b c d e f g (retVal -> state -> [state, retVal]) state0;
+    k retVal state1;
+
+let cpsFunc0 : 
+    {  { State : Type } 
+    -> F @ (CpsA State Any)
+    -> (CpsA State (Domain (Domain F)))
+    } =
+    (State : Type) ->
+    (func : F @ (CpsA State Any)) ->
+    (k : K @ (CpsK State (Domain (Domain F)))) ->
+    (state0 : State) ->
+    let [state1, retVal] = func (retVal -> state -> [state, retVal]) state0;
+    k retVal state1;
+
+-- TODO instead of implementing cpsFunc{0,1,2,3} as separate functions,
+-- TODO   it should be possible to implement a dependently-typed function "cpsFuncN".
+-- TODO but that can wait for another day.
+
+
+-- TODO ?  Can we use Self-types to tell the type system that the type of the first argument to cpsFunc? should be
+-- TODO ?    the same as the current context type ?

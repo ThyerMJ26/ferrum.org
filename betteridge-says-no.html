@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>
+Can Russel's Paradox be resolved without throwing the baby out with the bathwater? <br> Betteridge says no, but is he right?
+</title>
+<style>
+html { box-sizing: border-box; }
+*, *:before, *:after { box-sizing: inherit; }
+body { font-family: sans-serif; margin: auto; line-height: 1.5; }
+.s0 { display: flex; flex-direction: column; margin-block-end: 1em; max-width: 100ch; margin-left: calc(50% - 50ch); }
+.s1 { display: flex; flex-direction: column; margin-block-end: 1em; max-width: 100ch; margin-left: calc(50% - 50ch); }
+.s2 { margin-left: 4ch; text-indent: -4ch; }
+.s3 { margin-left: 4ch; text-indent: -2ch; }
+.s4 { text-indent: 4ch; }
+.s5 { text-indent: 0ch; }
+.s6 { max-width: 100ch; margin-top: 1ch; text-indent: 0ch; }
+.s7 { max-width: 100ch; margin-left: calc(50% - 50ch); }
+</style>
+</head>
+<body>
+<hr style='margin: 4ch'>
+<script type="module">
+import "/gen/site/page-reload.js"
+</script>
+<div style="margin-left: calc(50% - 50ch); width: 100ch;">
+<h1>
+Can Russel's Paradox be resolved without throwing the baby out with the bathwater? <br> Betteridge says no, but is he right?
+</h1>
+</div>
+<section class="s0">
+<h2>
+Paradox
+</h2>
+<dl class="s6">
+<dt>
+Russel's Paradox
+</dt>
+<dd>
+Does the set of all sets that don't contain themselves, contain itself?
+</dd>
+<dt>
+Betteridge's Law
+</dt>
+<dd>
+Any headline posed as a question can be answered no.
+</dd>
+<dt>
+Liar Paradox
+</dt>
+<dd>
+This sentence is false.
+</dd>
+<dt>
+Quine's Paradox
+</dt>
+<dd>
+"yields falsehood when preceded by its quotation" yields falsehood when preceded by its quotation.
+</dd>
+</dl>
+<div class="s1">
+<span class="s2">
+Russel's Paradox demonstrates that unrestricted set-theory can lead to contradictions.
+</span>
+<span class="s3">
+Similarly, unrestricted logical statements, such as the Liar Paradox, can lead to contradictions.
+</span>
+<span class="s3">
+To make set-theory consistent (free of contradictions), restrictions must be imposed.
+</span>
+<br>
+</div>
+</section>
+<section class="s0">
+<h2>
+Set Theory
+</h2>
+<div class="s1">
+<span class="s2">
+This is the problematic construction:
+</span>
+<span class="s3">
+{ x | x ∉ x }
+</span>
+<span class="s3">
+Different set-theories forbid it on different grounds.
+</span>
+<span class="s3">
+Zermelo–Fraenkel (ZF) forbids this because "x" is not drawn from an already existing set.
+</span>
+<span class="s3">
+Quine's New Foundations (NF) forbids this because "x" is used on both sides of the negated set-membership "∉" operator. (In NF terms, the predicate "x ∉ x" is not stratified)
+</span>
+<span class="s3">
+Whichever rules are used to prevent contradictions, will also forbid some otherwise non-problematic constructions.
+</span>
+<span class="s3">
+For example, NF permits the universal set, whereas ZF forbids it.
+</span>
+<span class="s3">
+(Examples of sets permited in ZF but not NF exist, but are a bit more involved.)
+</span>
+<br>
+</div>
+</section>
+<section class="s0">
+<h2>
+Type Theory
+</h2>
+<div class="s1">
+<span class="s2">
+Type-theory was invented to stop philosopher's talking nonsense.
+</span>
+<span class="s3">
+At first glance, the problem with the Liar Paradox is self-reference.
+</span>
+<span class="s3">
+Quine's paradox demonstrates that contradictions can arise without self-reference.
+</span>
+<span class="s3">
+Type theory can prevent the construction of such contradictory sentences.
+</span>
+<span class="s3">
+However, as with set theory, any specific type theory will forbid meaningful terms as well as contradictory ones.
+</span>
+<br>
+</div>
+</section>
+<section class="s0">
+<h2>
+Computation
+</h2>
+<div class="s1">
+<span class="s2">
+As well as contradictory/meaningless sets and sentences, we can have contradictory programs:
+</span>
+<span class="s3">
+function f() { return !f(); }
+</span>
+<span class="s3">
+If this function returns true, it returns false, and if it returns false, it returns true.
+</span>
+<span class="s3">
+Type systems for most programming languages don't concern themselves with termination.
+</span>
+<span class="s3">
+Type theory, on the other hand, does.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+The dividng line between sense and nonsense appears to be the same as the dividing line between total (always terminating) and partial (sometimes non-terminating) functions.
+</span>
+<span class="s3">
+Programmers are already accustomed to being responsible for ensuring their programs terminate.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Perhaps we can be less rigid in forbidding problematic sets by defining a permitted set, as a set with a total predicate function.
+</span>
+<span class="s3">
+This isn't a decidable definitions, because the halting problem isn't decidable.
+</span>
+<span class="s3">
+NF provides one particular way of ensuring only total predicates can be formed.
+</span>
+<span class="s3">
+But if we need more expressability, any method of proving that a predicate is total is valid.
+</span>
+<br>
+</div>
+</section>
+<section class="s0">
+<h2>
+Theorem Proving
+</h2>
+<div class="s1">
+<span class="s2">
+Theorem proving and type-checking have a close correspondence.
+</span>
+<span class="s3">
+However, Ferrum's type-system is primarily inteded to be useful for programming, and specializing and translating code.
+</span>
+<span class="s3">
+A type-check is only a valid proof if termination is also proved.
+</span>
+<span class="s3">
+Languages for theorem provers typically ensure only terminating programs can be written.
+</span>
+<span class="s3">
+Ferrum could be equipped with primitives which only allow you to write terminating programs.
+</span>
+<span class="s3">
+Ferrum's type-system could be refined to treat total-functions as a subtype of partial-functions.
+</span>
+<span class="s3">
+At present, termination is left as the responsibility of the programmer.
+</span>
+<br>
+</div>
+</section>
+<section class="s0">
+<h2>
+So, is the headline true?
+</h2>
+<div class="s1">
+<span class="s2">
+The headline is neither true, nor false, nor true, nor false, nor true, nor false, nor true, nor false, nor true, nor false, nor true, nor false, ...
+</span>
+<span class="s3">
+Some questions just don't have answers.
+</span>
+<span class="s3">
+(Or, whatever answer there is, it is neither true nor false.)
+</span>
+<br>
+</div>
+</section>
+<hr style='margin: 4ch'>

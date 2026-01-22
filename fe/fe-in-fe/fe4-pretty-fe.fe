@@ -1,0 +1,140 @@
+language ferrum/0.1
+
+
+let FeCtx = { [] | [ExprTag, Int] | ["Op", Str, Int] };
+
+let PfExpr   = {            P3Indent -> FeCtx -> Expr  -> PD };
+let PfDecl   = {            P3Indent ->          Decl  -> PD };
+let PfDecls  = {            P3Indent ->          Decls -> PD };
+let PfDecl0  = { PfExpr  -> P3Indent ->          Decl  -> PD };
+let PfDecls0 = { PfDecls -> P3Indent ->          Decls -> PD };
+
+let pfIndentIncrement = 4;
+
+let pfList : { P3Indent -> (List PD) -> (Maybe PD) -> PD } =
+    indent -> elems -> tlMb ->
+    let p3T = p3Text indent;
+    match [elems, tlMb] 
+    [ [ [], []] |=>
+        p3T "[]"
+    , [ [e1 ,, es], []] |=>
+        p3HV <| concat 
+        [ [p3H [p3T "[", e1]]
+        ,   forMap es <| e2 -> 
+            p3H [p3T ",", e2]
+        , [p3T "]"]
+        ]
+    , [ [e1 ,, es], [t]] |=>
+        p3HV <| concat 
+        [   [p3H [p3T "[", e1]]
+        ,   forMap es <| e2 -> 
+            p3H [p3T ",", e2]
+        ,   [ p3H [p3T ",,", t] ]
+        , [p3T "]"]
+        ]
+    ];
+
+let pfParen : { P3Indent -> PD -> PD } =
+    indent -> expr ->
+    let p3T = p3Text indent;
+    p3HV [p3T "(", expr, p3T ")"];
+
+let pfParensNeeded : { FeCtx -> Expr -> Bool } =
+    ctx -> [tag,,_] ->
+    match [ctx, tag]
+    [ [[], _] |=> false
+    , _       |=> true
+    ];
+
+let pfDecls0 : { PfDecl -> P3Indent -> Decls -> PD } =
+    pfDecl -> indent -> decls ->
+    p3V (map (pfDecl indent) decls);
+
+let pfDecl0 : { PfExpr -> P3Indent -> Decl -> PD } =
+    pfExpr -> indent -> [pat, defn] ->
+    let indent2 = indent + pfIndentIncrement;
+    let p3T = p3Text indent;
+    let pfE = pfExpr indent2;
+    p3HV [ p3HV [p3T "let ", p3H [pfE [] pat, p3T " = "] ]
+         , p3H [pfE [] defn, p3T "; "] 
+         ];
+
+
+let pfExpr : { P3Indent -> FeCtx -> Expr -> PD } =
+    rec <| (pfExpr : { P3Indent -> FeCtx -> Expr -> PD }) ->
+    indent -> ctx -> expr @ [tag ,, _] ->
+    let p3T = p3Text indent;
+    let pfE = pfExpr (indent + pfIndentIncrement);
+    let pfDecl = pfDecl0 pfExpr;
+    let result =
+        match expr
+        [ ["EVar",            name       ] |=> 
+            p3T name
+        , ["ELambda",         pat, body  ] |=> 
+            p3HV [pfE [tag,1]  pat, p3T " -> ", pfE [tag,2] body]
+        , ["ELambdaMaybe",    pat, body  ] |=> 
+            p3HV [pfE [tag,1]  pat, p3T " |=> ", pfE [tag,2] body]
+        , ["ELambdaNo",      pat, body  ] |=> 
+            p3HV [pfE [tag,1]  pat, p3T " |-> ", pfE [tag,2] body]
+        , ["ELambdaYes",     pat, body  ] |=> 
+            p3HV [pfE [tag,1]  pat, p3T " => ", pfE [tag,2] body]
+        , ["EApply",   func, arg         ] |=> 
+            p3HV [pfE [tag,1]  func, pfE [tag,2] arg]
+        , ["ELit",     datum             ] |=> 
+            p3T (show datum)
+        , ["ELets",    decls, expr       ] |=> 
+            let declsPf = pfDecls0 pfDecl indent decls;
+            let exprPf = pfE [] expr;
+            p3V [declsPf, exprPf]
+        , ["EList",    elems, tlMb         ] |=> 
+            pfList indent (map (pfE []) elems) (maybeMap (pfE []) tlMb)
+        , ["EType",    expr, ty          ] |=> 
+            p3HV [pfE [tag,1] expr, p3T ":", pfE [tag,2] ty]
+        , ["EAs",      name, expr        ] |=> 
+            p3HV [p3T name, p3T "@", pfE [tag,2] expr]
+        -- , ["EOper",    name, args        ] |-> 
+        --     guardTrue (isAlpha name) <| _ =>
+        --     let namePf : PD = p3T name;
+        --     let argsPf : List PD = map (pfE ["EApply", 2]) args;
+        --     let pds : List PD = [namePf ,, argsPf];
+        --     p3HV pds : PD
+        , ["EOper",    name, args        ] |=> 
+            if (isAlpha name) 
+            [ ->
+                p3HV [p3T "op", p3T (show name), pfList indent (map (pfE []) args) []]
+            , ->
+                match args
+                [ [] |=>
+                    p3HV [p3T name]
+                , [arg] |=>
+                    -- TODO handle prefix/postfix, assume prefix for now
+                    p3HV [p3T name, pfE [tag,1] arg]
+                , [arg1, arg2] |=>
+                    p3HV [pfE [tag,1] arg1, p3T name, pfE [tag,2] arg2]
+                , _ |=>
+                    error ["p3Expr", "too many operator arguments", expr]
+                ]
+            ]
+        -- , ["EOper",    name, []        ] |=> 
+        --     p3HV [p3T name]
+        -- , ["EOper",    name, [arg]        ] |=> 
+        --     p3HV [p3T name, pfE [tag,1] arg]
+        -- , ["EOper",    name, [arg1, arg2] ] |=> 
+        --     p3HV [pfE [tag,1] arg1, p3T name, pfE [tag,2] arg2]
+        -- , ["EOper",    name, [arg1, arg2, arg3] ] |=> 
+        --     p3HV [p3T name, pfE [tag,1] arg1, pfE [tag,2] arg2, pfE [tag,2] arg3]
+        , ["ETypeBrackets",     expr     ] |=> 
+            p3HV [p3T "{", pfE [] expr, p3T "}"]
+        , ["ETermBrackets",     expr     ] |=> 
+            p3HV [p3T "(", pfE [] expr, p3T ")"]
+        , [tag ,, _] |=> 
+            -- error ["pfExpr", "missing case", expr]
+            p3H [p3T "missing case", p3T <| show expr]
+        ];
+    -- TODO plumb through term/type context, so the we insert the correct parens/brackets when needed
+    if (pfParensNeeded ctx expr)
+    [ -> pfParen indent result
+    , -> result
+    ];
+
+

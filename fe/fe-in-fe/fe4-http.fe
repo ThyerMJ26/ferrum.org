@@ -1,0 +1,159 @@
+language ferrum/0.1
+
+-- let simpleServer : Io = 
+--     io2Listen "127.0.0.1" 8000 <| [listener, port] ->
+--     io2Loop2B ( [] ->
+--         (breakK : { [] -> Io }) -> continueK ->
+--         io2Accept listener <| [socket] ->
+--         io2HttpServe socket <| [connection] ->
+--         io2Loop2B ( [] ->
+--             (kBreak : { [] -> Io }) -> kContinue ->
+--             io2HttpNext connection <| [requestMb] ->
+--             match requestMb
+--             [ [] |=>
+--                 kBreak []
+--             , [request] |=>
+--                 io2HttpReqUrlPathnamne request <| pathname ->
+--                 io2HttpReqUrlQueryParams request <| queryParams ->
+--                 let response = show [pathname, queryParams];
+--                 io2HttpRespond request [] response <| ->
+--                 kContinue []
+--             ]
+--         ) [] <| ->
+--         continueK []
+--     ) [] <| ->
+--     io2Exit 0;
+
+
+-- let webApp1 : { [ HttpMethod, HttpQueryParams, WebApp1State] -> [HttpResponse, WebApp1State] } = 
+--     [ method, queryParams, state ] ->
+--     match method
+
+
+-- let webApp1GetSrcFe : { -> Html } = ->
+--     htmlCodegen "get" []
+--     """
+--      k ->
+--      getElemValue "key" <| key ->
+--      let _ = debug ["Get", key];
+--      -- fetch "post" "/post" [["Content-Type", "application/json"]] (show ["get", key]) <| resp ->
+--      -- getData resp <| respData ->
+--      -- fetch "post" "/post" [["Content-Type", "application/json"]] (show ["get", key]) <| respData ->
+--      serverCall ["get", key] <| respData ->
+--      let _ = debug ["Get Response", respData];
+--      setElemValue "resp" respData <| ->
+--      k []
+--     """
+--     ;
+
+-- let testCodeSrcFe : { -> Html } = ->
+--     htmlCodegen "get" []
+--     """
+--      k ->
+--      let _ = debug ["testCodeSrcFe", "debug"];
+--      printLn "testCodeSrcFe printLn" <| ->
+--      getElemValue "key" <| key ->
+--      getElemValue "val" <| val ->
+--      printLn (show ["Key", key, "Val", val]) <| ->
+--      k []
+--     """
+--     ;
+
+-- let webApp1SetSrcFe : { -> Html } = ->
+--     htmlCodegen "set" []
+--     """
+--      k ->
+--      getElemValue "key" <| key ->
+--      getElemValue "val" <| val ->
+--      let _ = debug ["Set", key, val];
+--      -- fetch "post" "/post" [["Content-Type", "application/json"]] (show ["set", key, val]) <| respData ->
+--      serverCall ["set", key, val] <| respData ->
+--      let _ = debug ["Set Response", respData];
+--      setElemValue "resp" respData <| ->
+--      k []
+--     """
+--     ;
+
+
+-- let WebApp1State = List {[Str, Str]};
+
+
+-- let webApp1 : { [WebApp1State, IoId] -> { [WebApp1State] -> Io } -> Io } =
+--     [state, request] -> k ->
+--     io2HttpReqMethod request <| [method] ->
+--     io2HttpReqUrlPathnamne request <| pathname ->
+--     io2HttpReqUrlQueryParams request <| queryParams ->
+--     match method
+--     [ "GET" |=>
+--         let response1 = show [pathname, queryParams];
+--         let response = htmlToStr2 
+--             ["html", []
+--             , ["meta", [["charset","utf-8"]]]
+--             , ["body", []
+--               -- , ["script", [], strJoin "\n" [webApp1GetSrc, webApp1SetSrc]]
+--               , ["li", []], "Key", ["input", [["id", "key"], ["type", "text"]]]
+--               , ["li", []], "Val", ["input", [["id", "val"], ["type", "text"]]]
+--               , ["li", []], "Resp", ["input", [["id", "resp"], ["type", "text"]]]
+--               , ["li", []], ["input", [["type", "submit"], ["value", "Get"], ["onclick", "get()"]]]
+--               , ["li", []], ["input", [["type", "submit"], ["value", "Set"], ["onclick", "set()"]]]
+--               , ["li", []], response1
+--               , ["div", [], "1 2 3 < 4 5 6 > 7 8 9 & 10"]
+--               , htmlRuntime2
+--               -- , testCodeSrcFe []
+--               , webApp1GetSrcFe []
+--               , webApp1SetSrcFe []
+--               ]
+--             ];
+--         io2HttpRespond request [["content-type", "text/html"]] response <| ->
+--         k [state]
+--     , "POST" |=>
+--         -- let response = "[1,2,3]";
+--         let _ = debug ["State", state];
+--         io2HttpReqData request <| [data] ->
+--         let [response, state2] = 
+--             match data
+--             [ ["get", keyAny] |->
+--                 guardStr keyAny <| key =>
+--                 match (listKvGet state key)
+--                 [ [] |=>
+--                     [["fail"], state]
+--                 , [val] |=>
+--                     [ ["ok", val], state ]
+--                 ]
+--             , ["set", keyAny, valAny] |->
+--                 guardStr keyAny <| key ->
+--                 guardStr valAny <| val =>
+--                 let state2 = listKvSet state key val;
+--                 [ ["ok"], state2 ]
+--             , _ |=>
+--                 [ ["fail"], state]
+--             ];
+--         io2HttpRespond request [["content-type", "application/json"]] (show2 response) <| ->
+--         k [state2]
+--     , _ |=> 
+--         error ["unknown/unhandled http request method", method]
+--     ];
+
+-- let simpleServer2 : Io = 
+--     io2Listen "127.0.0.1" 8000 <| [listener, port] ->
+--     io2Loop2B ( (state0 : WebApp1State) ->
+--         (breakK : { WebApp1State -> Io }) -> continueK ->
+--         io2Accept listener <| [socket] ->
+--         io2HttpServe socket <| [connection] ->
+--         io2Loop2B ( (state : WebApp1State) ->
+--             (kBreak : { WebApp1State -> Io }) -> kContinue ->
+--             io2HttpNext connection <| [requestMb] ->
+--             match requestMb
+--             [ [] |=>
+--                 kBreak state
+--             , [request] |=>
+--                 webApp1 [state,request] <| [state2] ->
+--                 kContinue state2
+--             ]
+--         ) state0 <| state3 ->
+--         continueK state3
+--     ) [] <| _ ->
+--     io2Exit 0;
+
+
+

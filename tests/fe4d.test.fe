@@ -1,0 +1,2064 @@
+language ferrum/test/0.1
+
+
+[
+
+  [ [ "name", "pipeline0" ]
+    , [ "language", "ferrum/0.1" ]
+    , [ "type_check", "bidir" ]
+    , [ "decls",
+        """
+          let f = g -> 3;  
+          let h = f <| -> 7;
+        """
+     ]
+  , [ "expect", "h", "value", "3"]
+  ]
+
+, [ [ "name", "cond" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        let cond1 = 
+          """
+            let a = true ? [1,,2];
+            let b = false ? [1,,2];
+            [a,b]   
+          """
+          ;
+          let testCond1 = evalStr cond1;
+      """
+    ]
+  , [ "expect", "testCond1", "value", "[1,2]"]
+  ]
+
+, [ [ "name", "pipeline1" ]
+  , [ "language", "ferrum/0.1" ]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , [ "type_check", "bidir" ]
+  -- , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+          let f : { Int -> Int -> Int -> Any }
+             = a -> b -> c ->
+             [ a+b, a-b, a*b ];
+
+          let a = (2 |> (f <| 10)) <| 3;
+
+          let g : { Int -> K@{ Int -> Any } -> K Int }
+              = arg -> (k: K@{Int->Any}) ->
+              k (arg*arg);
+
+          let b = 
+              g 1 <| x ->
+              g 2 <| y ->
+              g 3 <| z ->
+              [x, y, z];
+
+          let h : { Int -> K@{ [] -> Any } -> K [] }
+              = arg -> (k: K@{[]->Any}) ->
+              k [];
+
+          let c = 
+              h 1 <| [] ->
+              h 2 <| _  ->
+              h 3 <|    ->
+              [7, 7, 7];
+
+
+      """
+    ]
+  , [ "expect", "a", "value", "[12,8,20]"]
+  , [ "expect", "b", "value", "[1,4,9]"]
+  , [ "expect", "c", "value", "[7,7,7]"]
+
+  ]
+
+
+, [ [ "name", "pipeline2" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+          let IntStack = List Int;
+          let Cont : { Type -> Type }
+              = T -> { T -> IntStack -> Any };
+
+          let push : { Int -> K@(Cont {[]}) -> IntStack -> K [] IntStack } 
+              = val -> (k: K@(Cont {[]})) -> stack ->
+              -- let _ = debug ["push", val, stack];
+              k [] [val,,stack]; 
+
+          let dup : { K@(Cont {[]}) -> IntStack -> K [] IntStack } 
+              = (k: K@(Cont {[]})) -> stack ->
+              match stack
+              [ [] |=> error "dup: stack empty"
+              , [top,,_] |=>
+                  k [] [top,,stack]
+              ];
+
+          let add : { K@(Cont {[]}) -> IntStack -> K [] IntStack } 
+              = (k: K@(Cont {[]})) -> stack ->
+              match stack
+              [ [] |=> error "add: stack empty"
+              , [a] |=>
+                  error "add: stack too shallow"
+              , [a, b,,stack2] |=>
+                  k [] [a+b,,stack2]
+              ];
+
+          let mul : { K@(Cont {[]}) -> IntStack -> K [] IntStack } 
+              = (k: K@(Cont {[]})) -> stack ->
+              match stack
+              [ [] |=> error "mul: stack empty"
+              , [a] |=>
+                  error "mul: stack too shallow"
+              , [a, b,,stack2] |=>
+                  -- let _ = debug ["mul", a, b];
+                  k [] [a*b,,stack2]
+              ];
+
+          let pop : { K@(Cont Int) -> IntStack -> K Int IntStack } 
+              = (k: K@(Cont Int)) -> stack ->
+              match stack
+              [ [] |=> error "pop: stack empty"
+              , [top,,stack2] |=>
+                  let _ = debug ["pop", top, stack2];
+                  k top stack2
+              ];
+
+          let a : { K@(Cont {[Int,Int,Int]}) -> IntStack -> K [Int,Int,Int] IntStack }
+              = (k: K@(Cont {[Int,Int,Int]})) ->
+              push 3  <|    ->
+              push 4  <|    ->
+              add     <|    ->
+              dup     <|    ->
+              pop     <| x  ->
+              dup     <|    ->
+              dup     <|    ->
+              add     <|    ->
+              pop     <| y  ->
+              dup     <|    ->
+              mul     <|    ->
+              pop     <| z  ->
+              k [x, y, z];
+
+           let test1 = a (a -> s -> a) []; 
+
+      """
+    ]
+  , [ "expect", "test1", "value", "[7,14,49]"]
+  ]
+
+-- , [ [ "name", "intersect1" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "decls",
+--       """
+--         let IfInt = { A@Any -> K@[Int->Any, {A\Int} -> Any] -> { (Codomain (Hd K)) | (Codomain (Hd (Tl K))) } };
+--         let IfInt2 = { A@Any -> K@[Int->Any, {A\Int} -> Any] -> { (Hd {[(Codomain (Hd K)), A&Int]} ) | (Hd {[(Codomain (Hd (Tl K))), A\Int] } ) } };
+--         let IfInt3 = { A@Any -> K@[Int->Any, {A\Int} -> Any] -> { (Hd (Tl {[A&Int,(Codomain (Hd K))]} )) | (Hd (Tl {[A\Int, (Codomain (Hd (Tl K)))] } )) } };
+--         let ifInt2: IfInt3 = ifInt;
+-- 
+--         let IfStr = { A@Any -> K@[Str->Any, {A\Str} -> Any] -> { (Codomain (Hd K)) | (Codomain (Hd (Tl K))) } };
+--         let IfStr2 = { A@Any -> K@[Str->Any, {A\Str} -> Any] -> { (Hd {[(Codomain (Hd K)), A&Str]} ) | (Hd {[(Codomain (Hd (Tl K))), A\Str] } ) } };
+--         let IfStr3 = { A@Any -> K@[Str->Any, {A\Str} -> Any] -> { (Hd (Tl {[A&Str,(Codomain (Hd K))]} )) | (Hd (Tl {[A\Str, (Codomain (Hd (Tl K)))] } )) } };
+--         let ifStr2: IfStr3 = ifStr;
+-- 
+--         let A = { { Str -> Int } & { Int -> Str } };
+--         let a : { B@{ Str | Int } -> A B }
+--             = (b: B@{ Str | Int }) ->
+--             ifStr2 b
+--             [ _ -> 0
+--             , _ ->
+--                 ifInt2 b
+--                 [ _ -> "zero"
+--                 , _ -> error "impossible"
+--                 ]
+--             ];
+--         let t1 = Codomain A;
+--         let f : { A -> B@(Domain A) -> A B }
+--             = a -> b -> a b;
+--         let t2 = f a "1";
+--       """
+--     ]
+--   , [ "expect", "t1", "value", "{ Int | Str }"]
+--   , [ "expect", "t2", "value", "0"]
+-- 
+--   ]
+
+, [ [ "name", "inhab1" ]
+  , [ "language", "ferrum/0.1" ]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        -- let Case = { [ Str, Any ] };
+        -- let switch2 : { C@[Case, Case] -> { { (Hd (Hd C)) -> (Hd (Tl (Hd C))) } & { (Hd (Hd (Tl C))) -> (Hd (Tl (Hd (Tl C)))) } } } 
+        --     = ( [ [key1, result1], [key2, result2] ] : C@{[Case, Case]} ) -> ( name: { (Hd (Hd C)) | (Hd (Hd (Tl C))) } ) ->
+        --     let name2: Str = name;
+        --     1;
+        -- let t1 = switch2 [ ["one", 1], ["two", 2] ] "one";
+
+        -- let switch2 : { C@[Case, Case] -> N@(Hd (Elem C)) -> (Hd (Tl ( { (Elem C) & [N, Any] } ))) } 
+        --     = ( [ [key1, result1], [key2, result2] ] : C@{[Case, Case]} ) -> ( name: N@{ (Hd (Elem C)) } ) ->
+        --     let name2: Str = name;
+        --     1;
+        -- let t1 = switch2 [ ["one", 1], ["two", 2] ] "one";
+
+
+
+        -- let switch1 : { C@[[Str,Any]] -> { { (Hd (Hd C)) -> Any } } } 
+        -- -- let switch1 : { C@[[Str]] -> { { (Hd (Hd C)) -> Any } } } 
+        --     = ( [ [key1, result1] ] : C@{[[Str,Any]]} ) -> ( name: { (Hd (Hd C)) } ) ->
+        --     -- = ( [ [key1] ] : C@{ [[Str]] } ) -> ( name: { (Hd (Hd C)) } ) ->
+        --     let name2: Str = name;
+        --     1;
+        -- -- let t1 = switch2 [ ["one", 1], ["two", 2] ] "one";
+        -- let t1 = switch1 [ ["one", 1] ] "one";
+        -- -- let t1 = switch1 [ ["one"] ] "one";
+
+
+        let switch1 : { C@[[Str,Any]] -> { { (Hd (Hd C)) -> Any } } } 
+            = ( [ [key1, result1] ] : C@{[[Str,Any]]} ) -> ( name: { (Hd (Hd C)) } ) ->
+            let name2: Str = name;
+            1;
+        let t1 = switch1 [ ["one", 1] ] "one";
+
+
+
+        -- let switch1 : { C@[Str,Any] -> { { (Hd C) -> Any } } } 
+        --     = ( [key1, result1] : C@{ [Str,Any] } ) -> ( name: { (Hd C) } ) ->
+        --     let name2: Str = name;
+        --     1;
+        -- let t1 = switch1 ["one", 1] "one";
+
+
+      """
+    ]
+  , ["expect", "t1", "value", "1"] 
+  ]
+
+, [ [ "name", "dispatch1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        let IfStrEq = { A@Str -> B@Str -> C @ [ {A&B} -> {A&B} -> Any, {A\B} -> {B\A} -> Any ] -> { (Hd {[ (Hd C) A B, A&B ]}) | (Hd {[ (Hd (Tl C)) A B, Void -> A&B ] }) } };
+
+        -- let ifStrEq : { A@Str -> B@Str -> C @ [ {A&B} -> {A&B} -> Any, {A\B} -> {B\A} -> Any ] -> { (Hd {[ (Hd C) A B, A&B ]}) | (Hd {[ (Hd (Tl C)) A B, Void -> A&B ] }) } }
+        --     = (a: A@Str) -> (b: B@Str) -> -- ( [cT, cF] : C@{[Str -> Str -> Any, Str -> Str -> Any]}) ->
+        --     error "TODO define as primitive";
+
+        let ifStrEqApprox : { Str -> Str -> C@[Str -> Str -> Any, Str -> Str -> Any] -> { (Hd C) Str Str | (Hd (Tl C)) Str Str } }
+            = a -> b -> ( [cT, cF] : C@{[Str -> Str -> Any, Str -> Str -> Any]}) ->
+            if (a==b)
+            [ -> cT a b
+            , -> cF a b 
+            ];
+
+        let ifStrEq: IfStrEq = castT ifStrEqApprox;
+
+        let Case = { [Str, Any] };
+
+        -- -- let Dispatch2 = { C@[Case, Case] -> { { (Hd (Hd C)) -> (Hd (Tl (Hd C))) } & { (Hd (Hd (Tl C))) -> (Hd (Tl (Hd (Tl C)))) } } };
+        -- let Dispatch2 = { C@{[Case, Case]} -> { { (Hd (Hd C)) -> (Hd (Tl (Hd C))) } & { (Hd (Hd (Tl C))) -> (Hd (Tl (Hd (Tl C)))) } } };
+        -- let Dispatch2Approx1 = { C@[Case, Case] -> Str -> (Hd (Tl (Elem C))) };
+        -- let Dispatch2Approx2 = { C@[Case, Case] -> (Hd (Elem C)) -> (Hd (Tl (Elem C))) };
+        -- let Dispatch2Approx3 = { C@[Case, Case] -> N@(Hd (Elem C)) -> (Hd (Tl { (Elem C) & {[N, Any] } } )) };
+        -- let dispatch2a : Dispatch2Approx1
+        --     -- = ( [ [name1, val1], [name2, val2] ]: C@{[Case, Case]} ) -> ( name: N@(Hd (Elem C)) ) ->
+        --     = ( [ [name1, val1], [name2, val2] ]: C@{[Case, Case]} ) -> ( name: Str ) ->
+        --     ifStrEq name name1
+        --     [ _ -> _ -> 
+        --         val1
+        --     , _ -> _ ->
+        --         ifStrEq name name2
+        --         [ _ -> _ -> 
+        --             val2
+        --         , _ -> _ ->
+        --             error ["no match", name, name1, name2]
+        --         ]
+        --     ];
+
+        let DispatchApprox1 = { C@(List Case) -> Str -> (Hd (Tl (Elem C))) };
+        let DispatchApprox2 = { C@(List Case) -> (Hd (Elem C)) -> (Hd (Tl (Elem C))) };
+        let DispatchApprox3 = { C@(List Case) -> N@(Hd (Elem C)) -> (Hd (Tl { (Elem C) & [N, Any] } )) };
+        let dispatch1 : DispatchApprox1
+            = ( cases: C@(List Case) ) -> ( name: Str ) ->
+            loop1 ( (cases: List (Elem C)) ->
+                match cases
+                [ [] |=> 
+                    error ["no match", name]
+                , [ [name1, val1],,cases2] |=>
+                    ifStrEq name name1
+                    [ _ -> _ ->
+                        break val1
+                    , _ -> _ ->
+                        continue cases2
+                    ]
+                ]
+            ) cases;
+
+        let dispatch: DispatchApprox3 = castT dispatch1;
+
+        let A = { { "toInt" -> Str -> Int } & { "toStr" -> Int -> Str } };
+        let a : { R@{ "toInt" | "toStr" } -> A R }
+            = (r: R@{ "toInt" | "toStr" }) ->
+            dispatch
+            [ ["toInt", (b: Str) -> 99]
+            , ["toStr", (b: Int) -> "Ninety Nine"]
+            ] r;
+        let t1 = Codomain A;
+        let t1a = { A "toInt" };
+        let t1b = { A "toStr" };
+        let f : { A -> B@(Domain A) -> A B }
+            = a -> (b: B@(Domain A)) -> a b;
+        let t2 = f a "toInt" "Seven";
+
+        let t3: Int = dispatch [ ["seven", 7] ] "seven";
+        let t4: Str = dispatch [ ["id", ((a:A@Any)->a):{A@Any->A}] ] "id" "nine";
+        let t5: Str = dispatch [ ["id", ((a:A@Any)->a):{A@Any->A}], ["seven", 7] ] "id" "nine";
+      """
+    ]
+
+  -- , [ "expect", "1", "value", "1"]  
+  -- , [ "expect", "t1", "value", "{ Void -> { Int | Str } }"]
+  -- , [ "expect", "t1a", "value", "{ Str -> Int }"]
+  -- , [ "expect", "t1b", "value", "{ Int -> Str }"]
+  -- , [ "expect", "t2", "value", "99"]
+  -- , [ "expect", "t3", "value", "7"]
+  -- , [ "expect", "t4", "value", "\"nine\""]
+  -- , [ "expect", "t5", "value", "\"nine\""]
+
+  , [ "expectValue", "1", "1"]  
+  , [ "expectTerm", "t1", "{ Void -> { Int | Str } }"]
+  , [ "expectTerm", "t1a", "{ Str -> Int }"]
+  , [ "expectTerm", "t1b", "{ Int -> Str }"]
+  , [ "expectValue", "t2", "99"]
+  , [ "expectValue", "t3", "7"]
+  , [ "expectValue", "t4", "\"nine\""]
+  , [ "expectValue", "t5", "\"nine\""]
+
+  ]
+
+
+
+
+, [ [ "name", "dispatch2" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        let Case = { [Str, Any] };
+        let DispatchApprox1 = { C@(List Case) -> Str -> (Hd (Tl (Elem C))) };
+        let DispatchApprox2 = { C@(List Case) -> (Hd (Elem C)) -> (Hd (Tl (Elem C))) };
+        let DispatchApprox3 = { C@(List Case) -> N@(Hd (Elem C)) -> (Hd (Tl { (Elem C) & [N, Any] } )) };
+        let dispatch1 : DispatchApprox1
+            = ( cases: C@(List Case) ) -> ( name: Str ) ->
+            loop1 ( (cases: List (Elem C)) ->
+                match cases
+                [ [] |=> 
+                    error ["no match", name]
+                , [ [name1, val1],,cases2] |=>
+                    if (name == name1)
+                    [ ->
+                        break val1
+                    , ->
+                        continue cases2
+                    ]
+                ]
+            ) cases;
+
+        let dispatch: DispatchApprox3 = castT dispatch1;
+
+        let t5: Str = dispatch [ ["id", ((a:A@Any)->a):{A@Any->A}], ["seven", 7] ] "id" "nine";
+      """
+    ]
+  , [ "expect", "t5", "value", "\"nine\""]
+  ]
+
+
+
+
+, [ [ "name", "dispatch3" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        -- let Handler = { [Str, {(List Void)->Any)}] };
+        -- let Method = Self ( H -> { [ [Str,,Any], (Tl (Hd H))->Any] } );
+        let MethodApprox = SelfT ( H -> { [ Str, Any->Any] } );
+        let Method = SelfT ( H -> { [ Str, Void->Any] } );
+        let DispatchApprox = { C@(List MethodApprox) -> [Str,,Any] -> (Codomain (Hd (Tl (Elem C)))) };
+        -- let Dispatch = { C@(List Method) -> N@Str -> (Hd (Tl { (Elem C) & [N, Any] } )) };
+        let Dispatch = { C@(List Method) -> N@[Str,,(Domain (Hd (Tl { (Elem C) & [N, Any] } )))] -> (Codomain (Hd (Tl { (Elem C) & [N, Any] } ))) };
+        let dispatch1 : DispatchApprox
+            = ( cases: C@(List MethodApprox) ) -> ( [name:Str,,args] ) ->
+            loop1 ( (cases: List (Elem C)) ->
+                match cases
+                [ [] |=> 
+                    error ["no match", name]
+                , [ [name1, fun1],,cases2] |=>
+                    if (name == name1)
+                    [ ->
+                        break (fun1 args)
+                    , ->
+                        continue cases2
+                    ]
+                ]
+            ) cases;
+
+        let dispatch: Dispatch = castT dispatch1;
+
+        let t5: Str = dispatch [ ["id", (([a]:A@{[Any]})->a):{A@[Any]->(Hd A)}], ["seven", [] -> 7] ] ["id", "nine"];
+      """
+    ]
+  , [ "expect", "t5", "value", "\"nine\""]
+  ]
+
+
+
+
+
+
+-- , [ [ "name", "intersect2" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "decls",
+--       """
+--         -- let ifStrEq = ifEq;
+-- 
+--         -- let ifStrEq : { Str -> Str -> C@[Str -> Str -> Any, Str -> Str -> Any] -> { (Hd C) Str Str | (Hd (Tl C)) Str Str } }
+--         --     = a -> b -> ( [cT, cF] : C@{[Str -> Str -> Any, Str -> Str -> Any]}) ->
+--         --     if (a==b)
+--         --     [ -> cT a b
+--         --     , -> cF a b 
+--         --     ];
+-- 
+--         -- let ifStrEq : { A@Str -> B@Str -> C @ [ {A&B} -> {A&B} -> Any, {A\B} -> {B\A} -> Any ] -> { (Hd {[ (Hd C) A B, A&B ]}) | (Hd {[ (Hd (Tl C)) A B, {A\B} | {B\A} ] }) } }
+--         let ifStrEq : { A@Str -> B@Str -> C @ [ {A&B} -> {A&B} -> Any, {A\B} -> {B\A} -> Any ] -> { (Hd {[ (Hd C) A B, A&B ]}) | (Hd {[ (Hd (Tl C)) A B, Void -> A&B ] }) } }
+--             = (a: A@Str) -> (b: B@Str) -> -- ( [cT, cF] : C@{[Str -> Str -> Any, Str -> Str -> Any]}) ->
+--             error "TODO define as primitive";
+-- 
+--         let Case = { [ Str, Any ] };
+--         let switch2 : { C@[Case, Case] -> { { (Hd (Hd C)) -> (Hd (Tl (Hd C))) } & { (Hd (Hd (Tl C))) -> (Hd (Tl (Hd (Tl C)))) } } } 
+--             = ( [ [key1, result1], [key2, result2] ] : C@{[Case, Case]} ) -> ( name: { (Hd (Hd C)) | (Hd (Hd (Tl C))) } ) ->
+--             ifStrEq name key1
+--             [ _ -> _ -> 
+--                 result1
+--             , _ -> _ ->
+--                 ifStrEq name key2
+--                 [ _ -> _ -> 
+--                     result2
+--                 , _ -> _ ->
+--                     error "neither case matched"
+--                 ]
+--             ];
+-- 
+--         -- let Switch = Rec (Switch -> { { [] -> Any } & { C@(ListNonEmpty Case) -> { { (Hd (Hd C)) -> (Hd (Tl (Hd C))) } & (Switch (Tl C)) } } } );
+--         -- let switch { C@(List Case) -> (Switch C) } 
+--         --     = rec (switch: { C@(List Case) -> (Switch C) } ) -> cases -> (name: Str) ->
+--         --     ifNil cases
+--         --     [ -> error "no cases matched"
+--         --     , [ [key, result],,cases] -> 
+--         --         ifStrEq name key 
+--         --         [ _ -> _ ->
+--         --             result
+--         --         , _ -> _ ->
+--         --             switch cases name;
+--         --         ]
+--         --     ];
+-- 
+--         let A = { { "toInt" -> Str -> Int } & { "toStr" -> Int -> Str } };
+--         let a : { R@{ "toInt" | "toStr" } -> A R }
+--             = (r: R@{ "toInt" | "toStr" }) ->
+--             switch2
+--             [ ["toInt", (b: Str) -> 99]
+--             , ["toStr", (b: Int) -> "Ninety Nine"]
+--             ] r;
+--         let t1 = Codomain A;
+--         let t1a = { A "toInt" };
+--         let t1b = { A "toStr" };
+--         let f : { A -> B@(Domain A) -> A B }
+--             = a -> (b: B@(Domain A)) -> a b;
+--         let t2 = 0; -- f a "toInt" "Seven";
+--       """
+--     ]
+--   , [ "expect", "t1", "value", "{ Void -> { Int | Str } }"]
+--   , [ "expect", "t1a", "value", "{ Str -> Int }"]
+--   , [ "expect", "t1b", "value", "{ Int -> Str }"]
+--   , [ "expect", "t2", "value", "99"]
+-- 
+--   ]
+
+
+-- , [ [ "name", "rr1" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "decls",
+--       """
+--           let StackInterface = Rec ( S ->
+--               { { ["push", Int] -> [S,[]] }
+--               & { ["pop"]       -> [S,Int] } 
+--               });
+-- 
+--           let StackRequest = Domain StackInterface;
+-- 
+--           -- let mkStack : { (List Int) -> R@StackRequest -> StackInterface R }
+--           --     = rec ( (mkStack: { (List Int) -> R@StackRequest -> StackInterface R }) -> vals -> (req: R@StackRequest) ->
+--           --       match req
+--           --       [ ["push", val] |=> 
+--           --           let stack2 = mkStack [val,,vals];
+--           --           [stack2, []]
+--           --       , ["pop"] |=> 
+--           --           match vals
+--           --           [ [] |=> error "stack empty"
+--           --           , [val,,vals2] |=>
+--           --               let stack2 = mkStack vals2;
+--           --               [stack2, val]
+--           --           , _ |=> error ["oops", vals]
+--           --           ]
+--           --       , _ |=> error ["unhandled request", req]
+--           --       ] );
+-- 
+--           -- -- let mkStack : { (List Int) -> R@StackRequest -> StackInterface R }
+--           -- --     = rec ( (mkStack: { (List Int) -> R@StackRequest -> StackInterface R }) -> (vals: List Int) -> (req: R@StackRequest) ->
+--           -- let mkStack : { (List Int) -> StackInterface }
+--           --     = rec ( (mkStack: { (List Int) -> StackInterface }) -> (vals: List Int) -> (req: StackRequest) ->
+--           --       match7 req
+--           --       [ ["push", val] |=> 
+--           --           let stack2 = mkStack [val,,vals];
+--           --           [stack2, []]
+--           --       , ["pop"] |=> 
+--           --           match vals
+--           --           [ [] |=> error "stack empty"
+--           --           , [val,,vals2] |=>
+--           --               let stack2 = mkStack vals2;
+--           --               [stack2, val]
+--           --           , _ |=> error ["oops", vals]
+--           --           ]
+--           --       , _ |=> error ["unhandled request", req]
+--           --       ] : StackInterface ) ;
+-- 
+--           let MatchDomain : { Type -> Type }
+--               = f -> { (Inverse f) [Any] };
+--           -- let MatchDomain : { Type -> Type }
+--           --     = F -> { (Domain F) \ (Inverse F) [] };
+--           let Option = Maybe;   
+-- 
+--           -- let intersectFuncOpts : 
+--           --   {  DA@Type -> DB@Type
+--           --   ->  B@[ {DA -> [Any]} & {DB -> []}, {DB -> [Any]} & {DA -> []} ] 
+--           --   -> { DA -> { (Hd (Codomain (Hd B))) }
+--           --      & DB -> { (Hd (Codomain (Hd (Tl B)))) }
+--           --      }
+--           --   }
+--           --   = (_:DA@Type) -> (_:DB@Type)
+--           --   -> ( [fA, fB]: B@{ [ {DA -> [Any]} & {DB -> []}, {DB -> [Any]} & {DA -> []} ] } )
+--           --   -> (val: { DA | DB } ) 
+--           --   ->
+--           --   let a: Hd (Codomain (Hd B)) = fA val;
+--           --   matchMaybe a
+--           --   [ [] ->
+--           --       let b: Hd (Codomain (Hd (Tl B))) = fB val;
+--           --       matchMaybe b
+--           --       [ [] -> error "neither cases matched"
+--           --       , [result] -> result 
+--           --       ]
+--           --   , [result] -> result
+--           --   ];
+-- 
+--           let matchMaybe2 : { { [] -> K@[[]->Any, Any] -> (Hd K) [] } & { V@[Any] -> K@[Any, V->Any] -> K V } }
+--             = matchMaybe;
+--           let matchMaybe3 : { K@[[]->Any, [Void]->Any] -> { { [] -> (Hd K) [] } & { A@(Domain (Hd (Tl K))) -> (Hd (Tl K)) A } } }
+--             = k -> a -> matchMaybe a k;
+-- 
+--           let intersectFuncOpts : 
+--             {  DA@Type -> DB@Type
+--             ->  FA@ { { ["push", Int] -> [Any] } & { ["pop"] -> [] } }
+--             ->  FB@ { { ["pop"] -> [Any] } & { ["push", Int] -> [] } } 
+-- 
+--             -> { { ["push", Int] -> { (Hd { FA ["push", Int] } )  } }
+--                & { ["pop"] -> { (Hd { FB ["pop"] } ) } }
+--                }
+-- 
+--             }
+--             = (_:DA@Type) -> (_:DB@Type)
+--             -- -> ( [fA, fB]: F@{ [ { ["push", Int] -> [Any]} & {["pop"] -> []}, {["pop"] -> [Any]} & {["push", Int] -> []} ] } )
+--             -- -> (val: { ["push", Int] | ["pop"] } ) 
+-- 
+--             -> ( fA: FA@ { { ["push", Int] -> [Any] } & { ["pop"] -> [] } } )
+--             -> ( fB: FB@ { { ["pop"] -> [Any] } & { ["push", Int] -> [] } } )
+-- 
+--             -> (val: { ["push", Int] | ["pop"] } ) 
+--             ->
+--             -- let a: (Codomain FA) = fA val;
+--             -- let a: Codomain FA = fA val;
+--             -- let a: { FA (Domain FA) } = fA val;
+--             let a  = fA val;
+--             -- matchMaybe a
+--             -- [ [] ->
+--             --     -- let b: (Codomain FB) = fB val;
+--             --     let b = fB val;
+--             --     matchMaybe b
+--             --     [ [] -> error "neither cases matched"
+--             --     , [result] -> result 
+--             --     ]
+--             -- , [result] -> result
+--             -- ];
+--             matchMaybe3
+--             [ [] ->
+--                 -- let b: (Codomain FB) = fB val;
+--                 let b = fB val;
+--                 matchMaybe3
+--                 [ [] -> error "neither cases matched"
+--                 , [result] -> result 
+--                 ] b
+--             , [result] -> result
+--             ] a;
+-- 
+--           let mkStack : { (List Int) -> StackInterface }
+--               = rec ( (mkStack: { (List Int) -> StackInterface }) -> (vals: List Int) -> (req: StackRequest) ->
+--                 intersectFuncOpts { ["push", Int] } { ["pop"] }
+--                 ( ["push", val: Int] |=> 
+--                     let stack2 = mkStack [val,,vals];
+--                     [stack2, []]
+--                 )
+--                 ( ["pop"] |=> 
+--                     match vals
+--                     [ [] |=> error "stack empty"
+--                     , [val,,vals2] |=>
+--                         let stack2 = mkStack vals2;
+--                         [stack2, val]
+--                     , _ |=> error ["oops", vals]
+--                     ]
+--                 -- , _ |=> error ["unhandled request", req]
+--                ) req ) ;
+-- 
+-- 
+--           let s1 = mkStack [7,8,9];
+--           let [s2, v1] = s1 ["pop"];
+-- 
+--       """
+--     ]
+--   , [ "expect", "v1", "value", "7"]
+--   ]
+
+-- , [ [ "name", "rr2" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   -- , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "decls",
+--       """
+--         let Rec = Fix;
+--         let StackI = Rec ( S ->
+--             { { ["push", Int] -> [S,[]] }
+--             & { ["pop"]       -> [S,Int] } 
+--             });
+--         let StackRequest = Domain StackI;
+--         let mkStack : { (List Int) -> R@StackRequest -> StackI R } 
+--           = items -> req -> 
+--           error "TODO";
+--           -- "TODO";
+-- 
+--         -- let ReqRespHandler = Rec ( RRH -> { ["done",,Any] | (Self (RQ -> { ["do", StackRequest,, { { (Hd (Tl {StackI (Hd (Tl RQ))})) } -> RRH } ] } ))  } );
+--         let ReqRespHandler = Rec ( RRH -> { ["done",,Any] | ["do",, (Self (RQ -> { [ StackRequest,, { { (Hd (Tl {StackI (Hd RQ)})) } -> RRH } ] })) ] } );
+--         let ReqRespHandler1 = Self (RQ2 -> { [ StackRequest,, { (Hd (Tl { StackI (Hd RQ2)})) -> ReqRespHandler } ] } );
+-- 
+--         let objDo = (obj1: StackI) -> (rr1: ReqRespHandler) -> error "TODO";
+--         -- let f1 : { ReqRespHandler -> StackI -> Any } = rrh -> s -> error "TODO";
+-- 
+--         -- let [a, b] = 
+--         --     objDo (mkStack [7,8,9]) (
+--         --       "do"   :: ( ( ["pop"]      :: ( (_:Int) ->
+--         --       "done" :: [7, 6]  
+--         --       ) ) : ReqRespHandler1 )
+--         --     );
+-- 
+--         -- let [a, b] = 
+--         --     objDo (mkStack [7,8,9]) (
+--         --       -- "do"   :: ["pop"]   :: (x: Int) ->
+--         --       "do"   :: ["push", 2]  :: [] ->
+--         --       "done" :: [7, 6]  
+--         --     );
+-- 
+--         -- let a1 = ( ( ["pop"]  :: ( (_:Int) ->  "done" :: [7, 6]  ) ) : ReqRespHandler1 );
+-- 
+--         -- let b1: ReqRespHandler =
+--         --     "do"   :: ( ( ["pop"]      :: ( (_:Int) ->
+--         --     "done" :: [7, 6]  
+--         --     ) ) : ReqRespHandler1 );
+-- 
+--         let b2: ReqRespHandler =
+--             "do"   :: ( ( ["pop"]      :: ( (_:Int) ->
+--             "done" :: [7, 6]  
+--             ) )  );
+-- 
+--         let c1: ReqRespHandler =
+--             "do"   :: ["pop"]  :: (x: Int) ->
+--             "do"   :: ["push", 2]  :: [] ->
+--             "done" :: [7, 6] ;
+-- 
+--       """
+--     ]
+--   , [ "expect", "1", "value", "1"]
+--   -- , [ "expect", "ReqRespHandler", "value", "1"]
+--   -- , [ "expect", "ReqRespHandler1", "value", "1"]
+--   ]
+
+
+-- , [ [ "name", "stackObj1" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+--   , [ "decls",
+--       """
+--         -- let Handler = { [Str, {(List Void)->Any)}] };
+--         -- let Method = Self ( H -> { [ [Str,,Any], (Tl (Hd H))->Any] } );
+--         let MethodApprox = Self ( H -> { [ Str, Any->Any] } );
+--         let Method = Self ( H -> { [ Str, Void->Any] } );
+--         let DispatchApprox = { C@(List MethodApprox) -> [Str,,Any] -> (Codomain (Hd (Tl (Elem C)))) };
+--         -- let Dispatch = { C@(List Method) -> N@Str -> (Hd (Tl { (Elem C) & [N, Any] } )) };
+--         let Dispatch = { C@(List Method) -> N@[Str,,(Domain (Hd (Tl { (Elem C) & [N, Any] } )))] -> (Codomain (Hd (Tl { (Elem C) & [N, Any] } ))) };
+--         let dispatch1 : DispatchApprox
+--             = ( cases: C@(List MethodApprox) ) -> ( [name:Str,,args] ) ->
+--             loop1 ( (cases: List (Elem C)) ->
+--                 match cases
+--                 [ [] |=> 
+--                     error ["no match", name]
+--                 , [ case1@[name1, fun1],,cases2] |=>
+--                     if (name == name1)
+--                     [ ->
+--                         -- TODO In order to give dispatch a sufficiently precise type,
+--                         -- TODO   we need to know that "fun1" can be applied to "args".
+--                         -- TODO The ifStrEq function is insufficient for this, as it takes "name1" without "val1", 
+--                         -- TODO   so the type-relationship connection between the two is lost.
+--                         -- TODO Perhaps it's time to add a binding/bound pattern operator, e.g.:
+--                         -- TODO   match case1
+--                         -- TODO   [ [@name, fun1] |=> break (fun1 args) 
+--                         -- TOOO   , _             |=> continue cases2 
+--                         -- TODO   ]
+--                         -- TODO Where "@name" denotes a bound reference to "name"
+-- 
+--                         break (fun1 args)
+--                     , ->
+--                         continue cases2
+--                     ]
+--                 ]
+--             ) cases;
+-- 
+--         let dispatch: Dispatch = castT dispatch1;
+-- 
+--         let t5: Str = dispatch [ ["id", (([a]:A@{[Any]})->a):{A@[Any]->(Hd A)}], ["seven", [] -> 7] ] ["id", "nine"];
+-- 
+--         let StackI = Rec ( S ->
+--             { { ["push", Int] -> [S,[]] }
+--             & { ["pop"]       -> [S,Int] } 
+--             });
+--         let StackRequest = Domain StackI;
+-- 
+--         let mkStack : { (List Int) -> R@StackRequest -> StackI R }
+--             = rec ( (mkStack: { (List Int) -> R@StackRequest -> StackI R }) -> vals -> (req: R@StackRequest) ->
+--               dispatch
+--               [ [ "push", [val: Int] -> 
+--                   let stack2 = mkStack [val,,vals];
+--                   [stack2, []] 
+--                 ]
+--               , [ "pop", [] -> 
+--                   match vals
+--                   [ [] |=> error "stack empty"
+--                   , [val,,vals2] |=>
+--                       let stack2 = mkStack vals2;
+--                       [stack2, val]
+--                   , _ |=> error ["oops", vals]
+--                   ]
+--                 ]  
+--               ] req );
+-- 
+-- 
+--         let s1 = mkStack [1,2,3];
+--         let [s2,v2] = s1 ["pop"];      
+--         let [s3,[]] = s2 ["push", 7];      
+--         let [s4,v4] = s3 ["pop"];      
+--         let [s5,v5] = s4 ["pop"];      
+--         let [s6,v6] = s5 ["pop"];      
+-- 
+--         -- let ReqRespHandler = Rec ( RRH -> { [Any] | (Self (RQ -> { [StackRequest,, { { StackI (Hd RQ) } -> RRH } ] } ))  } );
+--         -- let ReqRespHandler = Rec ( RRH -> { ["done",,Any] | (Self (RQ -> { ["do", StackRequest,, { (Hd (Tl { StackI (Hd (Tl RQ)) } )) -> RRH } ] } ))  } );
+--         let ReqRespHandler = Rec ( RRH -> { ["done",,Any] | ["do",, (Self (RQ -> { [ StackRequest,, { { (Hd (Tl {StackI (Hd RQ)})) } -> RRH } ] })) ] } );
+--         -- let ReqRespHandler = Rec ( RRH -> { ["done", Any] | (Self (RQ -> { ["do", StackRequest, { { StackI (Hd (Tl RQ)) } -> RRH } ] } ))  } );
+--         let ReqRespHandler1 = Self (RQ2 -> { [ StackRequest,, { (Hd (Tl { StackI (Hd RQ2)})) -> ReqRespHandler } ] } );
+-- 
+--         -- let callRRH : { ReqRespHandler1 -> StackI -> [StackI, (Hd (Tl { StackI (Hd R) })) ] }
+--         let callRRH : { ReqRespHandler1 -> StackI -> [StackI, ReqRespHandler ] }
+--           = ([req,,respHandler]: R@ReqRespHandler1) -> stack ->
+--           let [stack2,resp] = stack req;
+--           [stack2, respHandler resp];
+-- 
+--         let objDo : { StackI -> ReqRespHandler -> [StackI, Any] } 
+--             = (obj1: StackI) -> (rr1: ReqRespHandler) ->
+--           -- castT <|
+--           loop1 ( L@[obj2: StackI, rr2: ReqRespHandler] -> 
+--           -- match rr2
+--           --     [ [result] |=> 
+--           --         break [obj2, result]
+--           --     , [req: StackRequest,,respHandler] |=> 
+--           --       let [obj3, resp1] = castT <| obj2 req;
+--           --       continue [obj3, respHandler (castT resp1)]
+--           --     ]
+-- 
+--           -- match rr2
+--           --     [ [result] |=> 
+--           --         break [obj2, result]
+--           --     , [req: StackRequest,,respHandler] |=> 
+--           --       let [obj3, resp1] = castT <| obj2 req;
+--           --       continue [obj3, respHandler (castT resp1)]
+--           --     ]
+--           -- ) [obj1, rr1];
+-- 
+--           match rr2
+--               [ ["done",, result] |=> 
+--                   break [obj2, result]
+--               -- , ["do", req: StackRequest,,respHandler] |=> 
+--               , ["do",,rrh] |=> 
+--                 -- let [obj3, resp1] = obj2 req;
+--                 -- continue [obj3, respHandler resp1]
+--                 let [obj3, rrh3] = callRRH rrh obj2;
+--                 continue [obj3, rrh3]
+--               ]
+--           ) [obj1, rr1];
+-- 
+--           -- match rr2
+--           --     [ ["done", result] |=> 
+--           --         break [obj2, result]
+--           --     , ["do", req: StackRequest, respHandler] |=> 
+--           --       let [obj3, resp1] = obj2 req;
+--           --       continue [obj3, respHandler resp1]
+--           --     ]
+--           -- ) [obj1, rr1];
+-- 
+--         -- let [a, b] = 
+--         --     objDo (mkStack [7,8,9]) (
+--         --       ["pop"] :: a ->
+--         --       ["push", 5] :: ->
+--         --       [6]
+--         --     );
+-- 
+--         -- let [a, b] = 
+--         --     objDo (mkStack [7,8,9]) (
+--         --       [ ["pop"],, a ->
+--         --       [ ["push", 5],,  ->
+--         --       [[a, 6]] ] ]
+--         --     );
+-- 
+--         -- let [a, b] = 
+--         --     objDo (mkStack [7,8,9]) (
+--         --       ["pop"] :: "then" :: a ->
+--         --       ["push", 5] :: "then" :: ->
+--         --       6 ::  "return" :: []
+--         --     );
+-- 
+--         let [a, b] = 
+--             objDo (mkStack [7,8,9]) (
+--               "do"   :: ["pop"]      :: (a:Int) ->
+--               "do"   :: ["push", 5]  :: [] ->
+--               "done" :: [a, 6]
+--             );
+-- 
+--         -- let [a, b] = 
+--         --     objDo (mkStack [7,8,9]) (
+--         --       "do"   :: ["pop"]      :: (_:Int) ->
+--         --       "do"   :: ["push", 5]  :: (_:{[]}) ->
+--         --       "done" :: [7, 6]
+--         --     );
+-- 
+--         -- let [a, b] = 
+--         --     objDo (mkStack [7,8,9]) (
+--         --       ["do", ["pop"],, a ->
+--         --       ["do", ["push", 5],, ->
+--         --       ["done", [a, 6] ] ] ]
+--         --     );
+-- 
+--         -- let [a, b] = 
+--         --     objDo (mkStack [7,8,9]) (
+--         --       ["do", ["pop"],, (a: Int) ->
+--         --       ["do", ["push", 5],, ->
+--         --       ["done", [a, 6] ] ] ]
+--         --     );
+-- 
+--         -- let [a, b] = 
+--         --     objDo (mkStack [7,8,9]) (
+--         --       ["do", ["pop"], (a: Int) ->
+--         --       ["do", ["push", 5], ->
+--         --       ["done", [a, 6] ] ] ]
+--         --     );
+-- 
+--       """
+--     ]
+--   , [ "expect", "t5", "value", "\"nine\""]
+--   , [ "expect", "v2", "value", "1"]
+--   , [ "expect", "v4", "value", "7"]
+--   , [ "expect", "v5", "value", "2"]
+--   , [ "expect", "v6", "value", "3"]
+--   , [ "expect", "b", "value", "[7,6]"]
+--   ]
+
+
+
+, [ [ "name", "paraPoly" ]
+  , [ "language", "ferrum/0.1" ]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+          let f : { {T: Type} -> T -> T -> Bool }
+            = (T: Type) -> (a: T) -> (b: T) ->
+            a==b;
+
+          let f11 = f Int 1 1;
+          let f12 = f Int 1 2;
+      """
+    ]
+  , ["expect", "f11", "value", "true"]
+  , ["expect", "f12", "value", "false"]
+  ]
+
+
+
+, [ [ "name", "power1_cps" ]
+  , [ "language", "ferrum/0.1" ]
+  -- , [ "language", "ferrum.org/lang/0.1" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+
+        let power1 = 
+          """
+           -- let fix = f -> x -> f (fix f) x;
+           -- let fixY = f -> (x -> f (x x)) (x -> f (x x));
+           -- let fixZ = f -> (x -> (x x)) (x -> f (y -> x x y));
+           -- let fixZ = f -> (x -> f (y -> x x y)) (x -> f (y -> x x y));
+           -- let fixZ = f -> (x -> (x x)) (x -> let xx = _ -> x x; f (y -> xx [] y));
+           let fixZ = f -> (x -> (x x)) (x -> f (y -> (y $? x) x y));
+           let fix = fixZ;
+           -- TODO ? implement the Z-combinator as an operator ?
+           -- let fix = f -> x -> f $@ x;
+           -- f $@ x ---> f (x -> f $@ x) x
+           -- f $@ x ---> f ( ($@) f ) x
+           
+           -- let if = cond -> [t, f] -> (cond ? (t::f))[];
+           let if = cond -> [t, f] -> (cond ? ([t,,f]))[];
+
+           -- let resid = a -> $? a; -- TODO make postfix, or
+           -- let resid = a -> b -> a $? b; -- TODO make infix
+           let resid = a -> b -> b;
+
+           -- let spec = a -> $! a; -- TODO make postfix, or
+           -- let spec = a -> b -> (a $! []) b; -- TODO remove temporary in/post-fix syntax work-around
+           -- let spec = a -> b -> (a  b) $! []; -- TODO remove temporary in/post-fix syntax work-around
+           -- let spec = a -> a;
+           -- let spec = a -> b -> normalize a b;
+
+           -- let spec = a -> b -> a $! b; -- TODO make infix
+           let spec = a -> b -> a <$ b; -- TODO make infix
+           -- let spec = a -> b -> a b;
+
+
+           -- TODO ? change order of recursive reference and inductive variable
+           -- let power1 = n -> power1 -> x -> ...
+           -- let power2 = n -> x -> power1 n power1 x;
+
+
+
+           -- TODO ? use a seq on the explicit self-applying recursive call 
+           -- let power = n -> x ->
+           --     let power = power -> n -> x -> 
+           --         if (n==0)
+           --         [ _ -> 1
+           --         , _ -> x * (n $? power) power (n-1) x
+           --         ];
+           --      (n $? power) power n x;
+
+           let power = fix (power -> n -> x -> 
+               if (n==0)
+               [ _ -> 1
+               -- , _ -> x * (resid n power) (n-1) x
+               , _ -> x * power (n-1) x
+               -- , _ -> x * (n $? power) (n-1) x
+               ]);
+
+           -- let cube = power 3 $!;
+           -- let cube = $! power 3;
+           let cube = spec power 3;
+           [cube, cube 3]
+           -- cube 3
+           -- cube
+           -- power
+          """
+          ;
+      """
+    ]
+  , [ "expect", "evalStr power1", "value", "[#Func,27]"]
+  -- , [ "expect", "graphReduceStr power1", "value", "[v1->v1*v1*v1*1,27]"]
+  , [ "expect", "graphReduceStr power1", "value", "\"[(v1->v1*v1*v1*1),27]\""]
+
+  ]
+
+-- , [ [ "name", "power1_step" ]
+--   , [ "language", "ferrum/0.1" ]
+--   -- , [ "language", "ferrum.org/lang/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "decls",
+--       """
+-- 
+--         let power1 = 
+--           """
+--            -- let fix = f -> x -> f (fix f) x;
+--            -- let fixY = f -> (x -> f (x x)) (x -> f (x x));
+--            -- let fixZ = f -> (x -> (x x)) (x -> f (y -> x x y));
+--            -- let fixZ = f -> (x -> f (y -> x x y)) (x -> f (y -> x x y));
+--            -- let fixZ = f -> (x -> (x x)) (x -> let xx = _ -> x x; f (y -> xx [] y));
+--            let fixZ = f -> (x -> (x x)) (x -> f (y -> (y $? x) x y));
+--            let fix = fixZ;
+--            -- TODO ? implement the Z-combinator as an operator ?
+--            -- let fix = f -> x -> f $@ x;
+--            -- f $@ x ---> f (x -> f $@ x) x
+--            -- f $@ x ---> f ( ($@) f ) x
+--            
+--            -- let if = cond -> [t, f] -> (cond ? (t::f))[];
+--            let if = cond -> [t, f] -> (cond ? ([t,,f]))[];
+-- 
+--            -- let resid = a -> $? a; -- TODO make postfix, or
+--            -- let resid = a -> b -> a $? b; -- TODO make infix
+--            let resid = a -> b -> b;
+-- 
+--            -- let spec = a -> $! a; -- TODO make postfix, or
+--            -- let spec = a -> b -> (a $! []) b; -- TODO remove temporary in/post-fix syntax work-around
+--            -- let spec = a -> b -> (a  b) $! []; -- TODO remove temporary in/post-fix syntax work-around
+--            -- let spec = a -> a;
+--            -- let spec = a -> b -> normalize a b;
+-- 
+--            let spec = a -> b -> a $! b; -- TODO make infix
+--            -- let spec = a -> b -> a b;
+-- 
+-- 
+--            -- TODO ? change order of recursive reference and inductive variable
+--            -- let power1 = n -> power1 -> x -> ...
+--            -- let power2 = n -> x -> power1 n power1 x;
+-- 
+-- 
+-- 
+--            -- TODO ? use a seq on the explicit self-applying recursive call 
+--            -- let power = n -> x ->
+--            --     let power = power -> n -> x -> 
+--            --         if (n==0)
+--            --         [ _ -> 1
+--            --         , _ -> x * (n $? power) power (n-1) x
+--            --         ];
+--            --      (n $? power) power n x;
+-- 
+--            let power = fix (power -> n -> x -> 
+--                if (n==0)
+--                [ _ -> 1
+--                -- , _ -> x * (resid n power) (n-1) x
+--                , _ -> x * power (n-1) x
+--                -- , _ -> x * (n $? power) (n-1) x
+--                ]);
+-- 
+--            -- let cube = power 3 $!;
+--            -- let cube = $! power 3;
+--            let cube = spec power 3;
+--            [cube, cube 3]
+--            -- cube 3
+--            -- cube
+--            -- power
+--           """
+--           ;
+--       """
+--     ]
+--   , [ "expect", "evalStr power1", "value", "[#Func,27]"]
+--   -- , [ "expect", "graphReduceStr power1", "value", "[v1->v1*v1*v1*1,27]"]
+--   , [ "expect", "graphReduceStr power1", "value", "\"[(v1->v1*v1*v1*1),27]\""]
+-- 
+--   ]
+
+
+
+
+, [ [ "name", "power2" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+
+        let power1 = 
+          """
+           let rec = fix;
+
+           let power = 
+               rec <| power -> 
+               n -> x -> 
+               if (n == 0)
+               [ _ -> 1
+               , _ -> x * power (n-1) x
+               ];
+
+           let cube = power <$ 3;
+           [cube, cube 3]
+          """
+          ;
+      """
+    ]
+  -- , [ "expect", "evalStr power1", "value", "[#Func,27]"]
+  , [ "expect", "graphReduceStr2 power1", "value", "\"[(v1->v1*v1*v1*1),27]\""]
+  -- , [ "expect", "specializeStr power1", "value", "\"[(v1->v1*v1*v1*1),27]\""]
+
+  ]
+
+
+
+
+
+
+-- , [ [ "name", "obj1" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "ignoreUnproven", "" ]
+--   , [ "project", "../fe/fe-in-fe/fe4b.proj.fe" ]
+--   , [ "decls",
+--       """
+--         let t5: Str = objDispatch [ ["id", (([a]:A@{[Any]})->a):{A@[Any]->(Hd A)}], ["seven", [] -> 7] ] ["id", "nine"];
+-- 
+--         let [a, b] = 
+--             objDo Stack (mkStack [7,8,9]) (
+--               "do"   :: ["pop"]      :: (a:Int) ->
+--               "do"   :: ["push", 5]  :: [] ->
+--               "done" :: [a, 6]
+--             );
+-- 
+--       """
+--     ]
+--   , [ "expect", "t5", "value", "\"nine\""]
+--   , [ "expect", "b", "value", "[7,6]"]
+-- 
+--   ]
+
+
+-- , [ [ "name", "objLoop" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "ignoreUnproven", "" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "project", "../fe/fe-in-fe/fe4b.proj.fe" ]
+--   , [ "decls",
+--       """
+--        let [_,t1] = objDo Stack (mkStack [7]) (
+--             objLoop Stack ( (i: Int) ->
+--               objBreak 9
+--             ) 3 <| a ->
+--             "done" :: a
+--           );
+-- 
+-- 
+--         let [_, t2] = 
+--             objDo Stack (mkStack []) (
+--                 objLoop Stack ( (i: Int) ->
+--                   if (i <= 10)
+--                   [ -> 
+--                       "do" :: ["push", i] :: ->
+--                       objContinue (i+1)
+--                   , ->
+--                       objBreak (i*i)
+--                   ]
+--                 ) 0 <| m ->
+--                 objLoop Stack ( [i: Int, j: Int] ->
+--                   if (i <= 10)
+--                   [ -> 
+--                       "do" :: ["pop"] :: (x: Int) ->
+--                       objContinue [i+1, j+x]
+--                   , ->
+--                       objBreak j
+--                   ]
+--                 ) [0, 0] <| n ->
+--                 "done" :: [m, n]
+--             );
+-- 
+-- 
+--       """
+--     ]
+-- 
+--   , [ "expect", "t1", "value", "9"]
+--   , [ "expect", "t2", "value", "[121,55]"]
+-- 
+--   ]
+
+-- , [ [ "name", "objLoop2" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "project", "../fe/fe-in-fe/fe4b.proj.fe" ]
+--   , [ "decls",
+--       """
+--        let [_,t1] = objDo Stack (mkStack [7]) (
+--             objLoop Stack ( (i: Int) ->
+--               oBreak 9
+--             ) 3 <| a ->
+--             oDone a
+--           );
+-- 
+-- 
+--         let [_, t2] = 
+--             oDo2 (mkStack []) (
+--                 oLoop Stack ( (i: Int) ->
+--                     if (i <= 10)
+--                     [ -> 
+--                         oReq ["push", i]  <| ->
+--                         oContinue (i+1)
+--                     , ->
+--                         objBreak (i*i)
+--                     ]
+--                 ) 0 <| m ->
+--                 oLoop Stack ( [i: Int, j: Int] ->
+--                     if (i <= 10)
+--                     [ -> 
+--                         oReq ["pop"] <| (x: Int) ->
+--                         oContinue [i+1, j+x]
+--                     , ->
+--                         oBreak j
+--                     ]
+--                 ) [0, 0] <| n ->
+--                 oDone [m, n]
+--             );
+-- 
+--       """
+--     ]
+-- 
+--   , [ "expect", "t1", "value", "9"]
+--   , [ "expect", "t2", "value", "[121,55]"]
+-- 
+--   ]
+
+, [ [ "name", "objLoopType" ]
+  , [ "language", "ferrum/0.1" ]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  -- , [ "project", "../fe/fe-in-fe/fe4b.proj.fe" ]
+  , [ "decls",
+      """
+       let Rec = Fix;
+       let ReqRespH : { Type -> Type -> Type } 
+           = (Obj: Type) -> (Result: Type) -> 
+               (Rec ( RRH -> 
+                   { ["done",,Result] 
+                   | ["do",, (SelfT (RQ -> { [ {(Inverse Obj) [Obj, Any] },, { { (Hd (Tl {Obj (Hd RQ)})) } -> RRH } ] })) ] 
+                   } ) );
+
+        let ObjLoopBody = (OBJ: Type) -> (R: Type) -> SelfT ( B -> { Void -> (ReqRespH OBJ { ["break", Any] | ["continue", (Domain B) ] } ) } );
+
+        let Stack = Rec ( S ->
+            { { ["push", Int] -> [S,[]]  }
+            & { ["pop"]       -> [S,Int] } 
+            } );
+
+        let StackLoopBody = ObjLoopBody Stack Any;
+
+      """
+    ]
+  -- , [ "expect", "StackLoopBody", "value", "todo"]
+  ]
+
+
+, [ [ "name", "cast" ]
+  , [ "language", "ferrum/0.1" ]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+       let cast : { {From: Type} -> {To: Type} -> From -> To }
+           = (From: Type) -> (To: Type) -> (a: From) -> 
+           castT a: To;
+      """
+    ]
+  ]
+
+
+-- , [ [ "name", "oParse1" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "ignoreUnproven", "" ]
+--   , [ "project", "../fe/fe-in-fe/fe4b.proj.fe" ]
+--   , [ "decls",
+--       """
+--         let a = parseExprStr "1";  
+--         let b = map parseExprStr 
+--           [ "1"
+--           , "a b"
+--           , "a + b"
+--           , "a -> b"
+--           , "( a b ) c"
+--           , "[]"
+--           , "[1]"
+--           , "[1, 2]"
+--           , "[1,,2]"
+--           , "[1, 2,,3]"
+--           , "let a = b; c"
+--           , "let a=1; let b=2; c"
+--           ];
+-- 
+--         let c = parseDeclsStr "let a=1; let b=2;";
+--       """
+--     ]
+--   , [ "expect", "a", "value", "[\"ELit\",1]"]
+--   -- , [ "expect", "b", "value", "TODO"]
+--   , [ "expect", "c", "value", "[[[\"EVar\",\"a\"],[\"ELit\",1]],[[\"EVar\",\"b\"],[\"ELit\",2]]]"]
+--   , [ "expect", "testParseFile \"\" fe4_prelude_text", "value", "\"Test PASSED\""]
+--   , [ "expect", "testParseFile \"\" fe4_parser3_text", "value", "\"Test PASSED\""]
+--   ]
+
+, [ [ "name", "hpsParse1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        let a = parseExprStr "1";  
+        let b = map parseExprStr 
+          [ "1"
+          , "a b"
+          , "a + b"
+          , "a -> b"
+          , "( a b ) c"
+          , "[]"
+          , "[1]"
+          , "[1, 2]"
+          , "[1,,2]"
+          , "[1, 2,,3]"
+          , "let a = b; c"
+          , "let a=1; let b=2; c"
+          ];
+
+        let c = parseDeclsStr "let a=1; let b=2;";
+      """
+    ]
+  , [ "expect", "a", "value", "[\"ELit\",1]"]
+  -- , [ "expect", "b", "value", "TODO"]
+  , [ "expect", "c", "value", "[[[\"EVar\",\"a\"],[\"ELit\",1]],[[\"EVar\",\"b\"],[\"ELit\",2]]]"]
+  , [ "expect", "testParseFile \"\" fe4_prelude_text", "value", "\"Test PASSED\""]
+  , [ "expect", "testParseFile \"\" fe4_parser3_text", "value", "\"Test PASSED\""]
+
+  ]
+
+, [ [ "name", "io2Do1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let prog1 = 
+          io2ReadFile "hello.txt" <| contents ->
+          let contents2 = strCat [contents, "addendum", "1", "\n\n2"];
+          io2WriteFile "hello2.txt" contents2 <| ->
+          io2Print "io done" <| ->
+          io2Exit 7; 
+      """
+    ]
+  , [ "expect", "ioDo prog1", "value", "7"]
+  ]
+
+, [ [ "name", "io2Do2" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let prog1 = 
+          io2ReadFile2 "hello3.txt" <| contentsResult ->
+          let contents = 
+            match contentsResult
+            [ ["Ok", contents] |=> contents
+            , ["Error", msg] |=>
+              debug2 ["ignoring IO error: ", msg] <| ->
+              "empty file\n"
+            ];
+          -- let contents = 
+          --   ifOk contentsResult
+          --   [ contents -> contents]
+          --   , msg ->
+          --     debug2 ["ignoring IO error: ", msg] <| ->
+          --     "empty file"
+          --   ];
+          -- let contents = 
+          --   cifError contentsResult <| (
+          --     errMsg ->
+          --     debug2 ["ignoring IO error: ", msg] <| ->
+          --     "empty file"
+          --   ) <| contents -> contents;
+          let contents2 = strCat [contents, "addendum", "1", "\n\n2\n"];
+          io2WriteFile "hello4.txt" contents2 <| ->
+          io2Print "io done" <| ->
+          io2Exit 7; 
+      """
+    ]
+  , [ "expect", "ioDo prog1", "value", "7"]
+  ]
+
+-- , [ [ "name", "io2PrintLoop1" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "decls",
+--       """
+--         let prog1 = 
+--           printNumbers;
+--       """
+--     ]
+--   , [ "expect", "ioDo prog1", "value", "3"]
+--   , [ "expect", "ioDo printNumbers2", "value", "3"]
+--   ]
+
+, [ [ "name", "io2PrintNumbers1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+          -- let printNumbers : { { [Int, Str] -> IoReqResp } -> IoReqResp } = ioReturn ->
+          let printNumbers : IoReqResp =
+              io2Loop ( (i: Int) ->
+                  io2Print [i, i*i, i*i*i] <| ->
+                  if (i >= 10)
+                  [ -> io2Break [i, strCat ["i = ", show i]] 
+                  , -> io2Continue (i+1)
+                  ]
+              ) 1 <| (result: {[Int, Str]}) ->
+              io2Print result <| ->
+              -- ioReturn resut
+              io2Exit 3;
+      """
+    ]
+  , [ "expect", "ioDo printNumbers", "value", "3"]
+  ]
+
+, [ [ "name", "io2PrintNumbers2" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        -- let printNumbers : { { [Int, Str] -> IoReqResp } -> IoReqResp } = ioReturn ->
+        let printNumbers2 : IoReqResp =
+            io2Loop2A {[Int,Str]} ( (i: Int) -> breakK -> continueK ->
+                io2Print [i, i*i, i*i*i] <| ->
+                if (i >= 10)
+                [ -> breakK [i, strCat ["i = ", show i]] 
+                , -> continueK (i+1)
+                ]
+            ) 1 <| result ->
+            io2Print result <| ->
+            -- ioReturn resut
+            io2Exit 3;
+      """
+    ]
+  , [ "expect", "ioDo printNumbers2", "value", "3"]
+  ]
+
+, [ [ "name", "io2PrintNumbers3" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let printNumbers3 : Io =
+            io2Loop2B ( (i: Int) -> (breakK: {[Int,Str] -> Io}) -> continueK ->
+                io2Print [i, i*i, i*i*i] <| ->
+                if (i >= 10)
+                [ -> breakK [i, strCat ["i = ", show i]] 
+                , -> continueK (i+1)
+                ]
+            ) 1 <| result ->
+            io2Print result <| ->
+            io2Exit 3;
+      """
+    ]
+  , [ "expect", "ioDo printNumbers3", "value", "3"]
+  ]
+
+, [ [ "name", "io2PrintNumbers4" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let printNumbers4 : Io =
+            ioMap ( (i: Int) -> returnK ->
+                io2Print [i, i*i, i*i*i] <| ->
+                returnK [i, strCat ["i = ", show i]] 
+            ) numbers <| result ->
+            io2Print result <| ->
+            io2Exit 3;
+      """
+    ]
+  , [ "expect", "ioDo printNumbers4", "value", "3"]
+  ]
+
+
+, [ [ "name", "runTest_while_cps_Direct" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        let tDirect = -> ioDo (
+            -- io2GetFerrumDir_orPanic <| srcDir ->
+            -- let testFile = pathJoin [srcDir, "tests/fe4a.test.fe"];
+            io2GetFerrumTestDir_orPanic <| testDir ->
+            let testFile = pathJoin [testDir, "fe4a.test.fe"];
+            loadAndRunTests_single "Direct" testFile "while" <| summary ->   
+            ioDone summary
+        );    
+      """
+    ]
+  , [ "expect", "tDirect[]", "value", "[2,0,2]"]
+  ]
+
+, [ [ "name", "runTest_single" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let tDirect = -> ioDo (
+            io2GetFerrumTestDir_orPanic <| testDir ->
+            let testFile = pathJoin [testDir, "fe4a.test.fe"];
+            loadAndRunTests_single "InstRb" testFile "single" <| summary1 ->   
+            -- loadAndRunTests_single "InstRb" testFile "plus"   <| summary1 ->   
+            -- loadAndRunTests_single "InstRb" testFile "let"    <| summary1 ->   
+            -- loadAndRunTests_single "InstGrRb2" testFile "maybe-func"  <| summary1 ->   
+            -- loadAndRunTests_single "InstGrRb2" testFile "lambda-maybe-types"  <| summary1 -> 
+            -- loadAndRunTests_single "InstRb" testFile "CPS"  <| summary1 -> 
+            -- loadAndRunTests_single "InstRb" testFile "func"  <| summary1 -> 
+            -- loadAndRunTests_single "InstRb" testFile "type-check"  <| summary1 -> 
+            ioDone summary1
+        );    
+      """
+    ]
+  , [ "expect", "tDirect[]", "value", "[2,0,2]"]
+  ]
+
+, [ [ "name", "runTests_4a_cps_Direct" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        let t4 = -> ioDo (
+            io2GetFerrumTestDir_orPanic <| testDir ->
+            let testFile = pathJoin [testDir, "fe4a.test.fe"];
+            loadAndRunTests_all "Direct" testFile <| summary ->   
+            -- loadAndRunTests_single "Direct" testFile "keyValueTuple-set" <| summary ->   
+            -- loadAndRunTests_single "Direct" testFile "typeOps" <| summary ->   
+            ioDone summary
+        );    
+      """
+    ]
+  , [ "expect", "t4[]", "value", "[111,18,129]"]
+  ]
+
+-- This tests passes, but some of the tests within the test fail, and are expected to fail
+-- these are the type tests which require graph-reduction to compute the types,
+-- but this test skips the graph-reduction phase, that's done in the next test.
+, [ [ "name", "runTests_4a_cps_InstRb" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+--  , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        let t4 = -> ioDo (
+            io2GetFerrumTestDir_orPanic <| testDir ->
+            let testFile = pathJoin [testDir, "fe4a.test.fe"];
+            loadAndRunTests_all "InstRb" testFile <| summary ->   
+            -- loadAndRunTests_single "InstRb" testFile "keyValueTuple" <| summary ->   
+            -- loadAndRunTests_single "InstRb" testFile "keyValueTuple-get" <| summary ->   
+            -- loadAndRunTests_single "InstRb" testFile "matchLookup" <| summary ->   
+            -- loadAndRunTests_single "InstRb" testFile "inverse-apply" <| summary ->   
+            -- loadAndRunTests_single "InstRb" testFile "let" <| summary ->   
+            ioDone summary
+        );    
+      """
+    ]
+  , [ "expect", "t4[]", "value", "[111,18,129]"]
+  ]
+
+, [ [ "name", "runTests_4a_cps_InstGrRb" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        let t4 = -> ioDo (
+            io2GetFerrumTestDir_orPanic <| testDir ->
+            let testFile = pathJoin [testDir, "fe4a.test.fe"];
+            loadAndRunTests_all "InstGrRb" testFile <| summary ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "typeOps" <| summary ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "inverse-apply" <| summary ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "CPS2" <| summary ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "lambda-maybe" <| summary ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "maybe-func" <| summary ->   
+            ioDone summary
+        );    
+      """
+    ]
+  , [ "expect", "t4[]", "value", "[113,11,124]"] -- Something has regressed, the "InstGrRb"/"InstGrRb2" modes used to result in 4 more test-passes than the non-"Gr" modes.
+  ]
+
+, [ [ "name", "runTests_4a_cps_InstGrRb2" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        let t4 = -> ioDo (
+            io2GetFerrumTestDir_orPanic <| testDir ->
+            let testFile = pathJoin [testDir, "fe4a.test.fe"];
+            loadAndRunTests_all "InstGrRb2" testFile <| summary ->   
+            -- loadAndRunTests_single "InstGrRb2" testFile "keyValueTuple-get" <| summary ->   
+            -- loadAndRunTests_single "InstGrRb2" testFile "plus" <| summary ->   
+            -- loadAndRunTests_single "InstGrRb2" testFile "let" <| summary ->   
+            -- loadAndRunTests_single "InstGrRb2" testFile "func" <| summary ->   
+            ioDone summary
+        );    
+      """
+    ]
+  , [ "expect", "t4[]", "value", "[113,11,124]"]
+  ]
+
+, [ [ "name", "runTests_4b_cps_Direct" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        let t4 = -> ioDo (
+            io2GetFerrumTestDir_orPanic <| testDir ->
+            let testFile = pathJoin [testDir, "fe4b.test.fe"];
+            loadAndRunTests_all "Direct" testFile <| summary ->   
+            -- loadAndRunTests_single "Direct" testFile "scanWord" <| summary ->    
+            -- loadAndRunTests_single "Direct" testFile "parse2" <| summary ->    
+            -- loadAndRunTests_single "Direct" testFile "cg" <| summary ->    
+            -- loadAndRunTests_single "Direct" testFile "instantiate1_cps" <| summary ->    
+            -- loadAndRunTests_single "Direct" testFile "graph2_cps" <| summary ->    
+            ioDone summary
+        );    
+      """
+    ]
+  , [ "expect", "t4[]", "value", "[75,0,75]"]
+  ]
+
+-- This test now works, all tests pass
+, [ [ "name", "runTests_4b_cps_InstRb" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """ 
+        let t4 = -> ioDo (
+            io2GetFerrumTestDir_orPanic <| testDir ->
+            let testFile = pathJoin [testDir, "fe4b.test.fe"];
+            -- loadAndRunTests_single "InstRb" testFile "first" <| summary ->   
+            -- loadAndRunTests_single "InstRb" testFile "foldSum" <| _ ->   
+            -- loadAndRunTests_single "InstRb" testFile "scanSimple" <| _ ->   
+            -- loadAndRunTests_single "InstRb" testFile "scanWord" <| _ ->   
+            -- loadAndRunTests_single "InstRb" testFile "parse1" <| _ ->   
+            -- loadAndRunTests_single "InstRb" testFile "cg" <| summary ->   
+            -- loadAndRunTests_single "InstRb" testFile "graph2_cps" <| summary ->   
+            -- loadAndRunTests_single "InstRb" testFile "lambda-maybe" <| summary ->   
+            -- loadAndRunTests_single "InstRb" testFile "maybe-func" <| summary ->   
+            loadAndRunTests_all "InstRb" testFile <| summary ->   
+            ioDone summary
+        );    
+      """
+    ]
+  , [ "expect", "t4[]", "value", "[75,0,75]"]
+  ]
+ 
+-- This test now works, all tests pass
+-- There are sufficient graph-reduction operators, implemented to varying degrees.
+-- Some graph-reduction operators are place-holders and don't reduce.
+-- They are read-back though, so evaluation continues, and the tests all pass. 
+, [ [ "name", "runTests_4b_cps_InstGrRb" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        let t4 = -> ioDo (
+            io2GetFerrumTestDir_orPanic <| testDir ->
+            let testFile = pathJoin [testDir, "fe4b.test.fe"];
+            -- loadAndRunTests_single "InstGrRb" testFile "first" <| _ ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "foldSum" <| _ ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "scanSimple" <| _ ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "scanWord" <| summary ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "parse1" <| _ ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "eval1" <| summary ->   
+            -- loadAndRunTests_single "InstGrRb" testFile "cpsLoop1" <| summary ->   
+            loadAndRunTests_all "InstGrRb" testFile <| summary ->   
+            ioDone summary
+        );
+      """
+    ]
+  , [ "expect", "t4[]", "value", "[75,0,75]"]
+  ]
+
+-- -- TODO This doesn't work yet, partly due to the mkArray... function not being supported during graph-reduction yet,
+-- -- TODO and partly due to some as-yet undiagnosed bug during graph-reduction.
+-- -- TODO Setting the reduceAll RedexCount test to bail early masks the undiagnosed bug
+-- -- the shorter tests culminating in the "eval1" test work
+-- -- the "cg" test works if the max-heap-size is increase and only half the test is run at a time
+-- -- (both halves work, but memory usage goes over 4GB is both are run together, there's no heap memory recycling/reclamation scheme implemented at present)
+-- -- the longer tests involving the mkArray function don't work
+-- -- this test (with "eval1") takes about 6 minutes using ./runtest (nodejs) or about 1 minute using ./runtest4-deno 
+-- -- (both the imperative code-style of the generated code, and use of Deno, help)
+-- , [ [ "name", "runTests_4b_cps_InstGrRb2" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "decls",
+--       """
+--         let t4 = -> ioDo (
+--             -- loadAndRunTests_single "InstGrRb2" "../tests/fe4b.test.fe" "first" <| _ ->   
+--             -- loadAndRunTests_single "InstGrRb2" "../tests/fe4b.test.fe" "foldSum" <| _ ->   
+--             -- loadAndRunTests_single "InstGrRb2" "../tests/fe4b.test.fe" "scanSimple" <| _ ->   
+--             -- loadAndRunTests_single "InstGrRb2" "../tests/fe4b.test.fe" "scanWord" <| summary ->   
+--             -- loadAndRunTests_single "InstGrRb2" "../tests/fe4b.test.fe" "parse1" <| summary ->   
+--             loadAndRunTests_single "InstGrRb2" "../tests/fe4b.test.fe" "eval1" <| summary ->   
+--             -- loadAndRunTests_single "InstGrRb2" "../tests/fe4b.test.fe" "cg" <| summary ->   
+--             -- loadAndRunTests_all "InstGrRb2" "../tests/fe4b.test.fe" <| summary ->   
+--             ioDone summary
+--         );
+--       """
+--     ]
+--   , [ "expect", "t4[]", "value", "[72,0,72]"]
+--   ]
+
+
+, [ [ "name", "runTests_4e_cps_InstRb" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        let t4 = -> ioDo (
+            io2GetFerrumTestDir_orPanic <| testDir ->
+            let testFile = pathJoin [testDir, "fe4e.test.fe"];
+            -- loadAndRunTests_all "InstRb" testFile <| summary ->
+            -- these tests require the readback code to let-bind shared graph nodes,
+            --   without this, the otherwise correct CopyOnSnapshot code will generate stale reference errors,
+            --   as work will be repeated not shared
+            loadAndRunTests_single "InstRb" testFile "array1" <| summary1 ->   
+            loadAndRunTests_single "InstRb" testFile "assoc1" <| summary2 ->   
+            -- ioDone summary2
+            ioDone [summary1, summary2]
+        );    
+      """
+    ]
+  , [ "expect", "t4[]", "value", "[[7,0,7],[3,0,3]]"]
+  -- , [ "expect", "t4[]", "value", "[[3,0,3]]"]
+  ]
+
+
+
+
+
+-- , [ [ "name", "runTests_4a_step_Direct" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "decls",
+--       """
+--         let tDirect = -> ioDo (
+--             loadAndRunTests_all "Direct" "../tests/fe4a.test.fe" <| summary ->   
+--             ioDone summary
+--         );    
+--       """
+--     ]
+--   , [ "expect", "tDirect[]", "value", "[58,9,67]"]
+--   ]
+
+-- , [ [ "name", "runTests_4a_step_InstRb" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "decls",
+--       """
+--         let tInstRb = -> ioDo (
+--             loadAndRunTests_all "InstRb" "../tests/fe4a.test.fe" <| summary ->   
+--             ioDone summary
+--         );    
+--       """
+--     ]
+--   , [ "expect", "tInstRb[]", "value", "[59,8,67]"]
+--   ]
+
+-- , [ [ "name", "runTests_4a_step_InstGrRb" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "decls",
+--       """
+--         let tInstGrRb = -> ioDo (
+--             loadAndRunTests_all "InstGrRb" "../tests/fe4a.test.fe" <| summary ->   
+--             -- loadAndRunTests_single "InstGrRb" "../tests/fe4a.test.fe" "match" <| _ ->   
+--             -- loadAndRunTests_single "InstGrRb" "../tests/fe4a.test.fe" "showAst" <| _ ->   
+--             -- loadAndRunTests_single "InstGrRb" "../tests/fe4a.test.fe" "guard" <| _ ->   
+--             ioDone summary
+--         );
+--       """
+--     ]
+--   , [ "expect", "tInstGrRb[]", "value", "[67,0,67]"]
+--   ]
+
+
+-- , [ [ "name", "runTests_4b_step" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "decls",
+--       """
+--         let t4 = -> ioDo (
+--             loadAndRunTests_all "Direct" "../tests/fe4b.test.fe" <| summary ->   
+--             ioDone summary
+--         );    
+--       """
+--     ]
+--   , [ "expect", "t4[]", "value", "[89,0,89]"]
+--   ]
+
+-- -- This works, see comments for runTests_4b_cps_InstRb
+-- , [ [ "name", "runTests_4b_step_InstRb" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "decls",
+--       """
+--         let t4 = -> ioDo (
+--             -- loadAndRunTests_single "InstRb" "../tests/fe4b.test.fe" "first" <| _ ->   
+--             loadAndRunTests_all "InstRb" "../tests/fe4b.test.fe" <| summary ->   
+--             ioDone summary
+--         );    
+--       """
+--     ]
+--   , [ "expect", "t4[]", "value", "[89,0,89]"]
+--   ]
+
+
+-- -- This "works", see comments for runTests_4b_cps_InstGrRb
+-- , [ [ "name", "runTests_4b_step_InstGrRb" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "decls",
+--       """
+--         let t4 = -> ioDo (
+--             loadAndRunTests_all "InstGrRb" "../tests/fe4b.test.fe" <| summary ->   
+--             ioDone summary
+--         );    
+--       """
+--     ]
+--   , [ "expect", "t4[]", "value", "[89,0,89]"]
+--   ]
+
+-- , [ [ "name", "runTests_4e_step_InstRb" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "decls",
+--       """
+--         let t4 = -> ioDo (
+--             -- loadAndRunTests_all "InstRb" "../tests/fe4e.test.fe" <| _ ->   
+--             loadAndRunTests_single "InstRb" "../tests/fe4e.test.fe" "array1" <| summary1 ->   
+--             loadAndRunTests_single "InstRb" "../tests/fe4e.test.fe" "assoc1" <| summary2 ->   
+--             ioDone [summary1, summary2]
+--         );    
+--       """
+--     ]
+--   , [ "expect", "t4[]", "value", "[[6,0,6],[3,0,3]]"]
+--   ]
+
+
+
+
+
+, [ [ "name", "effParser1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        let a = 7;
+      """
+    ]
+  , [ "expect", "a", "value", "7"]
+
+  ]
+
+, [ [ "name", "listUniq" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        let t1 = -> listUniq [1,2,1,4,6,6,9];
+      """
+    ]
+  , [ "expect", "t1[]", "value", "[1,2,4,6,9]"]
+
+  ]
+
+, [ [ "name", "gen-runTest-cmd" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        let t1 = -> ioDo (
+            io2GetEnvVar_orPanic "ferrumFeInFeDir" <| feInFeDir ->
+            genCmdLineCommand [feInFeDir] "rt_nodejs.ioDoPrim" "runTestCmdLine" "tmp-runtest4.js" <| ->
+            -- io2GetArgs <| args ->
+            -- io2Print ([length args, args]) <| _ ->
+            -- loadProjectViaCache "Direct" "../fe/fe-in-fe/fe4.proj.fe" [] <| [[_, [_, _, projJsCode, _, _]], _] ->
+            -- io2Print ["Project Code Length", strLen projJsCode] <| _ ->
+            -- let fullJsCode = strJoin "\n" <| concat
+            --   -- [ runTestHeaderJsCode
+            --   -- , [projJsCode]
+            --   -- , runTestFooterJsCode
+            --   -- ];
+            --   [ runTestHeaderJsCode2a
+            --   , [js_runtime_text]
+            --   , runTestHeaderJsCode2b
+            --   , [projJsCode]
+            --     -- TODO need to use the new/unique name for the "runTestCmdLine" function in the footer code
+            --   , runTestFooterJsCode
+            --   ];
+            -- io2WriteFile "tmp-runtest4.js" fullJsCode <| _ ->
+            io2Exit 4
+        );
+      """
+    ]
+  , [ "expect", "t1[]", "value", "4"]
+
+  ]
+
+, [ [ "name", "gen-ferrum-cmd" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        let t1 = -> ioDo (
+            io2GetEnvVar_orPanic "ferrumFeInFeDir" <| feInFeDir ->
+            genCmdLineCommand [feInFeDir] "rt_nodejs.ioDoPrim" "ferrumCmdLine" "tmp-ferrum.js" <| ->
+            -- io2GetArgs <| args ->
+            -- io2Print ([length args, args]) <| _ ->
+            -- loadProjectViaCache "Direct" "../fe/fe-in-fe/fe4.proj.fe" [] <| [[_, [_, _, projJsCode, _, _]], _] ->
+            -- io2Print ["Project Code Length", strLen projJsCode] <| _ ->
+            -- let fullJsCode = strJoin "\n" <| concat
+            --   [ ["\"use strict\";"]
+            --   , runTestHeaderJsCode2a
+            --   , [js_runtime_text]
+            --   , runTestHeaderJsCode2b
+            --   , [projJsCode]
+            --   , ferrumFooterJsCode
+            --   ];
+            -- io2WriteFile "tmp-ferrum.js" fullJsCode <| _ ->
+            io2Exit 4
+        );
+      """
+    ]
+  , [ "expect", "t1[]", "value", "4"]
+
+  ]
+
+, [ [ "name", "deadCode" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let t1 = -> ioDo (
+            io2GetEnvVar_orPanic "ferrumFeInFeDir" <| feInFeDir ->
+            -- let projFilename = "../fe/fe-in-fe/fe4.proj.fe";
+            let projFilename = pathJoin [feInFeDir, "fe4.proj.fe"];
+            let projDir = pathBasename projFilename;
+            loadProject projFilename <| projContents ->
+            loadProjContents projDir projContents <| projDecls ->
+            let projDeclsLoc : List DeclLoc = concat projDecls;
+
+            let rootVars = 
+                [ "ferrumCmdLine", "runTestCmdLine", "runWebApp_webIde", "loadAndRunTests_single", "loadAndRunTests_all", "vcDeadCodeCheck"
+                , "instantiateReadBack"
+                ];
+            let deadVars = vcDeadCodeCheck projDeclsLoc rootVars;
+
+            -- let output = strCat <| forMap deadVars <| [dv, loc] -> strCat [dv, " ", show loc, "\n"];
+            let cells = forMap deadVars <| [var, [file, [line, _, _], _]] -> [file, strPadEnd 4 <| show line, var];
+            -- TODO
+            -- let output = showTable cells;
+            let output = strJoin "\n" <| map (strJoin " ") cells;
+            io2Print (strJoin " " ["Root Vars" ,, rootVars]) <| ->
+            io2Print "Dead Code Vars" <| ->
+            io2Print output <| ->
+
+            io2Exit 4
+        );
+      
+      """
+    ]
+  , [ "expect", "t1[]", "value", "4"]
+  ]
+
+
+
+
+]

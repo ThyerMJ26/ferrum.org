@@ -1,0 +1,1470 @@
+-- language ferrum_test_0
+
+[ 
+  [ ['name', 'plus']
+  , ['expr', "1+2"]
+  , ['expected_value', "3"]
+  , ['expected_type', "Int"]
+  ]
+
+, [ ['name', 'let']
+  , ['expr', "let {a=7;} in a"]
+  , ['expected_value', "7"]
+  , ['expected_type', "Int"]
+  ]
+
+, [ ['name', 'lambda']
+  , ['expr', "(\\(a:int) -> a*a) 7"]
+  , ['expected_value', "49"]
+  , ['expected_type', "Int"]
+  ]
+
+, [ ['name', 'type-lambda']
+  , ['expr', 
+  """
+      let {
+        F = \int => int; 
+        f:F = \(a:int)->a*a;
+      } in
+      f 7
+  """
+  ]
+  , ['expected_value', "49"]
+  , ['expected_type', "Int"]
+  ]
+
+, [ ['name', 'let-pat']
+  , ['expr', 
+  """
+      let {
+        (a,b) = (1,2);
+        c = a+b;
+      } in
+      c
+  """
+  ]
+  , ['expected_value', "3"]
+  , ['expected_type', "Int"]
+  ]
+
+
+, [ ['name', 'type-error']
+  , ['expr', 
+  """
+      "hello": int
+  """
+  ]
+  , ['expected_value', '"hello"']
+  , ['expected_type', "Int"]
+  , ['expected_type_errors', 1]
+  , ['expected_type_warns', 0]
+  , ['expected_type_oks', 0]
+  ]
+
+, [ ['name', 'type-error-lambda']
+  , ['expr', 
+  """
+      (\(a:str)->a+1)
+  """
+  ]
+  , ['expected_type', "(:@Str) -> Int"]
+  , ['expected_type_errors', 1]
+  , ['expected_type_warns', 0]
+  , ['expected_type_oks', 2]
+  ]
+
+, [ ['name', 'type-error-let']
+  , ['expr', 
+  """
+      let { a:str = 1+2; } in a
+  """
+  ]
+  , ['expected_type', "Str"]
+  , ['expected_type_errors', 1]
+  , ['expected_type_warns', 0]
+  , ['expected_type_oks', 2]
+  ]
+
+, [ ['name', 'type-error-apply']
+  , ['expr', 
+  """
+      (\(a:int)->a*a) "seven"
+  """
+  ]
+  , ['expected_type', "Int"]
+  , ['expected_type_errors', 1]
+  , ['expected_type_warns', 0]
+  , ['expected_type_oks', 3]
+  ]
+
+, [ ['name', 'type-error-annot']
+  , ['expr', 
+  """
+      "seven": int
+  """
+  ]
+  , ['expected_type', "Int"]
+  , ['expected_type_errors', 1]
+  , ['expected_type_warns', 0]
+  , ['expected_type_oks', 0]
+  ]
+
+, [ ['name', 'type-error-annot2']
+  , ['expr', 
+    """
+        ("seven", 6): unionT (Variant "eight" str) (Variant "nine" int)
+    """
+    ]
+  , ['expected_type', "{'eight':Str,'nine':Int}"]
+  , ["type_check", "simple"]
+  , ['expected_type_errors', 1]
+  , ['expected_type_warns', 0]
+  , ['expected_type_oks', 6]
+  ]
+
+, [ ['name', 'type-error-annot3']
+  , ['expr', 
+  """
+     let {
+         ExprT = pair str any;
+         DeclT = pair str ExprT;
+
+         EVar    = Variant "EVar"    ( str                     );
+         ELambda = Variant "ELambda" ( pair ExprT ExprT        );
+         EApply  = Variant "EApply"  ( pair ExprT ExprT        );
+         ELit    = Variant "ELit"    ( any                     );
+         ELet    = Variant "ELet"    ( pair (list DeclT) ExprT );
+         EPair   = Variant "EPair"   ( pair ExprT ExprT        );
+         EType   = Variant "EType"   ( pair ExprT ExprT        );
+         EAlias  = Variant "EAlias"  ( pair str ExprT          );
+         
+         Expr = 
+           unionT EVar    $
+           unionT ELambda $
+           unionT EApply  $
+           unionT ELit    $
+           unionT ELet    $
+           unionT EPair   $
+           unionT EType   $
+           unionT EAlias  $
+           void;
+   
+     }
+     in ("EAs", ("EVar", "a"), ("ELit", 1)): Expr
+  """
+  ]
+  , ['expected_type', "{'EVar':Str,'ELambda':((Str, Any), Str, Any),'EApply':((Str, Any), Str, Any),'ELit':Any,'ELet':(list (Str, Str, Any), Str, Any),'EPair':((Str, Any), Str, Any),'EType':((Str, Any), Str, Any),'EAlias':(Str, Str, Any)}"]
+  , ['expected_type_errors', 1]
+  , ['expected_type_warns', 0]
+  , ['expected_type_oks', 57]
+  ]
+
+
+, [ ['name', 'lambda-pat']
+  , ['expr', 
+  """
+      let {
+        Pos = pair int int;
+        Input = list str;
+        f = \(pos: Pos, input: Input)->
+          let { (row, col) = pos; }
+          in (row, col+1);
+        pos1 = (1,2);
+        pos2 = f (pos1, ['7','8','9']);
+      } in
+      pos2
+  """
+  ]
+  , ['expected_value', "(1,3)"]
+  , ['expected_type', "(Int, Int)"]
+  ]
+
+
+, [ ['name', 'case']
+  , ['expr', 
+  """
+      let {
+        Left = Variant 'left' int;
+        Right = Variant 'right' str;
+        Either = unionT Left Right;
+
+        a: Either = ('left', 7);
+        b: Either = ('right', 'seven');
+
+        c = case a of {
+          ('left', num) -> ('right', chr (48 + num)): Right;
+          ('right', name) -> ('left', ord name): Left;
+        };
+      } in
+      c: Either
+  """
+  ]
+  , ['expected_value', '("right","7")']
+  , ['expected_type', "{'left':Int,'right':Str}"]
+  ]
+
+
+, [ ['name', 'case-list']
+  , ['expr', 
+  """
+      let {
+        Left = Variant 'left' (list int);
+        Right = Variant 'right' (pair str nil);
+        Either = unionT Left Right;
+
+        a: Either = ['left', 7];
+        b: Either = ['right', 'seven'];
+
+        c = case a of {
+          -- ['left', num] -> ['right', chr (48 + num)]: Right;
+          ('left', [num]) -> ['right', chr (48 + num)]: Right;
+          ['right', name] -> ['left', ord name]: Left;
+        };
+      } in
+      c: Either
+  """
+  ]
+  , ['expected_value', '("right","7",())']
+  , ['expected_type', "{'left':list Int,'right':(Str,nil)}"]
+  ]
+
+
+, [ ['name', 'flip-cons']
+  , ['expr', 
+  """
+      let {
+        -- flip = \(f: F@(\(_:never) -> \(_:never) -> any)) 
+        --     -> \(x: X@(domain (range F)))
+        --     -> \(y: Y@(domain F))
+        --      -- : (applyT (applyT F Y) X)
+        --     -> f y x;
+        
+        flip2 = \(f: F@(\never => \never => any)) 
+            -> \(x: X@(domain (range F)))
+            -> \(y: Y@(domain F))
+             -- : (applyT (applyT F Y) X)
+            -> f y x;
+        
+        -- cons : \(_:A@any) -> \(_:B@any) -> pair A B 
+        --      = \(a:A@any)-> \(b:B@any) -> (a,b);
+
+        cons2 : \(A@any) => \(B@any) => pair A B 
+             = \(a:A@any)-> \(b:B@any) -> (a,b);
+      } in
+      flip2 cons2
+  """
+  ]
+--  , ('expected_value', '("right","7")')
+  , ['expected_type', "\\(:X@Any) -> \\(:Y@Any) -> (Y, X)"]
+  ]
+
+
+, [ ['name', 'twice-inc']
+  , ['expr', 
+  """
+      let {
+        -- twice = \(f:F@(\void=>domain F))-> \(z:domain F)-> f (f z);
+        twice = \(f:F@(\(domain F)=>domain F))-> \(z:domain F)-> f (f z);
+        inc1 = \(x:int) -> x+1;
+      } in
+      twice inc1 3
+      -- universally polymorphic version
+      -- can only take a polymorphic id function ( (A@Any->A), but not (Int->Int) ), so cannot increment
+      -- let {
+      --   twice = \(f:((\(A@any)=>A)))-> \(z:Z@any)-> f (f z);
+      --   id = \(x:X@any)->x;
+      -- } in
+      -- twice id 3
+  """
+  ]
+  , ['type_check', 'simple']
+  , ['expected_value', '5']
+  , ['expected_type', "Int"]
+  ]
+
+
+, [ ['name', 'foldl']
+  , ['expr', 
+  """
+        let {
+          -- foldl : \(f:F@(\(_:DF :> never)-> \(_:never) -> DF)) -> \(_:domain F) -> \(_:list (domain (range F))) -> domain F
+          --      = \(f:F@(\(_:DF :> never)-> \(_:never) -> DF))
+          -- foldl : \(F@(\(F1 :> never)=> \never=> F1)) => \(domain F)=> \(list (domain (range F)))=> domain F
+          --       = \(f:F@(\(F1 :> never)=> \never=> F1))
+          -- foldl : \(F@(\(F1@never)=> \never=> F1)) => \(domain F)=> \(list (domain (range F)))=> domain F
+          --       = \(f:F@(\(F1@never)=> \never=> F1))
+
+          foldl : \(F@(\never=> \never=> domain F)) => \(domain F)=> \(list (domain (range F)))=> domain F
+                = \(f:F@(\(never)=> \never=> domain F))
+               -> \(z:(domain F))
+               -> \(x: list (domain (range F)))
+               ->
+              loop1 (\(z: domain F, x: list (domain (range F))) ->
+                    case x of {
+                      [] -> break z;
+                      (hx, tx) -> continue (f z hx, tx);
+                    }
+              )
+              (z, x);
+        }
+        in foldl (\(a:int)-> \(b:int)-> a+b) 0 (1,2,3,())
+  """
+  ]
+  , ['expected_value', "6"]
+  , ['expected_type', "Int"]
+  ]
+
+-- , [ ['name', 'foldlB']
+--   , ['expr', 
+--   """
+--         let {
+-- 
+--           foldl : \(F@(\(domain F)=> \(domain (range F))=> domain F)) => \(domain F)=> \(list (domain (range F)))=> domain F
+--                 = \(f:F@(\(domain F)=> \(domain (range F))=> domain F))
+--                -> \(z:(domain F))
+--                -> \(x: list (domain (range F)))
+--                ->
+--               loop1 (\(z: domain F, x: list (domain (range F))) ->
+--                     case x of {
+--                       [] -> break z;
+--                       (hx, tx) -> continue (f z hx, tx);
+--                     }
+--               )
+--               (z, x);
+--         }
+--         in foldl (\(a:int)-> \(b:int)-> a+b) 0 (1,2,3,())
+--   """
+--   ]
+--   , ['expected_value', "6"]
+--   , ['expected_type', "Int"]
+--   ]
+
+, [ ['name', 'foldl1']
+  , ['expr', 
+  """
+        let {
+            foldl1 : \F1@(\void=> \(domain F1)=> domain F1)=> \X1@(pair (domain F1) (list (domain F1)))=> (domain F1)
+                  = \(f:F1@(\void=> \(domain F1)=> domain F1))
+                 -> \((x1, xs):(pair (domain F1) (list (domain F1))))
+                 -- -> \(x:X1@(pair (domain F1) (list (domain F1))))
+                : (domain F1)
+                 -> 
+                 -- foldl f (hd x) (tl x);
+                loop1 (\(z: domain F1, x: list (domain F1))->
+                    case x of {
+                        ()      -> break z;
+                        (x1,xs) -> continue (f z x1, xs);
+                    })
+                (x1, xs);
+                -- x;
+        }
+        in foldl1 (\(a:int)-> \(b:int)-> a+b) (1,2,3,())
+  """
+  ]
+  , ['expected_value', "6"]
+  , ['expected_type', "Int"]
+  ]
+
+
+
+-- , [ ('name', 'foldl1b')
+--   , ('testType', "eval")
+--   , ('expr', 
+--   """
+--         let {
+--             foldl : \F@(\void=> \void=> domain F)=> \Z@(domain F)=> \X@(list (domain (range F)))=> (domain F)
+--                   = \(f:F@(\void=> \void=> domain F))
+--                  -> \(z:Z@(domain F))
+--                  -> \(x:X@(list (domain (range F))))
+--                  : (domain F)
+--                  ->
+--                  -- with a more accurate type for loop1, this test should fail, the type returned by (f z x1) may not fit in type Z
+--                 loop1 (\(z: domain F, x: list (domain (range F)))->
+--                     case x of {
+--                         ()      -> break z;
+--                         (x1,xs) -> continue (f z x1: domain F, xs: list (domain (range F)));
+--                     })
+--                 (z, x);
+--             
+--             foldl1 : \F1@(\void=> \(domain F1)=> domain F1)=> \(list (domain F1))=> (domain F1)
+--                   = \(f:F1@(\void=> \(domain F1)=> domain F1))
+--                  -> \(x:(list (domain F1)))
+--                  : (domain F1)
+--                  -> 
+--                  case x of {
+--                    [] -> error "too few arguments";
+--                    (x1,xs) -> foldl f x1 xs;
+--                  }
+--                  
+--         }
+--         in foldl1 (\(a:int)-> \(b:int)-> a+b) (1,2,3,())
+--   """
+--   )
+--   , ('expected_value', "6")
+--   , ('expected_type', "Int")
+--   ]
+
+
+
+-- , [ ('name', 'foldl1c')
+--   , ('testType', "eval")
+--   , ('expr', 
+--   """
+--         let {
+--             foldl1 : \F@(\void=> \(domain F)=> domain F)=> \X@(list (domain F))=> (elemT X)
+--                   = \(f:F@(\void=> \(domain F)=> domain F))
+--                  -> \(x:X@(list (domain F)))
+--                  : (elemT X)
+--                  -> 
+--                      loop1 (\(z: elemT X, x: list (domain F))->
+--                          case x of {
+--                              ()      -> break z;
+--                              (x1,xs) -> continue (f z x1, xs);
+--                          })
+--                      (hd x, tl x);
+--         }
+--         in foldl1 (\(a:int)-> \(b:int)-> a+b) (1,2,3,())
+--   """
+--   )
+--   , ('expected_value', "6")
+--   , ('expected_type', "Int")
+--   ]
+
+
+
+-- TODO implement foldl1 using foldl, type-system currently too dumb to spot (Dom F) and (Dom (Rng F)) are the same
+, [ ['name', 'foldl1d']
+  , ['expr', 
+  """
+        let {
+            foldl : \F@(\void=> \void=> domain F)=> \Z@(domain F)=> \X@(list (domain (range F)))=> domain F
+                  = \(f:F@(\void=> \void=> domain F))
+                 -> \(z:Z@(domain F))
+                 -> \(x:X@(list (domain (range F))))
+                 : domain F
+                 ->
+                loop1 (\(z: domain F, x: list (elemT X))->
+                    case x of {
+                        ()      -> break z;
+                        (x1,xs) -> continue (f z x1, xs);
+                    })
+                (z, x);
+            
+            foldl1 : \F@(\(domain F)=> \(domain F)=> domain F)=> ( (list (domain F))=> domain F )
+                  = \(f:F@(\(domain F)=> \(domain F)=> domain F))
+                 -> \(x:(list (domain F))
+                 : domain F
+                 -> 
+                 foldl f (hd x) (tl x);
+                 --  case x of {
+                 --    [] -> error "too few list elements";
+                 --    (z,xs) ->
+                 --        loop1 (\(z: domain F, x: list (domain F))->
+                 --            case x of {
+                 --                ()      -> break z;
+                 --                (x1,xs) -> continue (f z x1, xs);
+                 --            })
+                 --        (z, xs);
+                 --  };
+
+        }
+        in foldl1 (\(a:int)-> \(b:int)-> a+b) (1,2,3,()): int
+  """
+  ]
+  , ['expected_value', "6"]
+  , ['expected_type', "Int"]
+  ]
+
+
+
+
+
+
+
+
+, [ ['name', 'implode-reverse']
+  , ['expr', 
+  """
+     let {
+       -- foldl : \F@(\void=> \void=> domain F)=> \Z@(domain F)=> \X@(list (domain (applyT F Z)))=> domain F
+       foldl : \F@(\void=> \void=> domain F)=> \Z@(domain F)=> \X@(list (domain (range F)))=> domain F
+             = \(f:F@(\void=> \void=> domain F))
+            -> \(z:Z@(domain F))
+            -- -> \(x:X@(list (domain (applyT F Z))))
+            -> \(x:X@(list (domain (range F))))
+            : domain F
+            ->
+           loop1 (\(z: domain F, x: list (elemT X))->
+               case x of {
+                   ()      -> break z;
+                   (x1,xs) -> continue (f z x1, xs);
+               })
+           (z, x);
+
+          flip = \(f: F@(\never=> \never=> any)) 
+              -> \(x: X@(domain (range F)))
+              -> \(y: Y@(domain F))
+               -- : (range (range F))
+              -> f y x;
+          
+          cons : \A@any=> \B@any=> pair A B 
+               = \(a:A@any)-> \(b:B@any) -> (a,b);
+          
+
+
+        reverse : \L@(list any)=> list (elemT L) 
+                = \(l:L@(list any)) ->
+                  foldl 
+                  (flip cons: \(list (elemT L))=> \(elemT L)=> list (elemT L))
+                  ((): list (elemT L))
+                  (l: list (elemT L));
+
+
+       implode = \(strList: list str)-> foldl (\(a:str)-> \(b:str)-> a^b) ("": str) strList;
+ 
+     } in
+     implode (reverse (['3','2','1']: list str))
+  """
+  ]
+  , ['expected_value', "\"123\""]
+  , ['expected_type', "Str"]
+  ]
+
+
+, [ ['name', 'append']
+  , ['expr', 
+  """
+        let {
+          -- foldl : \(F@(\never=> \never=> domain F))=> \Z@(domain F)=> \X@(list (domain (applyT F Z)))=> domain F
+          foldl : \(F@(\never=> \never=> domain F))=> \Z@(domain F)=> \X@(list (domain (range F)))=> domain F
+                = \(f:F@(\never=> \never=> domain F))
+               -> \(z:Z@(domain F))
+               -- -> \(x:X@(list (domain (applyT F Z))))
+               -> \(x:X@(list (domain (range F))))
+               : domain F
+               ->
+              loop1 (\(z: (domain F), x: list (domain (range F))) -> 
+                    case x of {
+                      [] -> break z;
+                      (x1, xs) -> continue (f z x1, xs);
+                    }
+              )
+              (z, x);
+
+          flip = \(f: F@(\never=> \never=> any)) 
+              -> \(x: X@(domain (range F)))
+              -> \(y: Y@(domain F))
+               -- : (range (range F))
+              -> f y x;
+          
+          cons : \A@any=> \B@any=> pair A B 
+               = \(a:A@any)-> \(b:B@any) -> (a,b);
+          
+          reverse : \L@(list any)=> list (elemT L) 
+                  = \(l:L@(list any)) 
+                  : list (elemT L) 
+                  ->
+                    foldl 
+                    (flip (cons: \(elemT L)=> \(list (elemT L))=> list (elemT L)))
+                    -- (flip cons)
+                    -- ((): list (elemT L))
+                    ()
+                    l;
+
+          append  : \X@(list (elemT X))=> \(list (elemT X))=> list (elemT X)
+                  = \(xs:X@(list (any))) 
+                 -> \(ys:Y@(list (elemT X)))
+                  : list (elemT X)
+                 ->
+                  -- foldl (flip (cons: \(elemT X)=> \(list (elemT X))=> list (elemT X))) ys (reverse xs);
+                  foldl (flip cons: \(list (elemT X))=> \(elemT X)=> list (elemT X)) ys (reverse xs);
+                  -- foldl (flip cons) ys (reverse xs);
+        } in
+        append ((1,2,3,()):list int) ((7,8,9,()): list int)
+
+  """
+  ]
+  , ['expected_value', "(1,2,3,7,8,9,())"]
+  , ['expected_type', "list Int"]
+  ]
+
+
+, [ ['name', 'map']
+  , ['expr', 
+  """
+      let {
+      foldl : \F@(\never=> \never=> domain F)=> \Z@(domain F)=> \X@(list (domain (range F)))=> domain F
+            = \(f: F@(\never=> \never=> domain F))
+           -> \(z:Z@(domain F))
+           -> \(x:X@(list (domain (range F))))
+           : domain F
+           ->
+          loop1 (\(z: domain F, x: list (domain (range F))) ->
+                case x of { 
+                  [] -> break z;
+                  (x1, xs) -> continue (f z x1, xs);
+                })
+          (z, x);
+      
+      
+      flip = \(f: F@(\never=> \never=> any)) 
+          -> \(x: X@(domain (range F)))
+          -> \(y: Y@(domain F))
+          -> f y x;
+      
+      cons : \A@any=> \B@any=> pair A B 
+           = \(a:A@any)-> \(b:B@any) -> (a,b);
+      
+      
+      reverse : \L@(list any)=> list (elemT L) 
+              = \(l: L@(list any)) 
+                  : list (elemT L) 
+              ->
+                foldl 
+                (flip cons: \(list (elemT L))=> \(elemT L)=>list (elemT L))
+                ()
+                (l: list (elemT L));
+      
+      implode = \(strList: list str) -> foldl (\(a:str)-> \(b:str)-> a^b) ("") strList;
+      
+      append  -- : \X@(list (elemT X))=> \(list (elemT X))=> list (elemT X)
+              = \(xs:X@(list (any))) 
+             -> \(ys:Y@(list (elemT X)) )
+              : list (elemT X)
+             ->
+              -- foldl (flip cons) ys (reverse xs);
+              foldl (flip cons: \(list (elemT X))=> \(elemT X)=>list (elemT X)) ys (reverse xs);
+      
+      map1 = \(f:F@(\never=>any))-> \(xs:X@(list (domain F)))->
+        loop1 (\((xs,ys):pair (list (elemT X)) (list (range F)))-> 
+                      case xs of {
+                        [] -> break ys;
+                        (xs1, xss) -> continue (xss, (f xs1, ys));
+                      }
+        ) (reverse (xs:list (elemT X)), ());
+
+      map = \(f: F@(\void=>any))-> \(x: X@(list (domain F))) ->
+        loop1 (\(x: list (elemT X), y: list (applyT F (elemT X)))->
+          case x of {
+              ()      -> break y;
+              (x1,xs) -> continue (xs, (f x1, y));
+          }
+        ) (reverse x, ());
+
+
+      } in map (\(x:int)->x*x) (1,2,3,4,5,())
+      
+  """
+  ]
+  , ['expected_value', "(1,4,9,16,25,())"]
+  , ['expected_type', "list Int"]
+  ]
+
+
+-- , [ ('name', 'concat')
+--   , ('testType', "eval")
+--   , ('expr', 
+--   """
+--       let {
+--         reverse = \(l: L@(list (elemT L)))->
+--           loop1 (\(result: L, l: L)->
+--             case l of {
+--               () -> break result;
+--               (l1, ls) -> continue ((l1,result), ls);
+--             }
+--           ) ([], l);
+-- 
+--         append = \(x: X@(list (elemT X)))-> \(y: (list (elemT X)))-> 
+--           loop1 (\(result: X, l: X)->
+--             case l of {
+--               () -> break result;
+--               (l1, ls) -> continue ((l1,result), ls);
+--             }
+--           ) (y, reverse x);
+-- 
+--         concat : \(L@(list (list (elemT (elemT L))))) => list (elemT (elemT L))
+--                = \(l:L@(list (list (elemT (elemT L)))))->
+--           -- loop1 (\(result: list (elemT (elemT L)), l: list (list (elemT (elemT L))))->
+--           loop1 (\(result: list (elemT (elemT L)), l: L)->
+--               case l of {
+--                   () -> break result;
+--                   (l1, ls) -> continue (append l1 result, ls);
+--               }
+--           ) ([], reverse l);
+--       } in concat ([[1,2,3],[4,5,6],[7,8,9]]: list (list int))
+--       
+--   """
+--   )
+--   , ('expected_value', "(1,2,3,4,5,6,7,8,9,())")
+--   , ('expected_type', "list Int")
+--   ]
+
+
+, [ ['name', 'concat2']
+  , ['expr', 
+  """
+      let {
+        reverse = \(l: L1@(list any))->
+          loop1 (\(result: list (elemT L1), l: list (elemT L1))->
+            case l of {
+              () -> break result;
+              (l1, ls) -> continue ((l1,result), ls);
+            }
+          ) ([], l);
+
+        append = \(x: X@(list any))-> \(y: (list (elemT X)))-> 
+          loop1 (\(result: list (elemT X), l: list (elemT X))->
+            case l of {
+              () -> break result;
+              (l1, ls) -> continue ((l1,result), ls);
+            }
+          ) (y, reverse x);
+
+        concat : \(L2@(list (list any))) => list (elemT (elemT L2))
+               = \(l:L3@(list (list any)))->
+          loop1 (\(result: list (elemT (elemT L3)), l: list (elemT L3))->
+              case l of {
+                  () -> break result;
+                  (l1, ls) -> continue (append l1 result, ls);
+              }
+          ) ([], reverse l);
+      } in concat ([[1,2,3],[4,5,6],[7,8,9]]: list (list int))
+      
+  """
+  ]
+  , ['expected_value', "(1,2,3,4,5,6,7,8,9,())"]
+  , ['expected_type', "list Int"]
+  ]
+
+
+, [ ['name', 'loop']
+  , ['expr', 
+  """
+      let {
+        lookup2 = \(key:any)-> \(kvs: KVS@(list (pair any any))): tlT (elemT KVS) ->
+        -- lookup2 = \(key:any)-> \(kvs: KVS@(list (pair any any))): tlT (hdT KVS) ->
+          loop1 (\(kvs: list (elemT KVS))->
+            case kvs of {
+              [] -> error ("lookup failed", key);
+              (kv@(k,v),kvs2) ->
+              -- ((k,v),kvs2) ->
+                if key==k 
+                then break v
+                else continue (kvs2: list (elemT KVS));
+                -- else continue (kvs2);
+            } 
+          ) kvs;
+      } in lookup2 "banana" ([("apple", 1),("banana",2),("carrot",3)]:list (pair str int)): int
+      
+  """
+  ]
+  , ['expected_value', "2"]
+  , ['expected_type', "Int"]
+  ]
+
+
+, [ ['name', 'foldr']
+  , ['expr', 
+  """
+     let {
+        reverse = \(l: L1@(list any))->
+          loop1 (\(result: list (elemT L1), l: list (elemT L1))->
+            case l of {
+              () -> break result;
+              (l1, ls) -> continue ((l1,result), ls);
+            }
+          ) ([], l);
+
+         foldr : \(F@(\void=> \void => domain (range F))) => \Z@(domain (range F)) => \X@(list (domain F)) => domain (range F)
+               = \(f:F@(\void=> \void => domain (range F)))
+              -> \(z:Z@(domain (range F)))
+              -> \(x:X@(list (domain F)))
+              : domain (range F)
+              ->
+              loop1 (\(z: domain (range F), x: list (elemT X))->
+                  case x of {
+                      () -> break z;
+                      (x1,xs) -> continue (f x1 z, xs);
+                  }
+              ) (z, reverse x);
+     } in foldr (\(a:int)-> \(b:list int)-> (a,b): list int) ([]: list int) [1,2,3]
+
+  """
+  ]
+  , ['expected_value', "(1,2,3,())"]
+  , ['expected_type', "list Int"]
+  ]
+
+
+, [ ['name', 'iok']
+  , ['expr', 
+
+      -- TODO check this is running in the right order (don't we need a reverse?)
+      -- mapK = \(f: F@(\(domain F)=> \(IOK (domain (domain (range F))))=>applyT (domain (range F)) (domain F) ))
+      -- mapK = \(f: F@(\(void)=> \(IOK (domain (domain (range F))))=>applyT (domain (range F)) (domain F) ))
+      -- mapK = \(f: F@(\(void)=> \(IOK (any))=>applyT (domain (range F)) (domain F) ))
+      -- \A=> \ioWorld=> any
+      -- mapK = \(f: F@(\(void)=> \(\(domain F)=> \ioWorld=> any)=>applyT (domain (range F)) (domain F) ))
+      -- mapK = \(f: F@(\(void)=> \(\(void)=> \ioWorld=> any)=>range (domain (range F)) ))
+
+      --     : applyT (domain (range F)) (domain F)
+      --     : range (domain (range F))
+
+  """
+     let {
+
+      IOK = \(A: type)-> \A=> \ioWorld=> any;
+      IOK0 = \ioWorld=> nil;
+      iokDone: IOK0 = \(world1: ioWorld)-> ();
+      iokPrint = \(contents: str)-> \(k: IOK nil)-> \(world1: ioWorld)->
+          let { (result, world2) = ioPrint contents world1; } in 
+          k result world2;
+
+      -- mapK = \(f: F@(\(void)=> \(\(domain (domain (range F)))=> \ioWorld=> any)=> \ioWorld=> any ))
+      mapK = \(f: F@(\(void)=> \(\any=> \ioWorld=> any)=> \ioWorld=> any ))
+          -> \(x: list (domain F))
+          -> \(k: IOK (list (domain (domain (range F)))))
+           : \ioWorld=>any
+          ->
+          loop1 (\(x: list (domain F), ks: IOK (list (domain (domain (range F)))))->
+              case x of {
+                  ()      -> break (ks []);
+                  (x1,xs) -> continue (xs, \(ys: (list (domain (domain (range F)))))-> f x1 \(y1: domain (domain (range F)))-> ks (y1,ys) );
+              }
+          ) (x, k);
+      
+         printNumList = 
+           mapK (\(n:int)-> \(k: IOK str)->
+             iokPrint ("Num: "^n) $ \_->
+             k (n^"."^n)
+           ) [1,2,3] $ \(result: list str)->
+           iokPrint (""^result) $ \_->
+           \(world: ioWorld)->result;
+
+     } in ioRun printNumList 
+
+  """
+  ]
+  , ['expected_value', '("1.1","2.2","3.3",())']
+--  , ('expected_type', "list Str")
+  , ['expected_type', "Any"]
+  ]
+
+, [ ['name', 'Fix-const']
+  , ['expr', 
+    """
+       7: Fix (\(a:type)->int)
+    """
+    ]
+  , ['expected_value', "7"]
+  , ['expected_type', "Int"]
+  ]
+
+-- TODO?: dependent self-reference
+-- , [ ('name', 'Fix-dep-selfref')
+--   , ('testType', "eval")
+--   , ('expr',
+--     """
+--        (int, 7): Fix (\(a: A)->pair type (hd a))
+--        (int, 7): Fix { {a: A}-> [Type, hd a] }
+--        (int, 7): { {a: A} @-> [Type, hd a] }
+--     """
+--     )
+--   , ('expected_value', "7")
+--   , ('expected_type', "Int")
+--   ]
+
+, [ ['name', 'Fix-list']
+  , ['type_check', "bidir"]
+  , ['expr', 
+    """
+       [7,8,9]: Fix (\a->unionT nil (pair int a))
+    """
+    ]
+  , ['expected_value', "(7,8,9,())"]
+  , ['expected_type', "(a @-> unionT [(),(Int, a)])"]
+  ]
+
+
+, [ ['name', 'tree']
+  , ['type_check', "bidir"]
+  , ['expr', 
+    """
+       let { 
+           -- Tree = Fix (\Tree->Union
+           --     [ Variant "Leaf" int 
+           --     , Variant "Branch" (pair Tree Tree)
+           --     ]);
+           Tree = Fix (\Tree->
+               let {
+                   Leaf = Variant "Leaf" int;
+                   Branch = Variant "Branch" (pair Tree Tree);
+               } in
+               Union [Leaf, Branch]);
+
+           t1 = ("Branch", ("Branch", (("Leaf", 1), ("Leaf", 2))), ("Leaf", 3));
+
+           showTree = fix \(st: \Tree=>str)-> \(t:Tree)-> case t of
+               { ("Leaf", n)      -> ""^n;
+                 ("Branch", a, b) -> "< "^ st a ^" "^ st b ^" >";
+               };
+       } in
+       showTree t1
+    """
+    ]
+  , ['expected_value', "\"< < 1 2 > 3 >\""]
+  , ['expected_type', "Str"]
+  ]
+
+
+, [ ['name', 'tree2']
+  , ['type_check', "bidir"]
+  , ['expr', 
+    """
+       let { 
+           Tree = Fix (\Tree->Union
+               [ Variant "Leaf" int 
+               , Variant "Branch" (pair Tree Tree)
+               ]);
+
+           t1 = ("Branch", ("Branch", (("Leaf", 1), ("Leaf", 2))), ("Leaf", 3));
+           t2 = ("Branch", ("Branch", (("Leaf", 1), ("Leaf", 2))), ("Branch", (("Leaf", 3), ("Leaf", 4))));
+
+           showTree = fix \(st: \Tree=>str)-> \(t:Tree)-> case t of
+               { ("Branch", a, ("Branch", b, c)) -> "<< "^ st a ^" "^ st b ^" "^ st c ^" >>"
+               ; ("Branch", a, b) -> "< "^ st a ^" "^ st b ^" >"
+               ; ("Leaf", n)      -> ""^n
+               ;};
+       } in
+       showTree t2
+    """
+    ]
+  , ['expected_value', "\"<< < 1 2 > 3 4 >>\""]
+  , ['expected_type', "Str"]
+  ]
+
+
+, [ ['name', 'tuple-list']
+  , ['expr', 
+    """
+       let {
+
+        reverse = \(l: L1@(list any))->
+          loop1 (\(result: list (elemT L1), l: list (elemT L1))->
+            case l of {
+              () -> break result;
+              (l1, ls) -> continue ((l1,result), ls);
+            }
+          ) ([], l);
+
+
+         Tuple = \(x:list type)->
+           loop1 (\(xs: list type, result: type)->
+               case xs of {
+                   [] -> break result;
+                   (x1,xs2) -> continue (xs2, pair x1 result);
+               }
+           ) (reverse x, nil);
+  
+         ParseTreeC = Fix \(PTC: type)-> Tuple [str, list PTC, list int, int];
+         -- ParseTreeC = Tuple [str, list str, list int, int];
+  
+         ptcPt = \([name, pts, toks, loc]: ParseTreeC) -> (name, pts, toks);
+
+         init_val = ["a", [], [], 7];
+       } in
+       ptcPt init_val
+    """
+    ]
+  , ['expected_value', '("a",(),())']
+  , ['expected_type', ""]
+  ]
+
+
+, [ ['name', 'self-ref-func-type']
+  , ['expr', 
+    """
+       let {
+         -- F = \(A@never)=> \A=> A;
+         -- F = Fix (\(T:type) -> \(domain T)=> \(domain T)=>(domain T));
+         -- F = Fix (\(T:type) -> \(never)=> \(domain T)=>(domain T));
+         -- F = Fix { {f:F} -> Void -> dom f -> dom f};
+         -- F = domain ( \(T@( \void => \(domain T) => domain T )) => any );
+         F = Self (\(T:type) -> \void=> \(domain T)=>(domain T));
+         f = (\(a:int)-> \(b:int)-> a+b);
+         g = \(f:F1@F)-> \(x: domain F1): domain F1 -> f x x;
+       } in
+       g f 7
+    """
+    ]
+  -- , ('type_check', "bidir")
+  , ['expected_value', '14']
+  , ['expected_type', "Int"]
+  ]
+
+
+, [ ['name', 'cons-cons-list']
+  , ['expr', 
+    """
+       let {
+          Cons = \A@any=> \B@any=> pair A B;
+          cons : Cons
+               = \(a:A@any)-> \(b:B@any) -> (a,b);
+
+          ConsList = \A@any=> \B@(list any)=> list (unionT A (elemT B));
+          consList : ConsList
+                   = \(a:A@any)-> \(b:B@(list any)) -> (a,b);
+      
+       } in
+       (cons: ConsList) 1 [2]
+    """
+    ]
+--  , ('type_check', "bidir")
+  , ['expected_value', '(1,2,())']
+  , ['expected_type', "List Int"]
+  ]
+
+
+
+, [ ['name', 'continuation']
+  , ['expr', 
+
+  """
+     let {
+
+       -- convert = 
+       --     \(num: int)-> 
+       --     \(k: \pair int str=>str)->  
+       --     k (num, ""^ num ^"*"^ num ^"="^ (num*num));
+       --     
+       -- call = 
+       --     \(f: \int=> \(\(pair int str)=>str)=> str)-> 
+       --     \(input: int)-> 
+       --     \(k: \(pair int str)=>str)-> 
+       --     f input k;
+
+       convert = 
+           \(num: int)-> 
+           \(k: \pair int str=>str)->  
+           k (num, ""^ num ^"*"^ num ^"="^ (num*num));
+           
+       call = 
+           \(f: F@(\void=> \(\(any)=>str)=> str))-> 
+           \(input: (domain F))-> 
+           \(k: \(domain (domain (range F)))=>str)-> 
+           f input k;
+
+       angleK = \(result: pair int str)-> "<"^ result ^">";
+      
+     } in call convert 7 angleK
+
+  """
+  ]
+  , ['expected_value', '"<7,7*7=49>"']
+  , ['expected_type', "Str"]
+  ]
+
+, [ ['name', 'swap']
+  , ['expr', 
+
+  """
+     let {
+       swap = \(a:A@any, b:B@any)-> (b:B,a:A);
+     } in swap ((1,"one"):pair int str)
+
+  """
+  ]
+  , ['expected_value', '("one",1)']
+  , ['expected_type', "pair Str Int"]
+  ]
+
+, [ ['name', 'type-error-foldl']
+  , ['expr', 
+  """
+        let {
+          foldl : \(F@(\void=> \void=> domain F))=> \Z@(domain F)=> \X@(list (domain (applyT F Z)))=> Z
+                = \(f:F@(\void=> \void=> domain F))
+               -> \(z:Z@(domain F))
+               -> \(x:X@(list (domain (applyT F Z))))
+               : Z
+               ->
+              loop1 (\(z: Z, x: list (elemT X))->
+                  case x of {
+                    [] -> break z;
+                    (x1,xs) -> continue (f z x1, xs); -- this shouldn't type-check, (f z x1) doesn't neccessarily return something of type Z
+                  }
+              )
+              (z, x);
+
+          flipConsList : \B@(list any)=> \A@any=> list (unionT A (elemT B)) 
+               = \(b:B@(list any)) -> \(a:A@any)-> (a,b);
+          
+          reverse : \L@(list any)=> list (elemT L) 
+                  = \(l:L@(list any)) 
+                  : list (elemT L) 
+                  ->
+                  foldl flipConsList ([]) l;
+                  -- foldl (flipConsList: \(list (elemT L))=> \elemT L=>list (elemT L)) [] l; -- this shouldn't type-check without the type annotation on [], hmmm
+
+        } in
+        reverse [1,2,3]
+  """
+  ]
+  -- , ('type_check', 'bidir')
+  , ['expected_type_errors', 1]
+  , ['expected_type_warns', 0]
+  ]
+
+
+, [ ['name', 'type-error-flip-cons']
+  , ['expr', 
+  """
+        let {
+          F = \B@(list any)=> \A@any=> B;
+          flipConsList : \B@(list any)=> \A@any=> list (unionT A (elemT B)) 
+               = \(b:B@(list any)) -> \(a:A@any)-> (a,b);
+          
+        } in
+        flipConsList: F
+  """
+  ]
+  , ['expected_type_errors', 1]
+  , ['expected_type_warns', 0]
+  , ['expected_type', "\\B@(list any)=> \\A@any=> B"]
+  ]
+
+
+
+, [ ['name', 'intersect-variant']
+  , ['expr', 
+  """
+        let {
+
+            reverse: \L@(list any)=>list (elemT L) = \_->error "reverse";
+
+            Pos = pair int int;
+            Range = pair Pos Pos;
+            Loc = pair str Range;
+            
+            Atomic = 
+              Union
+                [ Variant "AStr" str
+                , Variant "AInt" int
+                ];
+
+            Token = 
+              pair Pos (pair Pos (
+                Union
+                  [ Variant "LexAtomic" Atomic
+                  , Variant "LexId" str
+                  , Variant "LexKeyId" str
+                  , Variant "LexOp" str
+                  , Variant "LexKeyOp" str
+                  , Variant "LexSep" str
+                  , Variant "LexEOF" nil
+                  ]));
+
+            nullToken = ((0,0),(0,0),("LexEOF",()));
+
+            ParseTree = 
+              Fix (\(PT:type)->
+                Union 
+                  [ Variant "token" Token
+                  , Variant "rule" (pair str (list PT))
+                  ]);
+            
+            ParseTreeToken = intersectT ParseTree (pair (singleT "token") any);
+            ParseTreeRule  = intersectT ParseTree (pair (singleT "rule" ) any);
+            
+            
+            RuleResultOk = Variant "ok" (pair ParseTree (pair (list Token) Token));
+            RuleResultFail = Variant "fail" (pair Token Token);
+            RuleResult = Union [RuleResultOk, RuleResultFail];
+            
+            Rule = \(list Token)=> RuleResult;
+            RulesTable = Fix (\(RT:type)-> list (pair str (\RT=> \(list Token)=> RuleResult)));
+            Rule1 = \RulesTable=> \(list Token)=> RuleResult;
+            
+            
+            -- nop = \(rt: RulesTable)-> \(tokens: list Token)-> (("fail", hd tokens): RuleResult);
+            
+            furthest = \(a@((rowA,colA),_,__): Token)-> \(b@((rowB,colB),___,____): Token): Token-> 
+              if rowA > rowB then a else
+              if rowB > rowA then b else
+              if colA > colB then a else
+              if colB > colA then b else
+              a;
+              
+            
+            def = \(name: str, rule: Rule1)-> (name: str, rule: Rule1);
+            
+            seq = \(rules:pair Rule1 (list Rule1))-> \(rt: RulesTable)-> \(tokens: list Token): RuleResult->
+                loop1 (\((rule,rules): pair Rule1 (list Rule1), tokens: list Token, pts: list ParseTree, far: Token)->
+                  case rule rt tokens of {
+                      ("ok", pt, tokens2, far2) -> 
+                          case rules of {
+                            [] -> break (("ok", ("rule", "seq", reverse ((pt,pts): list ParseTree)): ParseTreeRule, tokens2, furthest far far2): RuleResult);
+                            (rules1,ruless) -> continue ((rules1,ruless), tokens2, (pt,pts), furthest far far2);
+                          };
+                      ("fail", tok, far2) -> break ("fail", tok, furthest far far2);
+                  }
+                ) (rules,tokens,[],nullToken);
+            
+        } in
+        seq
+  """
+  ]
+  , ['expected_type_errors', 0]
+  , ['expected_type_warns', 0]
+  ]
+
+
+, [ ['name', 'pair-match-variant']
+  , ['expr', 
+    """
+       let {
+           Pos = pair int int;
+           Range = pair Pos Pos;
+           Loc = pair str Range;
+           
+           Atomic = 
+             Union
+               [ Variant "AStr" str
+               , Variant "AInt" int
+               ];
+           
+           Token = 
+             pair Pos (pair Pos (
+               Union
+                 [ Variant "LexAtomic" Atomic
+                 , Variant "LexId" str
+                 , Variant "LexKeyId" str
+                 , Variant "LexOp" str
+                 , Variant "LexKeyOp" str
+                 , Variant "LexSep" str
+                 , Variant "LexEOF" nil
+                 ]));
+           
+           TokenNoPos = tlT (tlT Token);
+
+           parse_tok : \TokenNoPos=> \(pair Token (list Token))=> list Token
+                     = \(expected_tok@(expected_tag,expected_value): TokenNoPos)
+                    -> \(input@(token@(start,finish,tok@(tag,value)),input2): list Token) ->
+             -- trace ("parse_tok",expected_tok) $
+             if (tag==expected_tag) && (value==expected_value) 
+             then input2
+             else error ("unexpected token",token,"expected",expected_tok);
+
+       } in
+       1
+    """
+    ]
+  , ['expected_value', '1']
+  , ['expected_type', "Int"]
+  ]
+
+, [ ['name', 'codec-pair']
+  , ['expr',
+    """
+        let {
+          -- Codec = Fix (\(A:type)->pair (\str=>any) (\(range (hdT A))=>str));
+          -- Codec = Fix (\(A:type)->pair (\str=>any) (\(applyT (hdT A) str)=>str));
+          -- Codec = domain (\(A@(pair (\str=>any) (\(range (hdT A))=>str))) => any);
+          Codec = Self (\(A:type)->pair (\str=>any) (\(applyT (hdT A) str)=>str));
+          -- codec1  = ( \(a:str)->a, \(a:str)->a ): Codec;
+          codec1  = ( \(a:A@any)->a, \(a:str)->a ): Codec;
+          codec2  = ( \(a:str)->ord a, \(a:int)->chr a ): Codec;
+          testCodec = 
+            \( (encode, decode): C @ Codec )-> \(a: str)->
+            decode (encode a) == a;
+        } in
+        [testCodec codec1 "A", testCodec codec2 "A", testCodec codec1 "Apple", testCodec codec2 "Apple"]
+    """
+    ]
+  , ['expected_value', '(true,true,true,false,())']
+  , ['expected_type', "(bool,bool,bool,bool,())"]
+  -- , ['type_check', 'simple'] -- TODO get this working with bidirectional type-checking
+  ]
+
+
+, [ ['name', 'sum-product-type']
+  , ['expr',
+    """
+        let {
+          SumProd = Union
+            [ Variant "Int" int
+            , Variant "Str" str
+            ];
+          -- a@(ax,ay): SumProd = ("Int", 7): SumProd;
+          -- a@(ax,ay): pair any any = ("Int", 7): SumProd;
+          (a@(ax,ay): SumProd): pair any any = ("Int", 7): SumProd;
+          -- a@(ax,ay) = ("Int", 7): SumProd;
+          -- a: SumProd = ("Int", 7);
+          b: SumProd = ("Str", "seven");
+        } in
+        (a,b)
+    """
+    ]
+  , ['expected_value', '(("Int",7),"Str","seven")']
+  -- , ('expected_type', "")
+  -- , ('type_check', 'simple')
+  ]
+
+
+, [ ['name', 'type-error-sum-product']
+  , ['expr',
+    """
+        let {
+          SumProd = Union
+            [ Variant "Int" int
+            , Variant "Str" str
+            ];
+          a@(ax,ay): SumProd = ("Int", "seven");
+          b: SumProd = ("Str", 7);
+        } in
+        (a,b)
+    """
+    ]
+  , ['expected_type_errors', 2]
+  -- , ('type_check', 'simple')
+  ]
+
+
+, [ ['name', 'sum-product-func']
+  , ['expr',
+    """
+        let {
+          SumProd = Union
+            [ Variant "Int" int
+            , Variant "Str" str
+            ];
+          f = \(sp@(x,y): SumProd)->y;
+          a = f ("Int", 7);
+          b = f ("Str", "seven");
+        } in
+        (a,b)
+    """
+    ]
+  , ['expected_value', '(7,"seven")']
+  -- , ('expected_type', "")
+  -- , ('type_check', 'simple')
+  ]
+
+
+, [ ['name', 'type-error-sum-product-func']
+  , ['expr',
+    """
+        let {
+          SumProd = Union [ Variant "Int" int, Variant "Str" str ];
+          f = \(sp@(x,y): SumProd) -> y;
+          a = f ("Int", "seven");
+          b = f ("Str", 7);
+        } in
+        (a,b)
+    """
+    ]
+  , ['expected_type_errors', 2]
+  -- , ('type_check', 'simple')
+  ]
+
+
+, [ ['name', 'dup']
+  , ['expr',
+    """
+        let {
+          dup = \x->(x,x);
+        } in
+        dup 7
+    """
+    ]
+  , ['expected_value', '(7,7)']
+  -- , ('type_check', 'simple')
+  ]
+
+
+
+
+, [ ['name', 'unzip']
+  , ['expr',
+    """
+        let {
+
+            reverse = \(l: L@(list any))->
+              loop1 (\(result: list (elemT L), l: list (elemT L))->
+                case l of {
+                  () -> break result;
+                  (l1, ls) -> continue ((l1,result), ls);
+                }
+              ) ([], l);
+
+
+            unzip : \L@(list (pair any any)) => pair (list (hdT (elemT L))) (list (tlT (elemT L)))
+                  = \(l:L@(list (pair any any))) ->
+                  loop1 (\(a: list (hdT (elemT L)), b: list (tlT (elemT L)), l: (list (elemT L))) ->
+                    case l of {
+                      []           -> break (a,b);
+                      ((a1,b1),ls) -> continue ((a1,a),(b1,b),ls);
+                    }
+                  ) ([], [], reverse l);
+
+            -- reverse = \(l: L1@(list any))->
+            --   loop1 (\(result: list (elemT L1), l: list (elemT L1))->
+            --     case l of {
+            --       () -> break result;
+            --       (l1, ls) -> continue ((l1,result), ls);
+            --     }
+            --   ) ([], l);
+
+            -- unzip : \L2@(list (pair any any)) => pair (list (hdT (elemT L2))) (list (tlT (elemT L2)))
+            --       = \(l:L2@(list (pair any any))) ->
+            --       loop1 (\(a: list (hdT (elemT L2)), b: list (tlT (elemT L2)), l: (list (elemT L2))) ->
+            --         case l of {
+            --           []           -> break (a,b);
+            --           ((a1,b1),ls) -> continue ((a1,a),(b1,b),ls);
+            --         }
+            --       ) ([], [], reverse l);
+
+
+        } in 
+        unzip [(1,2),(3,4),(5,6)]
+    """
+    ]
+  , ['expected_value', '((1,3,5,()),2,4,6,())']
+  -- , ('type_check', 'simple')
+  ]
+
+
+, [ ['name', 'tuple-list-pat']
+  , ['expr',
+    """
+        let {
+          [a, b, c]: list int = [1,2,3];
+        } in
+        a+b+c
+    """
+    ]
+  , ['expected_value', '6']
+  , ['type_check', 'bidir']
+  ]
+
+
+, [ ['name', 'func-type-infer']
+  , ['expr',
+    """
+        let {
+          f: \int=>int = \x-> x*x;
+        } in
+        f 7
+    """
+    ]
+  , ['expected_value', '49']
+  , ['type_check', 'bidir']
+  ]
+
+
+
+
+
+
+]
+

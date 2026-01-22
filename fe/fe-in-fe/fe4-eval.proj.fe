@@ -1,0 +1,28 @@
+language ferrum/proj/0.1
+
+[ "project", 
+  [ ["source", "fe4-prelude.fe"]
+
+  , ["source", "fe4-token.fe"]
+  , ["source", "fe4-scanner.fe"]
+
+  , ["source", "fe4-display-tree.fe"]
+  , ["source", "fe4-expr.fe"]
+
+
+  , ["source", "fe4-cps2.fe"]
+  , ["source", "fe4-hps.fe"]
+  , ["source", "fe4-parser-common-before.fe"]
+  , ["source", "fe4-parser-impl-hps.fe"]
+  , ["source", "fe4-parser-common-after.fe"]
+  -- , ["source", "fe4-parser-sync.fe"]
+
+  , ["source", "fe4-init-env.fe"]
+  , ["source", "fe4-eval.fe"]
+
+
+  ]
+]
+
+
+

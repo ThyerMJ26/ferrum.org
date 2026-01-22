@@ -1,0 +1,195 @@
+language ferrum/0.1
+
+-- let Fixity = { "Prefix" | "Infix" | "Postfix" };
+let OpDefn2 = { [Str, Fixity] };
+let OpCompare = { "Left" | "Right" | "None" };
+
+-- TODO add an operator definitions table
+-- TODO  and define a partial precedence relationship more declaratively
+
+let compareOperators : { OpDefn2 -> OpDefn2 -> OpCompare }
+    = [lName, lFixity] -> [rName, rFixity] ->
+    match [lName, rName]
+    [ [ "@"    , _     ] |=> "Left"
+    , [ _      , "@"   ] |=> "Right"
+    , [ _      , "->"  ] |=> "Right"
+    , [ _      , "|=>" ] |=> "Right"
+    , [ _      , "|->" ] |=> "Right"
+    , [ _      , "=>"  ] |=> "Right"
+    , [ _      , "<|"  ] |=> "Right"
+    , [ "->"   , _     ] |=> "Right"
+    , [ "|=>"  , _     ] |=> "Right"
+    , [ "|->"  , _     ] |=> "Right"
+    , [ "=>"   , _     ] |=> "Right"
+    , [ "+"    , "*"   ] |=> "Right"
+    , [ "*"    , "+"   ] |=> "Left"
+    , _ |=>
+        if (lName==rName) -- TODO check fixity
+        [ -> 
+            match lName
+            [ "<|" |=> "Right"
+            , "::" |=> "Right"
+            , _    |=> "Left" 
+            ]
+        , -> "None"
+        ]
+    ];
+
+let lookupOp2 : { Str -> OpDefn2 }
+    = name ->
+    [ name, "Infix" ];
+
+let lookupPrefixOp2 : { Str -> OpDefn2 }
+    = name ->
+    [ name, "Prefix" ];
+
+let mkApplyOp : { OpDefn2 -> Loc -> ExprLoc -> ExprLoc -> ExprLoc }
+    = [opName, opFixify] -> opLoc -> arg1 @ [_,arg1Loc] -> arg2 @ [_,arg2Loc] ->
+    let loc = mergeLoc arg1Loc arg2Loc;
+    match opName
+    [ "->"  |=> [ ["ELambda", arg1, arg2]         , loc ] 
+    , "|=>" |=> [ ["ELambdaMaybe", arg1, arg2]    , loc ]
+    , "|->" |=> [ ["ELambdaNo",    arg1, arg2]    , loc ]
+    , "=>"  |=> [ ["ELambdaYes",   arg1, arg2]    , loc ]
+    , ":"   |=> [ ["EType", arg1, arg2]           , loc ]
+    , "@"   |=> 
+        match arg1
+        [ [ ["EVar", name], _] |=> [ ["EAs", name, arg2], loc ]
+        , _ |=> error ["mkApplyOp", "expected name"]
+        ]
+         -- TODO ? record the direction of application in the AST ?
+         -- TODO ?   so as to indicate a preferred presentation during readback/codegen ?
+    , "|>" |=> [ ["EApply", arg2, arg1]           , loc ]
+    , "<|" |=> [ ["EApply", arg1, arg2]           , loc ]
+    , _    |=> [ ["EOper", opName, [arg1, arg2]]  , loc ]
+    ];
+
+let mkApplyOpPrefix : { OpDefn2 -> Loc -> ExprLoc -> ExprLoc }
+    = [ opName , opFixity ] -> opLoc -> arg1 @ [_, arg1Loc] ->
+    let loc = mergeLoc opLoc arg1Loc;
+    match opName
+    [ "->" |=>  [ ["ELambda", [ ["ELit", []], opLoc], arg1]  , loc ]
+    , _ |=>     [ ["EOper", opName, [arg1]]        , loc ]
+    ];
+
+-- let mkApplyOpPostfix : { OpDefn2 -> Loc -> ExprLoc -> ExprLoc }
+--     = [ opName , opFixity ] -> opLoc -> arg1 @ [_,arg1Loc] ->
+--     let loc = mergeLoc opLoc arg1Loc;
+--     match opName
+--     [ _ |=> [ ["EOper", opName, [arg1]], loc ]
+--     ];
+
+let foldOpArgs2 : { (List {[ExprLoc, OpDefn2]}) -> (List ExprLoc) -> (Maybe OpDefn2) -> [ (List {[ExprLoc, OpDefn2]}) , (List ExprLoc) ]  }
+    = opStack0 -> argStack0 -> opDefnOpt ->
+    loop1 ( [opStack: List {[ExprLoc, OpDefn2]}, argStack: List ExprLoc, precedence: OpCompare ] ->
+        -- let _ = debug ["fold loop 2", opStack, argStack, precedence];
+        match [opStack, precedence]
+        [ [ [[prevOpExpr, prevOpDefn@[prevOpName, prevOpFixity]],,opStack2], "Left" ] |=>
+            let precedence2 = 
+                match opDefnOpt
+                [ [] |=> "Left"
+                , [defn] |=>
+                    compareOperators prevOpDefn defn
+                ];
+            match precedence2
+            [ "Left" |=>
+                match prevOpFixity
+                [ "Prefix" |=>
+                    match argStack
+                    [ [arg1,,argStack2] |=>
+                        let arg = mkApplyOpPrefix prevOpDefn nilLoc arg1;
+                        continue [opStack2, [arg,,argStack2], precedence2]
+                    , _ |=>
+                        error ["impossible 1", opStack, argStack, opDefnOpt]
+                    ]
+                , "Infix" |=>
+                    match argStack
+                    [ [arg1, arg2,,argStack2] |=>
+                        let arg = mkApplyOp prevOpDefn nilLoc arg2 arg1;
+                        continue [opStack2, [arg,,argStack2], precedence2]
+                    , _ |=>
+                        error ["impossible 2", argStack, prevOpDefn, opDefnOpt]
+                    ]
+                , "Postfix" |=>
+                    error "impossible 3"
+                ]
+            , "Right" |=>
+                break [opStack, argStack]
+            , "None" |=>
+                error ["no precedence relationship exists between operators", prevOpDefn, opDefnOpt]
+            ]
+        , _ |=> break [opStack, argStack] 
+        ]
+    ) [opStack0, argStack0, "Left"];
+
+
+let foldOpArgs : { (List ExprLoc) -> ExprLoc } =
+    opArgs0 ->
+    -- let _ = debug ["foldOpArgs", opArgs];
+    -- TODO rewrite this as a fold
+    -- TODO can we merge opStack and argStack and eliminate the juxtaposed flag ?
+    loop1 ( [opArgs: List ExprLoc, opStack: List {[ExprLoc, OpDefn2]}, argStack: List ExprLoc, juxtaposedApplyPossible: Bool] ->
+        -- let _ = debug ["fold loop opArgs", opArgs];
+        -- let _ = debug ["fold loop opStack", opStack];
+        -- let _ = debug ["fold loop argStack", argStack];
+        -- let _ = debug ["fold loop juxt", juxtaposedApplyPossible];
+        match opArgs
+        [ [opArg ,, opArgs2] |=>
+            match opArg
+            [ [ ["ESym", name], loc1] |=>
+                if juxtaposedApplyPossible
+                [ ->
+                    match argStack
+                    [ [] |=>
+                        let opDefn = lookupPrefixOp2 name;
+                        continue [opArgs2, [[opArg, opDefn] ,, opStack], argStack, false]
+                    , [arg1 ,, argStack2] |=>
+                        let opDefn@[opName, opFixity] = lookupOp2 name;
+                        match opFixity
+                        [ "Prefix" |=>
+                            error "impossible 4"
+                        , "Infix" |=>
+                            let [opStack3, argStack3] = foldOpArgs2 opStack argStack [opDefn];
+                            let opStack4 = [ [opArg, opDefn],,opStack3 ];
+                            continue [opArgs2, opStack4, argStack3, false]
+                        , "Postfix" |=>
+                            error "TODO?"
+                        ]
+                    ]
+                , ->
+                    let opDefn = lookupPrefixOp2 name;
+                    continue [opArgs2, [[opArg, opDefn] ,, opStack], argStack, false]
+                ]
+            , [_, loc1] |=>
+                if juxtaposedApplyPossible
+                [ -> 
+                    match argStack
+                    [ [] |=> error "impossible 5"
+                    , [arg1 @ [_,loc2] ,, argStack2] |=>
+                        let loc = mergeLoc loc1 loc2;
+                        let arg2 = [ ["EApply", arg1, opArg], loc];
+                        let argStack3 = [arg2 ,, argStack2];
+                        continue [opArgs2, opStack, argStack3, true]
+                    ]
+                , ->
+                    continue [opArgs2, opStack, [opArg ,, argStack], true]
+                ]
+            ]
+        , [] |=>
+            -- let _ = debug ["fold result 1 opStack", opStack];
+            -- let _ = debug ["fold result 1 argStack", argStack];
+            let [opStack3, argStack3] = foldOpArgs2 opStack argStack [];
+            -- let _ = debug ["fold result 2 opStack", opStack3];
+            -- let _ = debug ["fold result 2 argStack", argStack3];
+            match [opStack3, argStack3]
+            [ [ [], [arg1] ] |=>
+                break arg1
+            , _ |=>
+                error ["failed to fold opArgs", opArgs]
+            ]
+        ]
+    ) [opArgs0, [], [], false];
+
+
+
+

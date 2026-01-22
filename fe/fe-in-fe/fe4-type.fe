@@ -1,0 +1,818 @@
+language ferrum/0.1
+
+let tyDebug = debug2Skip;
+-- let tyDebug = debug2;
+
+
+let ExprTy = 
+    ExprAnnot <| Exp -> 
+    { [ Exp
+      , Loc
+      , Addr -- expr address
+      , Addr -- ty1 address / synthesized/calculated/computed-type
+      , Addr -- ty2 address / context-type
+      , Addr -- type-check / type-inhabitation address 
+            -- (TI { ty1 \ ty2 }) (for expressions/positive-contexts), and 
+            -- (TI { ty2 \ ty1 }) (for patterns/negative-contexts)
+      ] };
+
+let DeclTy = { [ExprTy, ExprTy] };
+let DeclTys = List DeclTy;
+
+-- TODO this is copy-pasted from "subExprs"
+-- TODO write this in a more generic/reusable manner
+let exprTySubExprs : { ExprTy -> (List ExprTy) } = 
+    exprTy ->
+    let [expr ,, _] = exprTy;
+    match expr
+    [ ["EVar",    v              ] |=> []
+    , ["ELambda",         arg, body ] |=> [arg, body]
+    , ["ELambdaNo",       arg, body ] |=> [arg, body]
+    , ["ELambdaYes",      arg, body ] |=> [arg, body]
+    , ["ELambdaMaybe",    arg, body ] |=> [arg, body]
+    , ["EApply",  func, arg      ] |=> [func, arg]
+    , ["ELit",    val            ] |=> []
+    , ["ELet",    pat, def, exp  ] |=> [pat, def, exp]
+    -- , ["ELets",   decls, exp     ] |=> append (for decls ([pat,defn]->defn)) [exp]
+    , ["ELets",   decls, exp     ] |=> append (concat decls) [exp]
+    , ["EPair",   h, t           ] |=> [h, t]
+    , ["EList",   elems, t       ] |=> append elems t
+    , ["EType",   exp, typ       ] |=> [exp, typ]
+    , ["EAs",     name, exp      ] |=> [exp]
+    , ["EOper",   name, exps     ] |=> exps
+    , ["ETermBrackets", exp      ] |=> [exp]
+    , ["ETypeBrackets", exp      ] |=> [exp]
+    , ["EType", exp, ty          ] |=> [exp]
+    , _ |=> error ["subExprs", "missing case", expr]
+    ];
+
+-- TODO return the negative+positive sub-expressions separately, not sure we need this
+let exprTySubExprParts : { ExprTy -> [(List Datum), (List ExprTy), (List ExprTy)] } = 
+    exprTy ->
+    error "TODO";
+
+let showExprTy : { { ExprTy -> Addr } -> ExprTy -> (HeapA (List Str)) } =
+    typeField -> exprTy ->
+    (k : K @ HeapK (List Str)) ->
+    error "TODO";
+    -- TODO travers expression, readback type ty1/ty2 for each one, print one per line
+
+
+
+
+let OpType = { [Str, [(List Addr), Addr]] };
+
+-- TODO enable result types to depend on argument types
+-- let OpType = { [Str, [(List Addr), (List Addr) -> (HeapA Addr)]] };
+
+-- TODO enable result types to depend on argument values and types
+-- let OpType = { [Str, [(List Addr), (List { [Addr, Addr] }) -> (HeapA Addr)]] };
+
+-- TODO enable subsequent argument types to depend on earlier argument types ?
+-- let OpType = 
+--     { [Str, [                                                        ], [                ] -> (HeapA Addr)]] }
+--     | [Str, [Addr                                                    ], [Addr            ] -> (HeapA Addr)]] }
+--     | [Str, [Addr, Addr -> (HeapA Addr)                              ], [Addr, Addr      ] -> (HeapA Addr)]] }
+--     | [Str, [Addr, Addr -> (HeapA Addr), [Addr, Addr] -> (HeapA Addr)], [Addr, Addr, Addr] -> (HeapA Addr)]] }
+--     };
+-- let OpType = 
+--     | [Str, (List { (List Addr) -> (HeapA Addr) }), (List Addr) -> (HeapA Addr)] };
+
+
+let OpTypes = List OpType;
+
+
+-- TODO alternatively use_ function_ types for_ operator types
+-- TODO benefits no need to_ duplicate the same type-application logic 
+-- TODO drawbacks ? no explicit indication of_ arity, as_ no explicit list of_ argument types ?
+-- TODO   could always add an integer, it's unlikely there would be any ambiguity in_ the arity of_ the operators that the type_ would clear up
+
+let OpFnType = { [Str, Addr] };
+let OpFnTypes = List OpFnType;
+
+
+
+
+
+let tiPropagateContradiction1 : { TiVal -> { [] -> TiVal } -> TiVal } =
+    a -> k ->
+    if (tiIsContradiction a)
+    [ -> 
+        -- errorTypeInhabitationContradictionDetected ["tiPropagateContradiction1", a]
+        tiContradiction
+    , -> k [] 
+    ];
+
+let tiPropagateContradiction2 : { TiVal -> TiVal -> { [] -> TiVal } -> TiVal } =
+    a -> b -> k ->
+    if (tiIsContradiction a || tiIsContradiction b) 
+    [ -> 
+        -- errorTypeInhabitationContradictionDetected ["tiPropagateContradiction2", a, b]
+        tiContradiction
+    , -> k [] 
+    ];
+
+
+let tiAnd     : { TiVal -> TiVal -> TiVal } = 
+    a @ [aF, aT] -> b @ [bF, bT] -> 
+    tiPropagateContradiction2 a b <| ->
+    [aF || bF, aT && bT];
+
+let tiAndImp  : { TiVal -> TiVal -> TiVal } = 
+    a @ [aF, aT] -> b @ [bF, bT] -> 
+    tiPropagateContradiction2 a b <| ->
+    if (tiIsTrue a)
+    [ -> 
+        tiTrue
+    , -> 
+        if (tiIsFalse b)
+        [ -> tiFalse
+        , -> tiAnd a b
+        ]
+    ];
+
+-- let tiAndImp  : { TiVal -> TiVal -> TiVal } = 
+--     a @ [aF, aT] -> b @ [bF, bT] -> 
+--     tiPropagateContradiction2 a b <| ->
+--     match []
+--     [ -> tiIsTrue  a  |= tiTrue
+--     , -> tiIsFalse b  |= tiFalse 
+--     , _               => tiAnd a b
+--     ];
+
+let tiOr      : { TiVal -> TiVal -> TiVal } = 
+    a @ [aF, aT] -> b @ [bF, bT] -> 
+    tiPropagateContradiction2 a b <| ->
+    [aF && bF, aT || bT];
+
+let tiOrImp   : { TiVal -> TiVal -> TiVal } = 
+    a @ [aF, aT] -> b @ [bF, bT] -> 
+    tiPropagateContradiction2 a b <| ->
+    if (tiIsTrue a)
+    [ ->
+        tiTrue
+    , -> 
+        if (tiIsFalse b)
+        [ -> tiFalse
+        , -> tiOr a b
+        ]
+    ];
+
+-- let tiOrImp  : { TiVal -> TiVal -> TiVal } = 
+--     a @ [aF, aT] -> b @ [bF, bT] -> 
+--     tiPropagateContradiction2 a b <| ->
+--     match []
+--     [ -> tiIsTrue  a  |= tiTrue
+--     , -> tiIsFalse b  |= tiFalse 
+--     , _               => tiOr a b
+--     ];
+
+
+let tiNot     : { TiVal ->          TiVal } = 
+    a @ [aF, aT] ->
+    tiPropagateContradiction1 a <| ->
+    [aT, aF];
+
+
+let tiMerge  : { TiVal -> TiVal -> TiVal } = 
+    a @ [aF, aT] -> b @ [bF, bT] -> 
+    tiPropagateContradiction2 a b <| ->
+    let result = [aF || bF, aT || bT];
+    tiPropagateContradiction1 result <| ->
+    result;
+
+
+
+-- TODO we shouldn't need both these (typeHd, typeTl) and the functions (opTyHd, opTyTl) in graph-reduction2.fe
+-- TODO get rid of these ones, they are only used by the instantiation code, and it should be possible to switch them
+-- TODO the result will be the (Hd,Tl) reductions don't occur immediately, but that should be fine.
+
+let typeHd : { Addr -> (HeapA Addr) } =
+    a -> (k : K @ HeapK Addr) ->
+    heapDeref a <| [nc, aNode] ->
+    let depth = nc |> ncDepth;
+    heapMatch aNode
+    [ ["TyOper", "Any", []] |=> 
+        heapMatchYes a
+    , ["TyPair", h, t] |=>
+        heapMatchYes h
+    , _ |=>
+        ([kYes, kNo] : K @ CpsMbK HeapHandler Addr) ->
+        heapNewNode2 depth ["HOper", "Hd", [a]] <| tyHd ->
+        kYes tyHd
+    ] <| resultAddr ->
+    k resultAddr;
+
+let typeTl : { Addr -> (HeapA Addr) } =
+    a -> (k : K @ HeapK Addr) ->
+    heapDeref a <| [nc, aNode] ->
+    let depth = nc |> ncDepth;
+    heapMatch aNode
+    [ ["TyOper", "Any", []] |=> 
+        heapMatchYes a
+    , ["TyPair", h, t] |=>
+        heapMatchYes t
+    , _ |=>
+        ([kYes, kNo] : K @ CpsMbK HeapHandler Addr) ->
+        heapNewNode2 depth ["HOper", "Tl", [a]] <| tyTl ->
+        kYes tyTl
+    ] <| resultAddr ->
+    k resultAddr;
+
+
+-- TODO ? treat unevaluated and tiUnknown as different
+-- TODO ?   this would make it possible to avoid revisiting nodes which will clearly never change from tiUnknown
+-- let tiExprEval : { TiExpr -> (HeapA (Maybe TiVal)) } =
+--     rec <| (tiee : { TiExpr -> (HeapA (Maybe TiVal)) }) ->
+--     tiExpr ->
+--     (k : K @ HeapK (Maybe TiVal)) ->
+
+let tiExprEval : { TiExpr -> (HeapA TiVal) } =
+    rec <| (tiee : { TiExpr -> (HeapA TiVal) }) ->
+    tiExpr ->
+    tyDebug ["tiExprEval", tiExpr] <| ->
+    (k : K @ HeapK TiVal) ->
+    match tiExpr
+    [ ["TiConst",  tiVal] |=> 
+        k tiVal
+    , ["TiRef",    addr] |=> 
+        heapDeref addr <| [nc,node] ->
+        match node
+        [ ["TI", tyAddr, tiVal,      tiEdges] |=>
+            k tiVal
+        , _ |=>
+            error ["tiExprEval", "unexpect node, expected a TI node, not", node]
+        ]
+    , ["TiAnd",    a, b] |=> 
+        tiee a <| aTv ->
+        tiee b <| bTv ->
+        k (tiAnd aTv bTv)
+    , ["TiAndImp", a, b] |=> 
+        tiee a <| aTv ->
+        tiee b <| bTv ->
+        k (tiAndImp aTv bTv)
+    , ["TiOr",     a, b] |=> 
+        tiee a <| aTv ->
+        tiee b <| bTv ->
+        k (tiOr aTv bTv)
+    , ["TiOrImp",  a, b] |=> 
+        tiee a <| aTv ->
+        tiee b <| bTv ->
+        k (tiOrImp aTv bTv)
+    , ["TiNot",    a] |=> 
+        tiee a <| aTv ->
+        k (tiNot aTv)
+    ];
+
+
+
+
+
+
+
+-- let HEnvTy = List { [Str, [Addr, Addr]] };
+
+
+
+
+let applyTypes : { Depth -> HEnvTy -> Addr -> Addr -> Addr -> (HeapA Addr) } =
+    depth -> env -> funTy -> argTm -> argTy ->
+    (k : K @ HeapK Addr) ->
+    heapDeref funTy <| [fnc, funNode] ->
+    let funTyDepth = ncDepth fnc;
+    match funNode
+    [ ["TyFun", domTy, codTy] |=>
+        let depthShift = depth - funTyDepth - 1;
+        let newForm = _ -> "Weak";
+
+        -- traceHeap (show ["applyTypes", funTy, argTm, argTy]) funTy <| ->
+
+        -- traceHeap (show ["applyTypes/funTy", funTy]) funTy <| ->
+        -- traceHeap (show ["applyTypes/argTm", argTm]) argTm <| ->
+        -- traceHeap (show ["applyTypes/argTy", argTy]) argTy <| ->
+
+        graphSubst0 funTyDepth depthShift codTy argTm argTy newForm <| appAddr ->
+
+        -- traceHeap (show ["applyTypes/result", appAddr]) appAddr <| ->
+
+        k appAddr
+
+    , _ |=>
+        heapNewNode2 depth ["TyApp", funTy, argTy] <| appTy ->
+        k appTy
+    ];
+
+
+-- let tyEqual : { Addr -> Addr -> (HeapA Bool) } =
+--     a -> b ->
+--     (k : K @ HeapK Bool) ->
+--     heapDeref a <| [_, aNode] ->
+--     heapDeref b <| [_, bNode] ->
+--     -- TODO this is both too cautious and too wreckless
+--     -- TODO need to further descend to check for types (hash-consing types will remove the need for this)
+--     -- TODO need to make sure ["TyOper", "Unknown"] isn't considered equal to anything, even itself
+--     k (dataEq aNode bNode);
+
+
+let tisRelCompRule0 : { { Addr -> Addr -> (HeapA TiExpr) } -> Addr -> Addr -> (HeapA TiExpr) } =
+    -- rec <| 
+    (tisRc : { Addr -> Addr -> (HeapA TiExpr) }) ->
+    a -> b ->
+    (k : K @ HeapK TiExpr) ->
+    heapDeref a <| [_, aNode] ->
+    heapDeref b <| [_, bNode] ->
+    -- tyDebug ["tisRelCompRule", aNode, bNode] <| ->
+    heapMatch [aNode, bNode]
+    [ [_ , ["TyOper", "Any", []]] |=> 
+        heapMatchYes (tieConst tiFalse)
+    , [["TyOper", "Void", []], _] |=>
+        heapMatchYes (tieConst tiFalse)
+    , [["TyOper", op1,    []], ["TyOper", op2,   []]] |=>
+        let disjointOps = ["Nil", "Bool", "Int", "Str", "Type"];
+        if (isElem op1 disjointOps && isElem op2 disjointOps)
+        [ _ -> 
+            heapMatchYes (tieConst (tiValFromBool (not (op1 == op2))))
+        , -> 
+            heapMatchNo
+        ]
+    , [["TySingle", tmAddr], ["TyOper", "Int",   []]] |=>
+        heapMatchGuard (heapDeref tmAddr) <| [_, ["HValue", datum]] |=>
+        heapMatchYes (tieConst (tiValFromBool (not (isInt datum))))
+    , [["TySingle", tmAddr], ["TyOper", "Str",   []]] |=>
+        heapMatchGuard (heapDeref tmAddr) <| [_, ["HValue", datum]] |=>
+        heapMatchYes (tieConst (tiValFromBool (not (isStr datum))))
+    , [["TySingle", aAddr], ["TySingle", bAddr]] |=>
+        heapMatchGuard (heapDeref aAddr) <| [_, ["HValue", aDatum]] |=>
+        heapMatchGuard (heapDeref bAddr) <| [_, ["HValue", bDatum]] |=>
+        heapMatchYes (tieConst (tiValFromBool (not (aDatum == bDatum))))
+    , [["TySingle", aAddr], ["TyDatum", bDatum]] |=>
+        heapMatchGuard (heapDeref aAddr) <| [_, ["HValue", aDatum]] |=>
+        heapMatchYes (tieConst (tiValFromBool (not (aDatum == bDatum))))
+    , [["TyDatum", aDatum], ["TySingle", bAddr]] |=>
+        heapMatchGuard (heapDeref bAddr) <| [_, ["HValue", bDatum]] |=>
+        heapMatchYes (tieConst (tiValFromBool (not (aDatum == bDatum))))
+    , [["TyDatum", aDatum], ["TyDatum", bDatum]] |=>
+        heapMatchYes (tieConst (tiValFromBool (not (aDatum == bDatum))))
+    , [["TyOper", "Nil", []], ["TyDatum", bDatum]] |=>
+        heapMatchYes (tieConst (tiValFromBool (not ([] == bDatum))))
+    , [["TyPair", aH, aT], ["TyPair", bH, bT]] |=>
+        ([kYes, kNo] : K @ CpsMbK HeapHandler TiExpr) ->
+        tisRc aH bH <| tieH ->
+        tisRc aT bT <| tieT ->
+        tiExprEval tieH <| tivH ->
+        tiExprEval tieT <| tivT ->
+        let tiVal = tiOr tivH tivT;
+        kYes (tieConst (tiVal))
+    , [["TyFun", aDom, aCod], ["TyFun", bDom, bCod]] |=>
+        ([kYes, kNo] : K @ CpsMbK HeapHandler TiExpr) ->
+        tisRc bDom aDom <| tieDom ->
+        tisRc aCod bCod <| tieCod ->
+        tiExprEval tieDom <| tivDom ->
+        tiExprEval tieCod <| tivCod ->
+        let tiVal = tiOr tivDom tivCod;
+        kYes (tieConst (tiVal))
+    , [["TyPair", _, _], ["TyOper", "Type", []]] |=>
+        heapMatchYes (tieConst tiFalse)
+    , [["TyFun", _, _], ["TyOper", "Type", []]] |=>
+        heapMatchYes (tieConst tiFalse)
+    -- , [["TyOper", "|", [a1, a2]], ["TyOper", "|", [b1, b2]] ] |=>
+    --     ([kYes, kNo] : K @ CpsMbK HeapHandler TiExpr) ->
+    --     tisRc a1 b1 <| tie1 ->
+    --     tisRc a2 b2 <| tie2 ->
+    --     tiExprEval tie1 <| tiv1 ->
+    --     tiExprEval tie2 <| tiv2 ->
+    --     let tiVal = tiOr tiv1 tiv2;
+    --     -- TODO need to and-in a tiUnknown.
+    --     -- TODO the above tiOr can correctly indicate uninhabitation, but not inhabitation,
+    --     -- TODO whatever escapes from one side, could have been consumer by the other given the chance
+    --     let tiVal = tiVal |> tiAnd tiUnknown;
+    --     kYes (tieConst (tiVal))
+    , [["TyOper", "|", [a1, a2]], _] |=>
+        ([kYes, kNo] : K @ CpsMbK HeapHandler TiExpr) ->
+        tisRc a1 b <| tie1 ->
+        tisRc a2 b <| tie2 ->
+        tiExprEval tie1 <| tiv1 ->
+        tiExprEval tie2 <| tiv2 ->
+        let tiVal = tiOr tiv1 tiv2;
+        -- if (tiIsKnown tiVal)
+        -- [ -> kYes (tieConst (tiVal))
+        -- , -> kNo []
+        -- ]
+        kYes (tieConst (tiVal))
+    , [_, ["TyOper", "|", [b1, b2]]] |=>
+        ([kYes, kNo] : K @ CpsMbK HeapHandler TiExpr) ->
+        tisRc a b1 <| tie1 ->
+        tisRc a b2 <| tie2 ->
+        tiExprEval tie1 <| tiv1 ->
+        tiExprEval tie2 <| tiv2 ->
+        let tiVal = tiAnd tiv1 tiv2;
+        if (tiIsKnown tiVal)
+        [ -> kYes (tieConst (tiVal))
+        , -> kNo []
+        ]
+    , _ |=> 
+        heapMatchYes (tieConst tiUnknown)
+    ] k;
+
+let tisRelCompRule : { Addr -> Addr -> (HeapA TiExpr) } =
+    rec <| (tisRc : { Addr -> Addr -> (HeapA TiExpr) }) ->
+    a -> b -> (k : K @ HeapK TiExpr) ->
+    heapDeref a <| [_, aNode] ->
+    heapDeref b <| [_, bNode] ->
+    tyDebug ["tisRelCompRule", a, aNode, b, bNode, "call"] <| ->
+    tisRelCompRule0 tisRc a b <| tie ->
+    tyDebug ["tisRelCompRule", a, aNode, b, bNode, "return", tie] <| ->
+    k tie;
+
+let tisUnionRule0 : { { Addr -> Addr -> (HeapA TiExpr) } -> Addr -> Addr -> (HeapA TiExpr) } =
+    -- rec <| 
+    (tisUn : { Addr -> Addr -> (HeapA TiExpr) }) ->
+    a -> b ->
+    (k : K @ HeapK TiExpr) ->
+    heapDeref a <| [_, aNode] ->
+    heapDeref b <| [_, bNode] ->
+    heapMatch [aNode, bNode]
+    [ [_ , ["TyOper", "Any", []]] |=> 
+        heapMatchYes tieTrue
+    , [["TyOper", "Any", []], _] |=>
+        heapMatchYes tieTrue
+    , _ |=> 
+        heapMatchYes tieUnknown
+    ] k;
+
+let tisUnionRule : { Addr -> Addr -> (HeapA TiExpr) } =
+    rec <| (tisRc : { Addr -> Addr -> (HeapA TiExpr) }) ->
+    a -> b -> (k : K @ HeapK TiExpr) ->
+    heapDeref a <| [_, aNode] ->
+    heapDeref b <| [_, bNode] ->
+    tyDebug ["tisUnionRule", a, aNode, b, bNode, "call"] <| ->
+    tisUnionRule0 tisRc a b <| tie ->
+    tyDebug ["tisUnionRule", a, aNode, b, bNode, "return", tie] <| ->
+    k tie;
+
+
+
+let tiStructuralRule : { Addr -> (HeapA TiExpr) } =
+    tyAddr ->
+    (k0 : K @ HeapK TiExpr) ->
+    let (k : { TiExpr -> K TiExpr }) =
+        (tie : TiExpr) ->
+        tyDebug ["tiStructuralRule", tie] <| ->
+        k0 tie;
+    heapDeref tyAddr <| [_, tyNode] ->
+    tyDebug ["tiStructuralRule", tyAddr, tyNode] <| ->
+    match tyNode
+    [ ["TyOper", "Void", [] ] |=> k (tieConst tiFalse)
+    , ["TyOper", "Nil",  [] ] |=> k (tieConst tiTrue)
+    , ["TyOper", "Bool", [] ] |=> k (tieConst tiTrue)
+    , ["TyOper", "Int",  [] ] |=> k (tieConst tiTrue)
+    , ["TyOper", "Str",  [] ] |=> k (tieConst tiTrue)
+    , ["TyOper", "Any",  [] ] |=> k (tieConst tiTrue)
+    , ["TyOper", "relComp", [a, b]] |=> tisRelCompRule a b k
+    , ["TyOper", "\\",      [a, b]] |=> tisRelCompRule a b k
+    , ["TyOper", "|",       [a, b]] |=> tisUnionRule a b k
+    , _ |=>
+        k (tieConst tiUnknown)
+    ];
+
+-- TODO don't just assume "a" is a function
+let tiRcFunB : { Addr -> (HeapA TiExpr) } =
+    tyAddr ->
+    (k : K @ HeapK TiExpr) ->
+    heapDeref tyAddr <| [nc, tyNode] ->
+    let depth = nc |> ncDepth;
+    heapMatch tyNode
+    [ ["TyOper", "relComp", [a, b]] |=>
+        ([kYes, kNo] : K @ CpsMbK HeapHandler TiExpr) ->
+        heapDeref b <| [_, bNode] ->
+        match bNode
+        [ ["TyFun", bDom, bCod] |=>
+            heapNewNode2 depth ["HOper", "Domain",   [a]]   <| aDom ->
+            heapNewNode2 depth ["HOper", "Codomain", [a]]   <| aCod ->
+            heapNewNode2 depth ["TyOper", "relComp", [bDom, aDom]]  <| rcDom ->
+            heapNewNode2 depth ["TyOper", "relComp", [aCod, bCod]]  <| rcCod ->
+            heapNewNodeTi rcDom <| rcDomTi ->
+            heapNewNodeTi rcCod <| rcCodTi ->
+            kYes (tieOr (tieRef rcDomTi) (tieRef rcCodTi))
+        , _ |=>
+            kNo []
+        ]
+    , _ |=>
+        heapMatchYes (tieConst tiUnknown)
+    ] k;
+
+let tiRcSupB : { Addr -> (HeapA TiExpr) } =
+    tyAddr ->
+    (k : K @ HeapK TiExpr) ->
+    heapDeref tyAddr <| [nc, tyNode] ->
+    let depth = nc |> ncDepth;
+    heapMatch tyNode
+    [ ["TyOper", "relComp", [a, b]] |=>
+        ([kYes, kNo] : K @ CpsMbK HeapHandler TiExpr) ->
+        heapDeref b <| [_, bNode] ->
+        match bNode
+        [ ["TyOper", ":>", [bSup, bSub]] |=>
+            -- heapNewNode2 depth ["HOper", "Domain",   [a]]   <| aDom ->
+            -- heapNewNode2 depth ["HOper", "Codomain", [a]]   <| aCod ->
+            heapNewNode2 depth ["TyOper", "relComp", [a, bSup]]  <| rcSup ->
+            heapNewNode2 depth ["TyOper", "relComp", [a, bSub]]  <| rcSub ->
+            heapNewNodeTi rcSup <| rcSupTi ->
+            heapNewNodeTi rcSub <| rcSubTi ->
+            kYes (tieAndImp (tieRef rcSupTi) (tieRef rcSubTi))
+        , _ |=>
+            kNo []
+        ]
+    , _ |=>
+        heapMatchYes (tieConst tiUnknown)
+    ] k;
+
+let tiRcSubA : { Addr -> (HeapA TiExpr) } =
+    tyAddr ->
+    (k : K @ HeapK TiExpr) ->
+    heapDeref tyAddr <| [nc, tyNode] ->
+    let depth = nc |> ncDepth;
+    heapMatch tyNode
+    [ ["TyOper", "relComp", [a, b]] |=>
+        ([kYes, kNo] : K @ CpsMbK HeapHandler TiExpr) ->
+        heapDeref a <| [_, aNode] ->
+        match aNode
+        [ ["TyOper", "<:", [aSub, aSup]] |=>
+            heapNewNode2 depth ["TyOper", "relComp", [aSub, b]]  <| rcSub ->
+            heapNewNode2 depth ["TyOper", "relComp", [aSup, b]]  <| rcSup ->
+            heapNewNodeTi rcSub <| rcSubTi ->
+            heapNewNodeTi rcSup <| rcSupTi ->
+            kYes (tieAndImp (tieRef rcSubTi) (tieRef rcSupTi))
+        , _ |=>
+            kNo []
+        ]
+    , _ |=>
+        heapMatchYes (tieConst tiUnknown)
+    ] k;
+
+
+let TiRule = { [Str, Addr -> (HeapA TiExpr)] };
+
+let tiRules : List { [Str, { Addr -> (HeapA TiExpr) }] } = 
+    [ ["Structual", tiStructuralRule]
+    , ["rcFunB"   , tiRcFunB]
+    , ["rcSupB"   , tiRcSupB]
+    , ["rcSubA"   , tiRcSubA]
+    -- , ["rcUnA"    , tiRcSubA]
+    ];
+
+
+let tiApplyRules : { Addr -> (HeapA (List TiEdge)) } =
+    tyAddr ->
+    (k : K @ HeapK (List TiEdge)) ->
+    let edges = [] : List TiEdge;
+    heapWhile [tiRules, edges] (
+        [ [[ruleName, ruleFunc] ,, rules], edges] |=>
+        (k : K @ HeapK { [(List TiRule), (List TiEdge)] }) ->
+        ruleFunc tyAddr <| (tiExpr : TiExpr) ->
+        tyDebug ["tiApplyRules", tyAddr, ruleName, tiExpr] <| ->
+        let edges2 = 
+            match tiExpr
+            [ ["TiConst", tiVal] |->
+                guardTrue (tiIsUnknown tiVal) <| _ =>
+                edges
+            , _ |=> 
+                let edge : TiEdge = [ruleName, tiExpr, tiUnknown];
+                [ edge ,, edges ]
+            ];
+        k [ rules, edges2 ]
+    ) <| [_, edges] ->
+    k (reverse edges);
+
+
+let tiNext : { Addr -> (HeapA { [Addrs, Addrs] }) } =
+    addr0 ->
+    (k : K @ HeapK { [Addrs, Addrs] }) ->
+    let addr = addr0;
+    let todo    = [[addr, []]] : List { [Addr, (Maybe Addrs)] };
+    let visited = []           : Addrs;
+    let expand  = []           : Addrs;
+    let reduce  = []           : Addrs;
+    -- TODO use something (an Assoc object) more efficient than a list for "visited"
+    heapWhile [todo, visited, expand, reduce] (
+        [ [[addr, edgeAddrsMb] ,, todo], visited, expand, reduce ] |=>
+        (k : K @ HeapK { [(List { [Addr, (Maybe Addrs)] }), Addrs, Addrs, Addrs] }) ->
+        if ((edgeAddrsMb == []) && isElemInt addr visited)
+        [ ->
+            k [todo, visited, expand, reduce]
+        , ->
+            let visited2 = [addr ,, visited];
+            heapDeref addr <| [_, node] ->
+            match node
+            [ ["TI", _, tiVal, _] |->
+                guardTrue (tiIsKnown tiVal) <| _ =>
+                -- nothing more to do, the tiVal has been computed
+                -- TODO need to handle unknown/nil distinction correctly/consistently
+                k [todo, visited2, expand, reduce]
+            , ["TI", _, tiVal, []] |=>
+                -- nothing to do, there are no tiEdges to follow
+                k [todo, visited2, [addr ,, expand], [addr ,, reduce]]
+            , ["TI", _, tiVal, tieEdges] |=>
+                let edgeAddrs : Addrs =
+                    ifNil edgeAddrsMb
+                    [ ->
+                        concat <|
+                        forMap tieEdges <| [ruleName, tie, tiVal] ->
+                        if (tiIsKnown tiVal)
+                        [ -> []
+                        , -> tieAddrs tie
+                        ]
+                    , [edgeAddrs] -> edgeAddrs
+                    ];
+                ifNil edgeAddrs
+                [ ->
+                    k [todo, visited2, expand, [addr ,, reduce]]
+                , [hdEdgeAddr ,, tlEdgeAddrs] ->
+                    let todo1 = [hdEdgeAddr, []];
+                    let todo2 = [addr, [tlEdgeAddrs]];
+                    k [ [ todo1, todo2 ,, todo ], visited2, expand, reduce]
+                ]
+            , _ |=>
+                -- traceHeap "tiNext, unexpected case" addr0 <| ->
+                error ["tiNext", "unexpected case", addr, node]
+                -- k [nil, nil, nil, nil]
+                -- k [todo, visited2, expand, reduce]
+            ]
+        ]
+    ) <| [_, _, toExpand, toReduce] ->
+    tyDebug ["tiNext", addr, toExpand, toReduce] <| ->
+    k [toExpand, toReduce];
+
+
+let tiMergeVals : { (List TiVal) -> TiVal } =
+    tiVals ->
+    let [_, result] =
+        while [tiVals, tiUnknown : TiVal] <|
+        [ [tiVal ,, tiVals], result ] |=>
+        [tiVals, tiMerge tiVal result];
+    result;
+
+let typeCheckStep : { Addr -> (HeapA TiVal) } = 
+    tiAddr ->
+    (k : K @ HeapK TiVal) ->
+    -- traceHeap "typeCheckStep" tiAddr <| ->
+    tiNext tiAddr <| [toExpand, toReduce] ->
+    heapWhile toExpand (
+        [tiAddr ,, toExpand] |=>
+        (k : K @ HeapK Addrs) ->
+        heapDeref tiAddr <| [_, node] ->
+        match node
+        [ ["TI", tyAddr, _, []] |=>
+            -- TODO graph-reduce tyAddr before applying the ti-rules.
+            -- Eagerly compute types upfront (which should be fine, it mirrors the eager type-evaluation in fe-in-ts), but risks non-termination.
+            -- Alternatively, compute types in bounded number of reduction steps at a time, allowing other TI calculations to be interleaved.
+            --   This would require the ti-edges to be reclaculate repeatedly too, probably better off without this, hopefully won't find this is needed.
+            reduceAll tyAddr <| ->
+            tiApplyRules tyAddr <| edges ->
+            tyDebug ["typeCheckStep/expand", tiAddr, edges] <| ->
+            heapUpdateTiEdges tiAddr tiUnknown edges <| ->
+            k toExpand
+        , ["TI", tyAddr, tiVal, tiEdges] |=>
+            error ["typeCheckStep", "unexpected val/edges", tiVal, tiEdges]
+        , _ |=>
+            error ["typeCheckStep", "unexpected node", node]
+        ]
+    ) <| _ ->
+    heapWhile toReduce (
+        [tiAddr ,, toReduce] |=>
+        (k : K @ HeapK Addrs) ->
+        heapDeref tiAddr <| [_, node] ->
+        match node
+        [ ["TI", tyAddr, tiVal, tiEdges] |=>
+            heapWhile [tiEdges, [] : List TiEdge] (
+                [ [oldEdge ,, oldEdges], newEdges] |=>
+                ( k : K @ HeapK { [TiEdges, TiEdges] }) ->
+                let [ruleName, tiExpr, oldTiVal] = oldEdge;
+                tiExprEval tiExpr <| newTiVal ->
+                let newEdge = [ruleName, tiExpr, newTiVal];
+                k [oldEdges, [newEdge ,, newEdges]]
+            ) <| [_, tiEdgesRev] ->
+            let tiEdges2 = reverse tiEdgesRev;
+            let tiVal = tiMergeVals (forMap tiEdges2 <| [name, tiExpr, tiVal] -> tiVal);
+            tyDebug ["typeCheckStep/reduce", tiAddr, tiVal, tiEdges2] <| ->
+            heapUpdateTiEdges tiAddr tiVal tiEdges2 <| ->
+            k toReduce
+        , _ |=>
+            error ["typeCheckStep", "unexpected TI node", node]
+        ]
+    ) <| _ ->
+    heapDeref tiAddr <| [_, node] ->
+    match node
+    [ ["TI", tyAddr, tiVal, tiEdges] |=>
+        k tiVal
+    , _ |=>
+        error ["typeCheckStep", "unexpected node", node]
+    ];
+
+
+let typeCheckAddr : { Int -> Addr -> (HeapA TiVal) } =
+    maxIters -> tiAddr ->
+    (k : K @ HeapK TiVal) ->
+    let tiVal : TiVal = tiUnknown;
+    let iterCount : Int = 0;
+    -- traceHeap (show ["typeCheckAddr", maxIters, tiAddr]) tiAddr <| ->
+    heapWhile [iterCount, tiVal] (
+        [iterCount, tiVal] ->
+        guardTrue (iterCount < maxIters) <| _ ->
+        guardTrue (tiIsUnknown tiVal) <| _ =>
+        (k : K @ HeapK { [Int, TiVal] }) ->
+        typeCheckStep tiAddr <| tiVal ->
+        k [iterCount + 1, tiVal]
+    ) <| [iterCount, tiVal] ->
+    k tiVal;
+
+let TypeError = 
+    { ["TyErr", Loc] }; -- TODO ? add ok/fail
+
+let TypeCheckResult = 
+    { ["TcOkay", Loc]
+    | ["TcFail", Loc] 
+    };
+
+let TcTag = Hd TypeCheckResult;
+
+let typeCheckExpr : { Int -> ExprTy -> (HeapA (List TypeCheckResult)) } =
+    rec <| (tce : { Int -> ExprTy -> (HeapA (List TypeCheckResult)) }) ->
+    maxIters -> expr ->
+    (k : K @ HeapK (List TypeCheckResult)) ->
+    -- debug2 ["typeCheckExpr", expr] <| ->
+    let todo   = [expr] : List ExprTy;
+    let result = []     : List TypeCheckResult;
+    heapWhile [todo, result] (
+        [[exprTy ,, todo], result] |=>
+        (k : K @ HeapK {[(List ExprTy), (List TypeCheckResult)]}) ->
+        let [expr, exprLoc, exprAddr, _, _, tiAddr] = exprTy;
+        typeCheckAddr maxIters tiAddr <| tiVal ->
+        let tcResult =
+            if (tiIsFalse tiVal)
+            [ -> ["TcOkay", exprLoc]
+            , -> ["TcFail", exprLoc]
+            ];
+        let subExprs = exprTySubExprs exprTy;
+        let todo2 = append subExprs todo;
+        let result2 = [tcResult ,, result];
+        k [todo2, result2]
+    ) <| [_, result] ->
+    k result;
+
+let doTypeCheckExpr : { Heap -> Int -> ExprTy -> [Heap, (List TypeCheckResult)] } =
+    heap -> maxIters -> exprTy ->
+
+    -- let action : HeapA (List TypeCheckResult) =
+    --     heapFunc0 <|
+    --     (k : K @ HeapK (List TypeCheckResult)) ->
+    --     typeCheckExpr maxIters exprTy <| result ->
+    --     k result;
+    -- heapDo (List TypeCheckResult) action heap;
+
+    heapDo (List TypeCheckResult) (typeCheckExpr maxIters exprTy) heap;
+
+let doTypeCheckAddr : { Heap -> Int -> Addr -> [Heap, TiVal] } =
+    heap -> maxIters -> addr ->
+    heapDo TiVal (typeCheckAddr maxIters addr) heap;
+
+-- TODO collect and display some/all of the type-rules used and their results
+
+
+
+let collectTypeRuleInfo : { Addr -> (HeapA (List Str)) } =
+    addr ->
+    (k : K @ HeapK (List Str)) ->
+    let todo : List Addr = [addr];
+    let done : List Addr = [];
+    let output : List Str = [];
+    heapWhile [ todo, done, output ] (
+        [ [addr ,, todo], done, output ] |=>
+        (k : K @ HeapK { [(List Addr), (List Addr), (List Str)] }) ->
+        heapDeref addr <| [nc, node] ->
+        match node
+        [ ["TI", ty, val, edges] |=>
+            -- TODO show a mnemonic representation of tiVal
+            let out = show [addr, ty, val, edges];
+            let outTy = strCat [show addr, ": TI #", show ty, " = ", showTiVal val];
+            let outEdges = 
+                forMap edges <| [name, expr, val] ->
+                strCat ["    ", name, "  ", tieShow expr, "  ", showTiVal val];
+            let todoNext = concat <| forMap edges <| [name, expr, val] -> tieAddrs expr;
+            let todoNext = listDiff todoNext done;
+            let todo = append todoNext todo;
+            let done = [addr ,, done];
+            -- let output = [out ,, output];
+            let output = concat [ outEdges, [outTy], output ];
+            k [ todo, done, output]
+        , _ |=>
+            panic ["collectTypeRuleInfo", "expected a TI node, not", node]
+        ]
+    ) <| [_, _, output] ->
+    let output = reverse output;
+    k output;
+
+
+let doCollectTypeRuleInfo : { Addr -> Heap -> [Heap, (List Str)] } =
+    addr -> heap ->
+    heapDo (List Str) (collectTypeRuleInfo addr) heap;
+

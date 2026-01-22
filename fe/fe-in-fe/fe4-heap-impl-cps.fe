@@ -1,0 +1,97 @@
+language ferrum/0.1
+
+let heapStyle : HeapStyle = "CPS";
+
+
+
+let Heap = 
+    {[ "Heap"
+    -- ,  (List Indirect)
+    ,  (Array Indirect)
+    ]};
+
+let heapWhile = cpsWhile Heap;
+-- let heapLoop1 = cpsLoop1 Heap; -- function then value
+let heapLoop2 = cpsLoop2 Heap; -- value then function
+-- let heapLoop = heapLoop2;
+let heapSkip = cpsSkip Heap;
+let heapMap = cpsMap Heap;
+
+
+-- ? TODO ?
+-- heapMatch
+-- heapGuard
+-- heapAs
+
+
+let HeapSnapshot = { [] -> Heap };
+
+let snapshotHeap : { Heap -> [Heap, HeapSnapshot] } =
+    -- heap ->
+    -- [heap, -> heap];
+    ["Heap", heapArray] -> 
+    let [heapArray2, arraySnapshot] = heapArray ["snapshot"];
+    [ ["Heap", heapArray2], -> ["Heap", arraySnapshot[]]];
+
+let heapSnapshot = snapshotHeap;
+
+
+
+
+
+-- let heapEmpty = ["Heap", []];
+-- let heapMk = -> ["Heap", []];
+-- let heapMk : { [] -> Heap } = -> [ "Heap", mkArrayList Indirect [] ];
+-- let heapMk : { [] -> Heap } = -> [ "Heap", mkArrayFastAccessSlowCopy Indirect [] ];
+let heapMk : { [] -> Heap } = -> [ "Heap", mkArrayFastAccessNoCopy Indirect [] ];
+
+
+let HeapK : { Type -> Type } = 
+    A -> { A -> Heap -> Any };
+let HeapAction : { Type -> Type } = 
+    A -> { K @ (HeapK A) -> Heap -> K A Heap };
+let HeapA = HeapAction;
+
+let heapGet : { Addr -> K @ (HeapK Indirect) -> Heap -> K Indirect Heap } =
+    addr -> (k: K @ (HeapK Indirect)) -> ["Heap", heapArray] ->
+    let [heapArray2, indirect] = heapArray ["get", addr];
+    k indirect ["Heap", heapArray2];
+
+-- let heapSet : { Addr -> Indirect -> (HeapA Nil) } =
+let heapSet : { Addr -> Indirect -> K @ (HeapK Nil) -> Heap -> K Nil Heap } =
+    addr -> indirect -> (k : K @ (HeapK Nil)) -> ["Heap", heapArray] ->
+    let [heapArray2,[]] = heapArray ["set",addr,indirect];
+    k [] ["Heap", heapArray2];
+
+let heapNewNode : { [NodeCommon, Node] -> (HeapA Addr) } =
+    [nc, node] -> (k: K @ (HeapK Addr)) -> heap @ ["Heap", heapArray] ->
+    let [heapArray2,addr] = heapArray ["length"];
+    let indirect = [addr, [], nc, node];
+    let [heapArray3,[]] = heapArray2 ["extend",[indirect]];
+    k addr ["Heap", heapArray3];
+
+let heapNew =
+    (k: K @ (HeapK Addr)) ->
+    heapNewNode [[0, "Weak", "None", []], ["HHole"]] k;
+
+let heapDo : { { Result : Type } -> (HeapA Result) -> Heap -> [Heap, Result] } =
+    (Result : Type) -> (action : HeapA Result) -> (heap : Heap) -> 
+    let [heap2, result] = action (result -> heap -> [heap, result]) heap;
+    [heap2, result];
+
+-- TODO write a generic arrayToList function, 
+-- TODO   rather than three implementations of this function.
+let heapToList : { Heap -> [Heap, (List Indirect)] } =
+    [_, h0] ->
+    let [h1, length] = h0 ["length"];
+    let pos0 : Int = 0;
+    let inds0 : List Indirect = [];
+    let [h4, _, inds2] =
+        while [h1, pos0, inds0] <|
+        [h2, pos1, inds1] ->
+        guardLt [pos1, length] <| _ =>
+        let [h3, ind] = h2 ["get", pos1];
+        [h3, pos1 + 1, [ind ,, inds1]];
+    let result = [["Heap", h4], reverse inds2];
+    result;
+

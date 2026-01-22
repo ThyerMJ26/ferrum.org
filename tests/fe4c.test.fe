@@ -1,0 +1,57 @@
+language ferrum/test/0.1
+
+
+[
+
+
+  [ [ "name", "loadProj1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let t1 = -> 
+            ioDo <|
+            io2GetEnvVar_orPanic "ferrumFeInFeDir" <| feInFeDir ->
+            let projFile = pathJoin [feInFeDir, "fe4.proj.fe"];
+            loadProject projFile <| proj ->
+            -- loadProject "../../fe/fe-in-fe/fe4c.proj.fe" <| proj ->
+            io2Print proj <| ->
+            io2Exit 4;
+            
+      """
+    ]
+  , [ "expect", "t1[]", "value", "4"]
+  ]
+
+
+, [ [ "name", "loadProj2" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let t1 = -> 
+            ioDo <|
+            io2GetEnvVar_orPanic "ferrumFeInFeDir" <| feInFeDir ->
+            let projFile = pathJoin [feInFeDir, "fe4.proj.fe"];
+            loadProject projFile <| proj ->
+            -- loadProject "../../fe/fe-in-fe/fe4c.proj.fe" <| proj ->
+            print proj <| ->
+            let projDir = pathBasename projFile;
+            loadProjContents projDir proj <| parsedProj ->
+            -- print parsedProj <| ->
+            let pats : List ExprLoc = 
+              concat <| 
+              forMap parsedProj <| parsedFile -> 
+              forMap parsedFile <| [pat, defn] -> 
+              pat;
+            print pats <| ->
+            io2Exit 4;
+          
+      """
+    ]
+  , [ "expect", "t1[]", "value", "4"]
+  ]
+
+]

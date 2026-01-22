@@ -1,0 +1,368 @@
+language ferrum/0.1
+
+-- Step-style
+-- - TCPS - Trampolined Continuation Passing Style
+-- - STEP - Stack Trampoline Effect Programming
+-- - STEP - Simple Trampolined Effect Programming
+-- - STEP - Shallow Trampolined Effect Programming
+-- - CRS  - Continuation Returning Style
+
+
+-- -- let KLoopBody = Self ( LB -> { Void -> { Any -> ParserStep } -> { (Domain LB) -> ParserStep } -> ParserStep } );
+-- 
+-- let KLoopBody = Self ( LB -> { Void -> B @ { Any -> Void } -> C @ { (Domain LB) -> Void } -> { (Codomain B) | (Codomain C) } } );
+-- 
+-- let kLoop : 
+--     {  LB @ 
+--         {  (Domain LB)
+--         -> { Any -> Void }
+--         -> { (Domain LB) -> (Codomain (Domain (Codomain LB))) }
+--         -> (Codomain (Domain (Codomain LB)))
+--         }
+--     -> (Domain LB) 
+--     -> R @ { (Domain (Domain (Codomain LB))) -> (Codomain (Domain (Codomain LB))) } 
+--     -> (Codomain R) 
+--     } =
+--     (body: LB @ 
+--         {  (Domain LB)
+--         -> { Any -> Void }
+--         -> { (Domain LB) -> (Codomain (Domain (Codomain LB))) }
+--         -> { (Codomain (Domain (Codomain LB))) }
+--         }
+--     ) -> 
+--     (initVal: Domain LB) -> 
+--     (returnK : R @ { (Domain (Domain (Codomain LB))) -> (Codomain (Domain (Codomain LB))) }) ->
+--     let breakK = returnK;
+--     let continueK = rec ( (continueK: { (Domain LB) -> (Codomain R) }) -> val -> body val breakK continueK );
+--     body initVal breakK continueK;
+
+
+
+
+
+-- let HLoopBody = Self ( LB -> { Void -> { Any -> ParserStep } -> { (Domain LB) -> ParserStep } -> ParserStep } );
+-- 
+-- let hLoop : { LB @ HLoopBody -> (Domain LB) -> { (Domain (Domain (Codomain LB))) -> ParserStep } -> ParserStep } =
+--     (body: LB @ HLoopBody) -> 
+--     (initVal: Domain LB) -> 
+--     (returnK : { (Domain (Domain (Codomain LB))) -> ParserStep }) ->
+--     let breakK = returnK;
+--     let continueK = rec ( (continueK: { (Domain LB) -> ParserStep }) -> val -> body val breakK continueK );
+--     body initVal breakK continueK;
+
+
+let stepLoop1 : 
+    {  { Step : Type } 
+    -> LB @ 
+        {  Void
+        -> { Any -> Step }
+        -> { (Domain LB) -> Step }
+        -> Step
+        }
+    -> (Domain LB)
+    -> { (Domain (Domain (Codomain LB))) -> Step }
+    -> Step
+    } = 
+    ( Step : Type ) ->
+    (body: LB @ 
+        {  Void
+        -> { Any -> Step }
+        -> { (Domain LB) -> Step }
+        -> Step
+        }
+    ) -> 
+    (initVal: Domain LB) -> 
+    (returnK : { (Domain (Domain (Codomain LB))) -> Step }) ->
+    let breakK = returnK;
+    let continueK = rec ( (continueK: { (Domain LB) -> Step }) -> val -> body val breakK continueK );
+    body initVal breakK continueK;
+
+-- let stepLoop2 : 
+--     {  { Step : Type } 
+--     -> LA @ Any
+--     -> LB @ 
+--         {  LA
+--         -> { Any -> Step }
+--         -> { LA -> Step }
+--         -> Step
+--         }
+--     -> { (Domain (Domain (Codomain LB))) -> Step }
+--     -> Step
+--     } = 
+--     ( Step : Type ) ->
+--     (initVal : LA @ Any) ->
+--     (body: LB @ 
+--         {  LA
+--         -> { Any -> Step }
+--         -> { LA -> Step }
+--         -> Step
+--         }
+--     ) -> 
+--     (returnK : { (Domain (Domain (Codomain LB))) -> Step }) ->
+--     let breakK = returnK;
+--     let continueK = rec <| (continueK: { LA -> Step }) -> val -> body val breakK continueK;
+--     body initVal breakK continueK;
+
+-- let stepLoop = stepLoop1;
+
+-- let StepThen : { { Type -> Type } -> Type -> Type } =
+--     Step -> Then ->
+--     Rec ( ST -> { Then | (Step ST) } );    
+
+-- -- This doesn't work yet
+-- -- The { Step : { Type -> Type } } functor polymorphism is not understood by ferrum-in-typescript
+-- -- probably best to use more apporixmate types for now
+-- let stepLoopThen : 
+--     {  { Step : { Type -> Type } } 
+--     -> LB @ 
+--         {  Void
+--         -> { Any -> Void }
+--         -> { (Domain LB) -> (StepThen Step (Domain (Codomain LB))) }
+--         -> (StepThen Step (Domain (Codomain LB)))
+--         }
+--     -> (Domain LB)
+--     -> K @ { (Domain (Domain (Codomain LB))) -> Any }
+--     -> (StepThen Step K)
+--     } = 
+--     ( Step : { Type -> Type } ) ->
+--     (body: LB @ 
+--         {  Void
+--         -> { Any -> Void }
+--         -> { (Domain LB) -> (StepThen Step (Domain (Codomain LB))) }
+--         -> (StepThen Step (Domain (Codomain LB)))
+--         }
+--     ) -> 
+--     (initVal: Domain LB) -> 
+--     (returnK : { (Domain (Domain (Codomain LB))) -> (StepThen Step (Domain (Codomain LB))) }) ->
+--     let breakK = returnK;
+--     let continueK = rec ( (continueK: { (Domain LB) -> (StepThen Step (Domain (Codomain LB))) }) -> val -> body val breakK continueK );
+--     body initVal breakK continueK;
+
+
+
+-- let stepMap : 
+--     {  { Step : Type } 
+--     -> F @ { Void -> { { Any -> Step} -> Step } } 
+--     -> (List (Domain F)) 
+--     -> { (List (Domain (Domain (Codomain F)))) -> Step } 
+--     -> Step
+--     } =
+--     ( Step : Type ) ->
+--     (f : F @ { Void -> { { Any -> Step} -> Step }}) -> 
+--     (args0 : List (Domain F)) ->
+--     (returnK : { (List (Domain (Domain (Codomain F)))) -> Step }) ->
+--     let mapK = rec ( 
+--         (mapK: {(List (Domain F)) -> (List (Domain (Domain (Codomain F)))) -> Step }) -> 
+--         (args: List (Domain F)) -> 
+--         (results: List (Domain (Domain (Codomain F)))) -> 
+--         match args
+--         [ [] |=> 
+--             returnK (reverse results)
+--         , [arg1,,args2] |=>
+--             f arg1 <| result ->
+--             mapK args2 [result,,results]
+--         ]
+--     );
+--     mapK args0 [];
+
+-- let stepCond = -> error "TODO";
+
+-- let stepWhile = -> error "TODO";
+-- let stepForEach = -> error "TODO";
+
+
+let stepWhile : 
+    {  { Step : Type }
+    -> A @ Any
+    -> { A -> (Maybe { { A -> Step } -> Step }) }
+    -> { A -> Step }
+    -> Step
+    } =
+    ( Step : Type ) ->
+    rec <| (sw : { A @ Any -> { A -> (Maybe { { A -> Step } -> Step }) } -> { A -> Step } -> Step }) -> 
+    (val: A @ Any) -> (body: { A -> (Maybe { { A -> Step } -> Step }) }) -> (k: { A -> Step }) ->
+    let goMaybe = body val;
+    match goMaybe
+    [ [] |=>
+        k val
+    , [go] |=>
+        go <| val2 ->
+        sw val2 body k
+    ];
+
+-- let stepMap2 : 
+--     {  { Step : Type }
+--     -> A @ (List Any)
+--     -> B @ { (Elem A) -> { Any -> Step } -> Step }
+--     -> { (List (Domain (Domain (Codomain B)))) -> Step }
+--     -> Step
+--     } =
+--     (Step : Type) ->
+--     (elems : A @ List Any) ->
+--     (body : B @ { (Elem A) -> { Any -> Step } -> Step }) ->
+--     (k : { (List (Domain (Domain (Codomain B)))) -> Step }) ->
+--     stepWhile Step [elems : List (Elem A) ,[] : List (Domain (Domain (Codomain B)))] (
+--         [[e1,,elems2], ys] |=>
+--         (k1 : { [(List (Elem A)), (List (Domain (Domain (Codomain B))))] -> Step }) ->
+--         -- let y1 = body e1;
+--         body e1 <| y1 ->
+--         k1 [elems2, [y1,,ys]]
+--     ) <| [_, result] ->
+--     k (reverse result);
+
+let stepForEach : 
+    {  { Step : Type }
+    -> Z @ Any
+    -> A @ (List Any)
+    -> B @ { Z -> (Elem A) -> { [(Domain B), Any] -> Step } -> Step }
+    -> { [(Domain B), (List (Hd (Tl (Domain (Domain (Codomain (Codomain B)))))))] -> Step }
+    -> Step
+    } =
+    (Step : Type) ->
+    (z : Z @ Any) ->
+    (elems : A @ List Any) ->
+    (body : B @ { Z -> (Elem A) -> { [(Domain B), Any] -> Step } -> Step }) ->
+    (k : { [(Domain B), (List (Hd (Tl (Domain (Domain (Codomain (Codomain B)))))))] -> Step }) ->
+    stepWhile Step [z : Domain B, elems : List (Elem A), [] : List ((Hd (Tl (Domain (Domain (Codomain (Codomain B)))))))] (
+        [z2, [e2,,elems2], ys] |=>
+        k1 ->
+        body z2 e2 <| [z3: Domain B, y3: Hd (Tl (Domain (Domain (Codomain (Codomain B)))))] ->
+        k1 [z3, elems2, [y3,,ys]]
+    ) <| [z4, _, result] ->
+    k [z4, reverse result];
+
+-- TODO
+-- let stepFor / stepForEffect
+--     go through the elements of a list, solely for the effect, like stepMap / stepForMap but without collecting the results
+
+-- TODO
+-- let stepForFoldL 
+--     foldL wih effect, like stepForEach, but without the per-element result, and without needing the reverse that part of the result
+
+
+-- let stepSkip :
+--     {  { Step : Type }
+--     -> { Nil -> Step }
+--     -> Step
+--     } =
+--     (Step : Type) ->
+--     (k: { Nil -> Step }) ->
+--     k [];
+
+
+-- ? TODO ?
+-- stepMatch
+-- stepGuard
+-- stepAs
+
+
+let StepMbK : { Type -> Type -> Type } =
+    Step -> Arg ->
+    { [ Arg -> Step, [] -> Step ] };
+
+let StepMbA : { Type -> Type -> Type } =
+    Step -> Arg ->
+    { [ Arg -> Step, [] -> Step ] -> Step };
+
+let stepMatchOk : 
+    {  { Step : Type }
+    -> A @ Any
+    -> K @ (StepMbK Step A)
+    -> Step
+    } =
+    (Step : Type) ->
+    (a : A @ Any) ->
+    (k : K @ StepMbK Step A) ->
+    let [kT, kF] = k;
+    kT a;
+
+let stepMatchFail : 
+    {  { Step : Type }
+    -> K @ (StepMbK Step Any)
+    -> Step
+    } =
+    (Step : Type) ->
+    (k : K @ StepMbK Step Any) ->
+    let [kT, kF] = k;
+    kF [];
+
+let stepMatchGuard : 
+    {  { Step : Type }
+    -> A @ { { Any -> Step } -> Step }
+    -> F @ { (Domain (Domain A)) -> (Maybe (StepMbA Step Any)) }
+    -> (StepMbK Step (Domain (Hd (Domain (Hd { F (Domain (Domain A)) })))))
+    -> Step
+    } =
+    (Step : Type) ->
+    (a : A @ { { Any -> Step } -> Step }) ->
+    (f : F @ { (Domain (Domain A)) -> (Maybe (StepMbA Step Any)) }) ->
+    (k : (StepMbK Step (Domain (Hd (Domain (Hd { F (Domain (Domain A)) })))))) ->
+    let [kT, kF] = k;
+    a <| b ->
+    match (f b)
+    [ [c] |=>
+        c k
+    , [] |=>
+        kF []
+    ];
+
+
+let stepMatch : 
+     {  { Step : Type } 
+     -> A @ Any
+     -> C @ (List { A -> (Maybe (StepMbA Step Any)) })
+     -> { (Domain (Hd (Domain (Hd (Codomain (Elem C)))))) -> Step } 
+     -> Step
+     } =
+     (Step : Type) ->
+     (a : A @ Any) ->
+     (conds : C @ (List { A -> (Maybe (StepMbA Step Any)) })) ->
+     (k : { (Domain (Hd (Domain (Hd (Codomain (Elem C)))))) -> Step }) ->
+     let conds0 : List (Elem C) = conds;
+     let resultMb0 : Maybe (Domain (Hd (Domain (Hd (Codomain (Elem C)))))) = [];
+     stepWhile Step [conds0, resultMb0] (
+         [[c ,, cc], []] |=>
+         (k1 : { [(List (Elem C)), (Maybe (Domain (Hd (Domain (Hd (Codomain (Elem C)))))))] -> Step }) ->
+         let kT = (result : (Domain (Hd (Domain (Hd (Codomain (Elem C))))))) -> k1 [ [], [result] ];
+         let kF = [] -> k1 [ cc, [] ];
+         match (c a)
+         [ [action] |=>
+             action [kT, kF]
+         , [] |=>
+            kF []
+         ]
+     ) <| cr @ [conds2, resultMb2] ->
+     match cr 
+     [ [ _, [result2] ] |=>
+         k result2
+     , [ [], [] ] |=>
+         error ["stepMatch", "exhausted all conditions, but nothing succeeded"]
+     , [ [c ,, cc], [] ] |=>
+         error ["stepMatch", "impossible"]
+     ];
+
+-- The cpsFunc{0,1,2,3} functions can be used to form a local trampoline and limit stack usage
+-- The stepFunc{0,1,2,3} functions exist just for consistency, this way, the same code,
+--   can be run in CPS-style or step-style,
+-- There's nothing for these functions to do, as step-style trampolines immediately anyway.
+
+-- let stepFunc0 : { { Step : Type } -> A @ Any -> A } =
+--     (Step : Type) -> (a : A @ Any) -> a;
+-- 
+-- let stepFunc1 : { { Step : Type } -> A @ Any -> A } =
+--     (Step : Type) -> (a : A @ Any) -> a;
+-- 
+-- let stepFunc2 : { { Step : Type } -> A @ Any -> A } =
+--     (Step : Type) -> (a : A @ Any) -> a;
+-- 
+-- let stepFunc3 : { { Step : Type } -> A @ Any -> A } =
+--     (Step : Type) -> (a : A @ Any) -> a;
+-- 
+-- let stepFunc4 : { { Step : Type } -> A @ Any -> A } =
+--     (Step : Type) -> (a : A @ Any) -> a;
+-- 
+-- let stepFunc5 : { { Step : Type } -> A @ Any -> A } =
+--     (Step : Type) -> (a : A @ Any) -> a;
+
+
+

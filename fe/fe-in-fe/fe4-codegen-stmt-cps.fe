@@ -1,0 +1,702 @@
+language ferrum/0.1
+
+-- ---------
+-- Statement-oriented CodeGen
+-- ---------
+
+-- copied and translated from fe3-codegen.fe
+-- the syntax and types have been updated, but the functionality has not.
+-- it doesn't handle lambda-maybe, for example.
+
+
+let CGResult = { [Str, Int] }; -- name-arity pair, the result of generating code for an expression
+let cgResult = [expStr: Str, arity: Int] -> [expStr, arity];
+let cgResultStr   = ([s,a]: CGResult) -> s;
+let cgResultArity = ([s,a]: CGResult) -> a;
+
+-- arity indicates the number of arguments a function takes
+-- currently this is always 1 for functions and 0 for data, all generated functions are curried
+-- TODO use arity to generate more conventional functions, and automatically convert them when used in contexts expecting a different arity
+-- TODO generalize arity to representation, and generate more conventional data-structures
+
+
+let CGEnv = List CGResult; -- environment, maps bound names to arities
+
+let CodeGenState = 
+  { [ Int                -- name-source, value of next unique id
+    , (List Str)         -- statements
+    , (List (List Str))  -- context, stack of statements
+    , CGEnv              -- environment, only used for top-level bindings
+    ] };
+
+let cgStateNs    = ([ns,stmts,ctx,env]: CodeGenState) -> ns;
+let cgStateStmts = ([ns,stmts,ctx,env]: CodeGenState) -> stmts;
+let cgStateCtx   = ([ns,stmts,ctx,env]: CodeGenState) -> ctx;
+let cgStateEnv   = ([ns,stmts,ctx,env]: CodeGenState) -> env;
+
+
+
+let CGK0 = { CodeGenState -> CodeGenState };
+let CGK = (A:type) -> { A -> { CodeGenState -> CodeGenState } };
+
+
+let nop: { CGK0 -> CodeGenState -> CodeGenState } = cont -> cgstate -> cont cgstate;
+
+let freshName : { (CGK Str) -> CodeGenState -> CodeGenState } = 
+    cont -> [ns,stmts,ctx,env] ->
+    cont ("v_" ^ ns) [ns+1,stmts,ctx,env];
+
+let freshPat : { { Expr -> CodeGenState -> CodeGenState } -> CodeGenState -> CodeGenState } =
+  cont -> [ns,stmts,ctx,env] ->
+  cont ["EVar", ("" ^ ns)] [ns+1,stmts,ctx, env];
+
+let addStmt : { Str -> { CodeGenState -> CodeGenState } -> CodeGenState -> CodeGenState } =
+  stmt -> cont -> [ns, stmts, ctx, env] ->
+  let indent = concatStrs (map ( _ -> "    ") ctx );
+  cont [ns, [indent ^ stmt,, stmts], ctx, env];
+
+let addStmts : { (List Str) -> { CodeGenState -> CodeGenState } -> CodeGenState -> CodeGenState } =
+  stmts1 -> cont -> [ns, stmts2, ctx, env] -> 
+  cont [ns, append stmts1 stmts2, ctx, env];
+
+let addStmtsIndent : { (List Str) -> { CodeGenState -> CodeGenState } -> CodeGenState -> CodeGenState } =
+  stmts1 -> cont -> [ns, stmts2, ctx, env] -> 
+  let indent = concatStrs (map ( _ -> "    ") ctx );
+  let stmts1a = map ((s:Str)->indent ^ s) (reverse stmts1);
+  cont [ns, append stmts1a stmts2, ctx, env];
+
+let pushCtx : { { CodeGenState -> CodeGenState } -> CodeGenState -> CodeGenState } =
+  k -> [ns, stmts, ctx, env] ->
+  k [ns, [], [stmts,, ctx], env];
+
+let popCtx : { { (List Str) -> CodeGenState -> CodeGenState } -> CodeGenState -> CodeGenState } =
+  k -> cgs ->
+  match cgs
+  [ [ns, stmts, [ctx1,,ctx], env] |=> k stmts [ns, ctx1, ctx, env]
+  , _ -> error "context stack empty"
+  ];
+  
+
+let extendEnv : { Expr -> Int -> { CodeGenState -> CodeGenState } -> CodeGenState -> CodeGenState } =
+  pat -> arity -> cont -> cgstate@[ns, stmts, ctx, env] ->
+  match pat
+  [ ["EVar", var] |=> 
+        -- trace ("ARITY "^ var ^" "^ arity) $
+        cont [ns, stmts, ctx, [[var,arity],, env]: CGEnv]
+  , _ |=> cont cgstate
+  ];
+
+let getEnv : { (CGK CGEnv) -> CodeGenState -> CodeGenState } = 
+    k -> cgstate ->  
+    k (cgStateEnv cgstate) cgstate;
+
+let initCgState: CodeGenState = [0,[],[],[]];
+
+
+let ExprCtx = { ["Expr"] };
+let BindCtx = { ["Bind", Expr] };
+let AssignCtx = { ["Assign", Expr] };
+let ReturnCtx = { ["Return"] };
+
+let Ctx0 = 
+    { AssignCtx
+    | ReturnCtx
+    };
+
+let LoopCtx = { ["Loop", Str, Ctx0] };
+
+let Ctx = 
+    { ExprCtx
+    | BindCtx
+    | AssignCtx
+    | ReturnCtx
+    | LoopCtx
+    };
+
+let exprCtx: ExprCtx = ["Expr"];
+let returnCtx: ReturnCtx = ["Return"];
+let bindCtx: { Expr -> BindCtx } = lhs -> ["Bind", lhs];
+let assignCtx: { Expr -> AssignCtx } = lhs -> ["Assign", lhs];
+let loopCtx: { Str -> Ctx0 -> LoopCtx } = continuePat -> breakCtx -> ["Loop", continuePat, breakCtx];
+
+-- TODO make context sensitive codegeneration optional/controllable
+
+let cgCtx: {Ctx -> (CGK CGResult) -> CGResult -> CodeGenState -> CodeGenState } = 
+    ctx -> k -> result -> 
+    match ctx
+    [ ["Expr"] |=>
+        k result
+    , ["Bind", pat] |=>
+        let patStr = cgPatBind pat;
+        if ((patStr == cgResultStr result) || (patStr==""))
+        [ ->
+            k (cgResult [cgPatBind pat, cgResultArity result])
+        , ->
+            addStmt ( "let " ^ patStr ^ " = " ^ cgResultStr result ^ ";" ) <|
+            k (cgResult ["", 0])
+        ]
+    , ["Assign", pat] |=>
+        let patStr = cgPatBind pat;
+        if ((patStr == cgResultStr result) || (patStr=="") || (cgResultStr result==""))
+        [ -> k (cgResult ["", 0])
+        , ->
+            addStmt (patStr ^" = "^ cgResultStr result ^";") <|
+            k (cgResult ["", 0])
+        ]
+    , ["Return"] |=>
+        if (cgResultStr result == "")
+        [ -> k (cgResult ["", 0]) 
+        , ->
+            addStmt ( "return "^ cgResultStr result ^";" ) <|
+            k (cgResult ["", 0])
+        ]
+    , ["Loop", cPat, bCtx] |=>
+        if (not (cgResultStr result == ""))
+        [ -> error "break/continue value should have been handled already"
+        , -> k (cgResult ["", 0])
+        ]
+    ];
+
+
+-- we need a flat list of vars when declaring all the variables 
+-- that will later be assigned to via pattern/destructinging assignment.
+let flatVars : { Expr -> Str } = fix <| (fv: { Expr -> Str }) -> 
+    (pat: Expr) ->
+    match pat
+    [ ["EVar", var] |=> "v_" ^ var
+    , ["ELit", val] |=> ""
+    , ["EPair", h, t] |=> 
+        match [fv h,fv t]
+        [ [vh, ""] |=> vh
+        , ["", vt] |=> vt
+        , [vh, vt] |=> vh ^ ", " ^ vt
+        ]
+    , ["EType", exp, ty] |=> fv exp
+    , ["EAs", name, exp] |=> "v_" ^ name
+    , _ |=> error ["missing case flatVars", pat]
+    ];
+
+-- return a name according to the context
+-- sutiable for use in a subsequent call to assignResult
+-- also returns a new context (if we were in a Bind context, move to an Assign context)
+let assignableName : { Ctx -> (CGK {[Str, Ctx]}) -> CodeGenState -> CodeGenState } = 
+    ctx -> k ->
+    match ctx
+    [ ["Expr"] |=>
+        freshName <| name ->
+        addStmt ("let " ^ name ^ ";") <|
+        k [name, ctx]
+    , ["Bind", pat] |=>
+        addStmt ("let "^flatVars pat^";") <|
+        k [cgPatBind pat, assignCtx pat]
+    , ["Assign", pat] |=>
+        k [cgPatBind pat, ctx]
+    , ["Return"] |=>
+        k ["", ctx]
+    , ["Loop", _, _] |=>
+        k ["", ctx]
+    , _ |=> error ["assignableName", "missing case", ctx]
+    ];
+
+let bindableName : { Ctx -> (CGK Str) -> CodeGenState -> CodeGenState } = 
+    ctx -> k ->
+    match ctx
+    [ ["Expr"] |=>
+        freshName <| name ->
+        k name
+    , ["Bind", pat] |=>
+        k (cgPatBind pat)
+    , ["Assign", pat] |=>
+        freshName <| name ->
+        k name
+    , ["Return"] |=>
+        freshName <| name ->
+        k name
+    , ["Loop", _, _] |=>
+        error "impossible"
+    , _ |=> error ["bindableName", "missing case", ctx]
+    ];
+
+-- assign the result according to the context
+-- the name should be the name returned by a preceeding call to assignableName
+let assignResult : { Ctx -> Str -> Expr -> Str -> CGK0 -> CodeGenState -> CodeGenState } =
+    ctx -> name -> exp -> rhs -> k ->
+    match [ctx, exp] 
+    [ [["Expr"], _] |=>
+        if ((name=="") || (rhs=="")) 
+        [ -> k
+        , ->
+            addStmt ("    "^name^" = "^rhs^";") <|
+            k
+        ]
+    , [["Bind", pat], _] |=>
+        if (rhs == "") 
+        [ -> k
+        , ->
+            addStmt ("    " ^ name ^ " = " ^ rhs ^ ";") <|
+            k
+        ]
+    , [["Assign", pat], _] |=>
+        if (rhs=="") 
+        [ -> k
+        , ->
+            addStmt ("    " ^ name ^ " = " ^ rhs ^ ";") <|
+            k
+        ]
+    , [["Return"], _] |=>
+        if (rhs == "") 
+        [ -> k
+        , ->
+            addStmt ("    return " ^ rhs ^ ";") <|
+            k
+        ]
+    , [["Loop", cPat, bCtx], ["EApply", ["EVar", "continue"], arg]] |=>
+        if (rhs=="")
+        [ -> k
+        , ->
+            addStmt ("    " ^ cPat ^ " = " ^ rhs ^ ";") <|
+            addStmt ("    continue;") <|
+            k
+        ]
+    , [["Loop", cPat, ["Assign", bPat]], ["EApply", ["EVar", "break"], arg]] |=>
+        if (rhs=="") 
+        [ -> k
+        , ->
+            addStmt ("    " ^ bPat ^ " = " ^ rhs ^ ";") <|
+            addStmt ("    break;") <|
+            k
+        ]
+    , [["Loop", cPat, ["Return"]], ["EApply", ["EVar", "break"], arg]] |=>
+        if (rhs=="")
+        [ -> k
+        , ->
+            addStmt ("    return " ^ rhs ^ ";") <|
+            k
+        ]
+    , [["Loop", cPat, bCtx], _] |=>
+        if (rhs == "") 
+        [ -> k
+        , ->
+            -- error "break/continue value should have been handled already" 
+            -- except a failed case match results in a valid non break/continue call
+            addStmt "    // break/continue" <|
+            addStmt ("    " ^ rhs) <|
+            k
+        ]
+    ];
+
+-- bind the expression to a variable
+-- needed when using an expression more than once to save duplicating work
+-- if the expression is a variable anyway, just use that variable, no need to make up a fresh one.
+let bindExpToVar : { Expr -> Str -> (CGK Str) -> CodeGenState -> CodeGenState } = 
+    exp -> expStr -> k ->
+    match exp
+    [ ["EVar", var] |=>
+        k ("v_"^var)
+    , _ |=>
+        freshName <| var ->
+        addStmt ("let " ^ var ^ " = " ^ expStr ^ ";") <|
+        k var
+    ];
+
+
+let splitFuncBody0 : { Expr -> [(List Expr), Expr] } = 
+    expr ->
+    [[], expr];
+
+let splitFuncBody : { Expr -> [(List Expr), Expr] } = 
+    expr ->
+    loop ( [expr: Expr, args: list Expr] ->
+        match expr
+        [ ["ELambda", arg, body] |=>
+            continue [body, [arg,, args]: List Expr]
+        , _ |=>
+            break [reverse args, expr]
+        ]
+    ) [expr, []];
+
+let collectArgs : { Expr -> [Expr, (List Expr)] } = 
+    expr ->
+    loop ( [expr: Expr, args: list Expr] ->
+        match expr
+        [ ["EApply", ["EApply", ["EApply", ["EVar", "if"], c], t], f] |=>
+            break [expr, args]
+        , ["EApply", ["EApply", ["EVar", "=="], a], b] |=>
+            break [expr, args]
+        , ["EApply", ["EApply", ["EVar", "loop"], lp@["ELambda", arg, body]], initVal] |=>
+            break [expr, args]
+        , ["EApply", ["EVar", "continue"], a] |=>
+            break [expr, args]
+        , ["EApply", ["EVar", "break"], a] |=>
+            break [expr, args]
+        , ["EApply", ["EVar", "fix"], f@["ELambda", self, body@["ELambda", _, _]]] |=>
+                break [expr, args]
+--            ('EApply', ('EApply', op@('EVar', name), a), b) ->
+--                if isInfixOp name then
+--                    break [expr, args]
+--                else
+--                    break [op, [a,b,, args]: List Expr];
+
+        , ["EApply", func, arg] |=>
+            continue [func, [arg,, args]: List Expr]
+        , _ |=>
+            break [expr, args]
+        ]
+    ) [expr, []];
+
+let canConvertToLoop : { Expr -> Bool } = fix <| (cctl: { Expr -> Bool }) -> 
+    exp ->
+    match exp
+    [ ["EApply", ["EVar", "break"], _] |=> true
+    , ["EApply", ["EVar", "continue"], _] |=> true
+    , ["EApply", ["EApply", ["EApply", ["EVar", "if"], c], t], f] |=> 
+        (cctl t) && (cctl f)
+    -- , ["ECase', _, alts)->
+    --         all (map (\(pat: Expr, defn: Expr)->cctl defn) alts);
+    --     _ -> false;
+    ];
+
+let canConvertToLoop0 : { Expr -> Bool } = 
+    exp -> false;
+
+
+let cgCtxContinue : { Ctx -> (CGK CGResult) -> CGResult -> CodeGenState -> CodeGenState } = 
+    ctx -> k -> result -> 
+    match ctx
+    [ ["Loop", continuePat, breakCtx] |=>
+        -- assignResult exprCtx continuePat result $
+        if (cgResultStr result=="")
+        [ -> k (cgResult ["", 0])
+        , ->
+            addStmt (continuePat ^ " = " ^ cgResultStr result ^ ";" ) <|
+            addStmt "continue;" <|
+            k (cgResult ["", 0])
+        ]
+    , _ |=> cgCtx ctx k (cgResult [ "_.continue(" ^ cgResultStr result ^ ")", 0])
+    ];
+
+let cgCtxBreak : { Ctx -> (CGK CGResult) -> CGResult -> CodeGenState -> CodeGenState } = 
+    ctx -> k -> result -> 
+    match ctx
+        -- ("Loop", _, breakCtx)->
+        --    cg_ctx breakCtx (\(result2:CGResult)->addStmt "break" $ k result2) result;
+    [ ["Loop", _, breakCtx@["Assign", pat]] |=>
+        cgCtx breakCtx ( (result2:CGResult) -> addStmt "break;" <| k result2) result
+    , ["Loop", _, breakCtx@["Return"]] |=>
+        cgCtx breakCtx k result
+    , _ |=> 
+        cgCtx ctx k (cgResult [ "_.break(" ^ cgResultStr result ^ ")", 0])
+    ];
+
+let extendEnvPat : { Expr -> CGResult -> CGEnv -> CGEnv } = 
+    pat -> result -> env ->
+    match pat
+    [ ["EVar", var] |=> [[var, cgResultArity result],, env]: CGEnv
+    , _             |=> env
+    ];
+
+
+let cgExpr2a : { Expr -> Ctx -> CGEnv -> (CGK CGResult) -> CGK0 } = 
+    fix <| (cg: { Expr -> Ctx -> CGEnv -> (CGK CGResult) -> CGK0 }) -> 
+    expr -> ctx -> env -> k ->
+    match expr
+    [ ["EVar", var] |=> 
+        -- let varArity = match (tryLookup var env) [ [] |=> 0, [a] |=> a ]; 
+        let varArity = match (lookup var env) [ [] |=> 0, [a] |=> a ]; 
+        -- let { varArity = 0; } in
+        --cg_ctx ctx k (cgResult (cg_pat expr, 0 ));
+        -- cg_ctx ctx k (cgResult ("/*v"^varArity^"*/"^cg_pat expr, varArity ));
+        cgCtx ctx k (cgResult [cgPat expr, varArity])
+
+    , ["ELambda", arg, body] |=> 
+        -- freshName $ \(var: str)->
+        bindableName ctx <| var ->
+        let [args, body2] = splitFuncBody expr;
+        -- addStmt ("let "^var^" = "^ concatStrs (map (\(a:Expr)->"("^ cg_pat_bind a^")=> ") args)^"{") $
+        -- addStmt ("let "^var^" = ("^ intersperseStrs ", " (map cg_pat_bind args)^")=> {") $
+        addStmt ("let " ^ var ^ " = (" ^ intersperseStrs ")=> (" (map cgPatBind args) ^ ")=> {") <|
+        pushCtx <|
+        addStmtsIndent (concat (map cgPatStmt args)) <|
+        cg body2 returnCtx env <| bodyR ->
+        popCtx <| stmts ->
+        addStmts stmts <|
+        addStmt ("};") <|
+        -- cg_ctx ctx k (cgResult (var, length args));
+        cgCtx ctx k (cgResult [var, 1])
+
+    , ["EApply", ["EApply", ["EApply", ["EVar", "if"], c], t], f] |=>
+        cg c exprCtx env <| cR ->
+        assignableName ctx <| [result, ctx2] ->
+        addStmt ( "if (" ^ cgResultStr cR ^ ") {" ) <|
+        pushCtx <|
+        cg t ctx2 env <| tR ->
+        popCtx <| tStmts ->
+        addStmts tStmts <|
+        assignResult ctx result t (cgResultStr tR) <|
+        addStmt ("} else {") <|
+        pushCtx <|
+        cg f ctx2 env <| fR ->
+        popCtx <| fStmts ->
+        addStmts fStmts <|
+        assignResult ctx result f (cgResultStr fR) <|
+        addStmt ("}") <|
+        cgCtx ctx k (cgResult [result, 0])
+ 
+    , ["EApply", ["EApply", ["EVar", "=="], a], b] |=>
+        cg a exprCtx env <| aR ->
+        cg b exprCtx env <| bR ->
+        cgCtx ctx k (cgResult [ "(" ^ cgResultStr aR ^ " === " ^ cgResultStr bR ^ ")", 0])
+
+    , ["EApply", ["EApply", ["EVar", "loop"], lp@["ELambda", arg, body]], initVal] |=>
+        -- TODO base loopVar on domain of loop body function
+        if (canConvertToLoop body)
+        [ ->
+            cg initVal exprCtx env <| initValR ->
+            freshName <| continueVar ->
+            freshPat <| breakVar ->
+            addStmt ("let " ^ continueVar ^ " = " ^ cgResultStr initValR ^ ";") <|
+            addStmt "while (true) {" <|
+            pushCtx <|
+            addStmt ("let " ^ cgPatBind arg ^ " = " ^ continueVar ^ ";") <|
+            addStmtsIndent (cgPatStmt arg) <|
+            -- addStmt (cg_pat_bind arg ^" = "^ loopVar ^";") $
+            cg body (loopCtx continueVar (assignCtx breakVar)) env <| aR ->
+            popCtx <| stmts ->
+            addStmts stmts <|
+            addStmt "}" <|
+            -- addStmt (breakVar ^" = "^ cgResultStr aR ^";") $
+            -- assignResult ctx continueVar ("ELit", "nop") aStr $
+            cg breakVar ctx env <| breakR ->
+            cgCtx ctx k breakR
+        , ->
+            cg lp exprCtx env <| loopR ->
+            cg initVal exprCtx env <| initValR ->
+            cgCtx ctx k (cgResult [ "(_.loop(" ^ cgResultStr loopR ^ ")(" ^ cgResultStr initValR ^ "))", 0])
+        ]
+    , ["EApply", ["EVar", "continue"], a] |=>
+        cg a exprCtx env <| aR ->
+        cgCtxContinue ctx k (cgResult [cgResultStr aR, 0])
+
+    , ["EApply", ["EVar", "break"], a] |=>
+        cg a exprCtx env <| aR ->
+        cgCtxBreak ctx k (cgResult [cgResultStr aR, 0])
+
+    , ["EApply", ["EVar", "fix"], f@["ELambda", self, body@["ELambda", _, _]]] |=>
+            addStmt ("// fix ") <|
+            bindableName ctx <| var ->
+            let [args, body2] = splitFuncBody body;
+            addStmt ("let " ^ var ^ " = (" ^ intersperseStrs ")=> (" (map cgPatBind args) ^ ")=> {") <|
+            pushCtx <|
+            let selfStr = cgPatBind self;
+            (   if (selfStr == var)
+                [ -> nop
+                , ->
+                 addStmt ("let " ^ selfStr ^ " = " ^ var ^ ";")
+                ]
+            ) <|
+            addStmtsIndent (cgPatStmt self) <|
+            addStmtsIndent (concat (map cgPatStmt args)) <|
+            cg body2 returnCtx env <| bodyR ->
+            popCtx <| stmts ->
+            addStmts stmts <|
+            addStmt ("};") <|
+            -- cg_ctx ctx k (cgResult (var, length args));
+            cgCtx ctx k (cgResult [var, 1])
+
+--        ('EApply', ('EApply', op@('EVar', name), a), b) ->
+--            cg a exprCtx env $ \(aR: CGResult)->
+--            cg b exprCtx env $ \(bR: CGResult)->
+--            if isInfixOp name
+--            then cg_ctx ctx k (cgResult ( "("^ cgResultStr aR ^ name ^ cgResultStr bR ^")", 0))
+--            else cg_ctx ctx k (cgResult ( "("^ cg_pat op ^"._("^ cgResultStr aR ^")._("^ cgResultStr bR ^"))", 0));
+
+-- TODO get short-circuit behaviour right, don't prematurely evaluate things (could only happend for complex arguments like let/case)
+--        ('EApply', ('EApply', ('EVar', '&&'), a), b) -> "("^ cg a ^"&&"^ cg b ^")";
+--        ('EApply', ('EApply', ('EVar', '||'), a), b) -> "("^ cg a ^"||"^ cg b ^")";
+
+    , ['EApply', func, arg] |=>
+
+        let [func1, args1] = collectArgs expr;
+
+        cg func1 exprCtx env <| funcR ->
+        -- TODO check/use arity of funcR
+        loop ( [args2: List Expr, k: CGK (List Str)] ->
+            match args2
+            [ [] |=> break (k [])
+            , [arg2,, argss] |=>
+                continue [argss,
+                    (argsStr: List Str) ->
+                    cg arg2 exprCtx env <| argR ->
+                    k [cgResultStr argR,, argsStr]
+                ]
+            ]
+        ) 
+        [   args1,
+            (argsStr: List Str) ->
+            -- cg_ctx ctx k (cgResult ( "("^ cgResultStr funcR ^"._("^ intersperseStrs ", " argsStr ^"))", 0 ))
+            let funcA = cgResultArity funcR;
+            let argsA = length args1;
+
+-- TODO get pattern guards working, and using pattern/guard matching rather then if-statements
+--                case [argsA, func1] of {
+--                    [2, ('EVar', name)] -> 
+
+                -- TODO use a case-express not a cast                    
+            let func1Str = castT func1: { [Str, Str] };
+            if ((argsA==2) && (hd func1Str=='EVar') && (isInfixOp ( (tl func1Str))))
+            [ ->
+                -- TODO use a case-express not a cast                    
+                let argsStr2 = castT argsStr: { [Str, Str,, (List Str)] };
+                cgCtx ctx k (cgResult [ "(" ^ hd argsStr2 ^ tl func1Str ^ hd (tl argsStr2) ^ ")", 0])
+            , ->
+                if (funcA == argsA)
+                [ ->
+                    -- cg_ctx ctx k (cgResult ( "("^"/*f"^ funcA ^"="^ argsA ^"*/"^ cgResultStr funcR ^"("^ intersperseStrs ", " argsStr ^"))", 0 ))
+                    cgCtx ctx k (cgResult [ "("^ cgResultStr funcR ^"("^ intersperseStrs ", " argsStr ^"))", 0 ])
+                , ->
+                    -- cg_ctx ctx k (cgResult ( "("^"/*f"^ funcA ^"-"^ argsA^"*/"^ cgResultStr funcR ^"._("^ intersperseStrs ", " argsStr ^"))", 0 ))
+                    -- cg_ctx ctx k (cgResult ( "("^ cgResultStr funcR ^"._("^ intersperseStrs ", " argsStr ^"))", 0 ))
+                    cgCtx ctx k (cgResult [ "("^ cgResultStr funcR ^"("^ intersperseStrs ")(" argsStr ^"))", 0 ])
+                ]
+            ]
+        ]
+
+--            cg func exprCtx $ \(funcStr: str)->
+--            cg arg exprCtx $ \(argStr: str)->
+--            cg_ctx ctx k ("("^funcStr^"._("^argStr^"))");
+
+        , ["ELit", val] |=>
+            cgCtx ctx k (cgResult [quoteAtomic val, 0])
+
+        , ["EPair", h, t] |=> 
+            cg h exprCtx env <| hR ->
+            cg t exprCtx env <| tR ->
+            cgCtx ctx k (cgResult [ "[" ^ cgResultStr hR ^ ", " ^ cgResultStr tR ^ "]", 0 ])
+
+        , ["ELets", decls, letExpr] |=> 
+            loop ( [decls: List { [Expr, Expr] }, k: CGK CGEnv] ->
+                match decls
+                [ [] |=> break (k env)
+                , [[pat,defn],, declss] |=>
+                    continue [declss,
+                      (env3: CGEnv) ->
+                      cg defn (bindCtx pat) env3 <| defnR ->
+                      addStmtsIndent (cgPatStmt pat) <|
+                      k (extendEnvPat pat defnR env3)
+                    ]
+                ]
+            ) [ reverse decls
+              , (env2: CGEnv)-> 
+                  -- addStmt ("/*e "^ env2 ^" */") $
+                  cg letExpr ctx env2 <| bodyR -> 
+                  cgCtx ctx k (cgResult [cgResultStr bodyR, 0])
+            ]
+
+
+
+        -- ('ECase', exp, alts) ->
+        --   cg exp exprCtx env $ \(caseR: CGResult)->
+        --   bindExpToVar exp (cgResultStr caseR) $ \(caseVar:str)->
+        --   assignableName ctx $ \(resultVar:str, ctx2: Ctx)->
+        --   loop (\(alts: list (pair Expr Expr), k2: CGK0)->
+        --              case alts of {
+        --                  [] -> break k2;
+        --                  ((pat,defn), altss)-> 
+        --                      continue (altss,
+        --                          addStmt ("if ("^ cg_pat_match caseVar pat ^") {") $
+        --                          pushCtx $
+        --                          let { pb = cg_pat_bind pat; } in
+        --                          ( if pb == "" then
+        --                                nop
+        --                            else 
+        --                                addStmt ("let "^ cg_pat_bind pat ^" = "^ caseVar ^"; ")
+        --                          ) $
+        --                          addStmtsIndent (cg_pat_bind_alias1 pat) $
+        --                          cg defn ctx2 env $ \(defnR: CGResult)->
+        --                          popCtx $ \(stmts: list str)->
+        --                          addStmts stmts $
+        --                          assignResult ctx resultVar defn (cgResultStr defnR) $
+        --                          addStmt ("} else ") $
+        --                          k2
+        --                      );
+        --              }
+        --            ) (reverse alts, 
+        --                 addStmt ( "{" ) $
+        --                 assignResult ctx resultVar ("EApply", ("EVar", "error"), ("ELit", "match failed")) "_.error('match failed')" $
+        --                 addStmt ( "}") $
+        --                 cg_ctx ctx2 k (cgResult (resultVar, 0))
+        --              );
+
+        , ["EType", exp, ty] |=> 
+            cg exp exprCtx env <| exprR -> 
+            cgCtx ctx k (cgResult [cgResultStr exprR, 0])
+
+        -- ('TLambda', pat, body) -> cg_ctx ctx k (cgResult (quoteAtomic (), 0));
+
+        , _ |=> error ["cg_expr2", show(expr)]
+    ];
+
+let cgExpr2 : { Expr -> (CGK CGResult) -> CodeGenState -> CodeGenState } = 
+    expr -> k ->
+-- cg_expr2 = \(expr: Expr)-> \(env: CGEnv)-> \(k:CGK CGResult)->
+    cgExpr2a expr exprCtx [] k;
+
+
+let cg2ExprStr : { Str -> Str } = 
+    input ->
+    let expr = parseExpr (scan input);
+    let k : CGK CGResult =
+        resultR ->
+        addStmt ("return " ^ cgResultStr resultR) ( (a: CodeGenState) -> a);
+    -- cgstate@(ns, stmts, ctx) = cg_expr2 expr k init_cg_state;
+    let cgstate = cgExpr2 expr k initCgState;
+    let stmts = cgStateStmts cgstate;
+    let jsSrc = concatStrs (reverse (map ( (a:Str) -> a ^ "\n") stmts));
+    let jsSrc2 = "(()=>{" ^ jsSrc ^ "})()";
+  -- in (length stmts, cgstate);
+    jsSrc2;
+
+let evalCg2ExprStr : { Str -> Any } = 
+    input -> 
+    jsEval (cg2ExprStr input);
+
+
+let codegenExpr : { Expr -> CGEnv -> CodeGenState -> CodeGenState } = 
+    expr -> env -> state ->
+    let k : CGK CGResult =
+        resultR ->
+        addStmt ("return " ^ cgResultStr resultR) ( (a: CodeGenState) -> a);
+        -- cgstate@(ns, stmts, ctx) = cg_expr2_a expr exprCtx env k state;
+    let cgstate = cgExpr2a expr exprCtx env k state;
+    cgstate;
+
+
+let cg2Decls : { (List {[Expr, Expr]}) -> CGEnv -> { CodeGenState -> CodeGenState } -> { CodeGenState -> CodeGenState } } = 
+    decls -> env -> k ->
+    loop ( [decls: List {[Expr, Expr]}, k: { CodeGenState -> CodeGenState} ] ->
+        match decls
+        [ [] |=> break k
+        , [[pat,defn],, declss] |=>
+            continue 
+            [ declss
+            , getEnv <| env3 ->
+                cgExpr2a defn (bindCtx pat) env3 <| defnR ->
+                addStmtsIndent (cgPatStmt pat) <|
+                extendEnv pat (cgResultArity defnR) <|
+                k
+            ]
+        ]
+    ) 
+    [ reverse decls
+    , k
+    ];
+
+let codegenDecls : { (List {[Expr, Expr]}) -> CGEnv -> CodeGenState -> {[CodeGenState, CGEnv]} } = 
+    decls -> env -> state ->
+    let k : { CodeGenState -> CodeGenState } = state -> state;
+    let cgstate = cg2Decls decls env k state;
+    let env3 = cgStateEnv cgstate;
+    [cgstate, env3];
+
+
+

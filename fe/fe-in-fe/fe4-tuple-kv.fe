@@ -1,0 +1,246 @@
+language ferrum/0.1
+
+
+let TupleKvSchema = List { [Str, Type] };
+
+let TupleKvSchemaToType : { TupleKvSchema -> Type } =
+    schema ->
+    panic ["TODO", "TupleKvSchemaToType"];
+
+-- let tupleKvGet : { S @ TupleKvSchema -> K @ (Hd (Elem S)) -> (Hd (Tl { S & [K, Any] })) } =
+--     (schema : S @ TupleKvSchema) -> (key : K @ (Hd (Elem S))) -> (fields : TupleKvSchemaToType schema) ->
+--     let [_, valueMb] =
+--         while [fields, no : Maybe (Hd (Tl { S & [K, Any] }))] <|
+--         [ [ field ,, fields], [] ] |=>
+--         match []
+--         [ ->
+--             guardHdDatumSingle key field <| [_, value] =>
+--             [ [], yes value]
+--         , _ |=>
+--             [ fields, no ]
+--         ];
+--     ifYes valueMb
+--     [ value -> 
+--         value
+--     , _ ->
+--         -- this sould be impossible, the call won't type-check if there is any possibility of the key not being present
+--         panic ["tupleKvGet", "key not found in key-value-tuple", key, fields]
+--     ];
+
+-- -- let tupleKvGet : { { TupleKv : SubType (List { [Str, Any] }) } -> K @ (Hd (Elem TupleKv)) -> TupleKv -> (Hd (Tl { (Elem TupleKv) & [K, Any] })) } =
+-- let tupleKvGet : { { TupleKv : Type } -> K @ (Hd (Elem TupleKv)) -> TupleKv -> (Hd (Tl { (Elem TupleKv) & [K, Any] })) } =
+--     (TupleKv : Type) -> (key : K @ (Hd (Elem TupleKv))) -> (fields : TupleKv) ->
+--     let fields = fields |> justTrustMeCast TupleKv (List (Elem TupleKv)); -- TODO implement SubType, so as not to need this cast
+--     let key = key |> justTrustMeCast (Hd (Elem TupleKv)) Str;
+--     let [_, valueMb] =
+--         while [fields : List (Elem TupleKv), no : Maybe (Hd (Tl { (Elem TupleKv) & [K, Any] }))] <|
+--         [ [ field ,, fields], [] ] |=>
+--         match []
+--         [ ->
+--             guardHdDatumSingle key field <| [_, value] |=>
+--             let value = value |> justTrustMeCast Any (Hd (Tl { (Elem TupleKv) & [K, Any] }));
+--             [ [], yes value ] : { [(List (Elem TupleKv)), (Maybe (Hd (Tl { (Elem TupleKv) & [K, Any] })))] }
+--         , _ |=>
+--             [ fields, no ] : { [(List (Elem TupleKv)), (Maybe (Hd (Tl { (Elem TupleKv) & [K, Any] })))] }
+--         ];
+--     ifYes valueMb
+--     [ value -> 
+--         value
+--     , _ ->
+--         -- this sould be impossible, the call won't type-check if there is any possibility of the key not being present
+--         panic ["tupleKvGet", "key not found in key-value-tuple", key, fields]
+--     ];
+
+-- TODO
+-- let tupleKvSet = 
+-- let tupleKvMod = 
+
+-- schedule |> tupleKvMod Outer "Tuesday" (tupleKvSet Inner "Noon" "Dinner")
+-- schedule |> tupleKvMod Outer "Tuesday" (tupleKvMod Inner "Noon" (flip append " with Pudding"))
+-- 
+-- to remove the types, 
+--   we either need to construct a generic TupleKv type with mandatory inclusion of { [Key, Any] } at some unspecified position
+--   or, need to calculate the range of valid keys from the context
+--   can we reference the context by taking the CoDomain of a Self type ?
+--   is there a sensible name/pattern to make the intent of 
+--      (Self <| S -> { ... (Domain (Codomain S)) ... }) 
+--   clearer ?
+--   perhaps:
+--      for function { ArgA -> ArgB -> Result } where "ArgA" wants to make reference to "ArgB"
+--      let NextArg : { { Type -> Type } -> Type } = F -> Self <| S -> F (Domain (Codomain S));
+--      (NextArg <| ArgB -> { { ... ArgB ... } -> ... -> ... })
+--   or
+--      let Result : { { Type -> Type } -> Type } = F -> Self <| S -> F (Codomain S);
+--      (Result <| R -> { { ... (Domain R) ... } ... -> ... })
+-- schedule |> tupleKvMod "Tuesday" (tupleKvSet "Noon" "Dinner")
+-- schedule |> tupleKvMod "Tuesday" (tupleKvMod "Noon" (flip append " with Pudding"))
+-- 
+
+let KvtWithout : { Str -> Type } =
+  (key : Str) ->
+  List { [Str \ (Single key) , Any] };
+
+let KvtWith : { Str -> Type -> Type } =
+  key -> V ->
+  Rec <| KW ->
+  { [ [ (Single key)        , V]    ,, (KvtWithout key)  ]
+  | [ [ Str \ (Single key)  , Any]  ,, KW                ]
+  };
+
+-- let kvtGet : { { key : Str } -> T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] })) }   =
+--     (key : Str) -> 
+--     rec <| (get : { T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] }))}) ->
+--     (kvt : T @ KvtWith key Any) ->
+--     match kvt
+--     [ [kv ,, kvts] |->
+--         -- guardHdDatumSingle key kv <| [k, v] =>
+--         let [k, v] = kv;
+--         if (k == key) 
+--         [ _ ->
+--             let v = v |> justTrustMeCast Any (Hd (Tl { (Elem T) & [(Single key), Any] }));
+--             yes v
+--         , _ -> 
+--             no
+--         ]    
+--     , [kv ,, kvts] |=>
+--         -- let kvts = kvts |> justTrustMeCast (List { [Str, Any] }) (KvtWith key Any);
+--         let kvts = kvts |> justTrustMeCast Any (KvtWith key Any);
+--         let v = get kvts;
+--         let v = v |> justTrustMeCast Any (Hd (Tl { (Elem T) & [(Single key), Any] }));
+--         v
+--     , [] |=>
+--         panic ["kvtGet", "impossible, key not found in tuple", key]
+--     ];
+
+let kvtGet : { { key : Str } -> T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] })) }   =
+    (key : Str) -> 
+    (kvt : T @ KvtWith key Any) ->
+    -- debug2 ["kvtGet", key, kvt] <| ->
+    let kvt = kvt |> justTrustMeCast (KvtWith key Any) (List { [Str, Any] });
+    let [_, resultMb] =
+        while [kvt : List { [Str, Any] }, [] : Maybe Any] <|
+            [ [[k,v],,kvs], [] ] |=>
+            if (k == key)
+            [ -> [ []  , yes v ]
+            , -> [ kvs , no    ]
+            ];
+    ifYes resultMb
+    [ result ->
+        -- for some reason, this "justTrustMeCast" causes variable "T" to escape, so using castT instead
+        --   probably need to update substTypeEnv to substitute into terms within types
+        -- let result = result |> justTrustMeCast Any (Hd (Tl { (Elem T) & [(Single key), Any] }));
+        let result : Hd (Tl { (Elem T) & [(Single key), Any] }) = 
+            result |> castT;
+        result
+    , ->
+        panic ["kvtGet", "impossible: key not found (", key, ") expected one of ", show (forMap kvt <| [k,v] -> k)]
+    ];
+
+let KvtSet : { { key : Str } -> Type -> Type -> Type } =
+    (key : Str) -> (V : Type) -> (T : Type) ->
+    let F = 
+      { {       [       (Single key), Any ] -> [ (Single key), V ]  } 
+      & {  KV @ [ Str \ (Single key), Any ] -> KV                   }
+      };
+    let T2 = TupleMap F T;
+    T2;
+
+let kvtSet1 : { { key : Str } -> V @ Any -> T @ (KvtWith key Any) -> (KvtSet key V T) }   =
+    (key : Str) -> (val : V @ Any) -> 
+    rec <| (set : { T @ (KvtWith key Any) -> (KvtSet key V T) }) ->
+    (kvt : T @ KvtWith key Any) ->
+    match kvt
+    [ [kv ,, kvts] |->
+        -- guardHdDatumSingle key kv <| [k, v] =>
+        let [k, v] = kv;
+        let valMb : Maybe Any = 
+            if (k == key) 
+            [ _ ->
+                let kvts1 = [ [key, val] ,, kvts ];
+                let kvts2 : (KvtSet key V T) = castT kvts1;
+                -- let kvts = kvts |> justTrustMeCast Any (KvtWith key V);
+                -- yes (castT kvts)
+                yes kvts2
+            , _ -> 
+                no
+            ];
+        let valMb2 : Maybe (KvtSet key V T) = castT valMb;
+        valMb2
+    , [kv ,, kvts] |=>
+        -- let kvts = kvts |> justTrustMeCast Any Void; -- (KvtWith key V);
+        let kvts1 = set (castT kvts);
+        let kvts2 = [kv ,, kvts1];
+        castT kvts2
+    , [] |=>
+        panic ["kvtSet", "impossible, key not found in tuple", key]
+    ];
+
+-- this simpler version, doesn't need TupleMap
+-- unlike kvtSet1, it can't change the type in a tuple, (which you wouldn't normally want to any way)
+-- it may require widening of the type of the given value though,
+--   the type of the new value must be as wide as the type in the tuple, but no wider
+let kvtSet2 : { { key : Str } -> V @ Any -> T @ (KvtWith key V) -> T }   =
+    (key : Str) -> (val : V @ Any) -> 
+    rec <| (set : { T @ (KvtWith key V) -> T }) ->
+    (kvt : T @ KvtWith key V) ->
+    match kvt
+    [ [kv ,, kvts] |->
+        -- guardHdDatumSingle key kv <| [k, v] =>
+        let [k, v] = kv;
+        let valMb : Maybe Any = 
+            if (k == key) 
+            [ _ ->
+                let kvts1 = [ [key, val] ,, kvts ];
+                let kvts2 : T = castT kvts1;
+                -- let kvts = kvts |> justTrustMeCast Any (KvtWith key V);
+                -- yes (castT kvts)
+                yes kvts2
+            , _ -> 
+                no
+            ];
+        -- see comments in fe4a.test.fe/keyValueTuple-set/kvtSet about this cast and the C-codegen
+        let valMb2 : Maybe T = castT valMb;
+        valMb2
+    , [kv ,, kvts] |=>
+        -- let kvts = kvts |> justTrustMeCast Any Void; -- (KvtWith key V);
+        let kvts1 = set (castT kvts);
+        let kvts2 = [kv ,, kvts1];
+        castT kvts2
+    , [] |=>
+        panic ["kvtSet", "impossible, key not found in tuple", key]
+    ];
+
+-- let kvtSet = kvtSet1;
+let kvtSet = kvtSet2;
+
+
+let kvtMod : { { key : Str } -> V @ { Void -> (Domain V) } -> T @ (KvtWith key (Domain V)) -> T }   =
+    (key : Str) -> (modify : V @ { Void -> (Domain V) }) -> 
+    rec <| (kvtMod : { T @ (KvtWith key (Domain V)) -> T }) ->
+    (kvt : T @ KvtWith key (Domain V)) ->
+    match kvt
+    [ [kv ,, kvts] |->
+        -- guardHdDatumSingle key kv <| [k, v] =>
+        let [k, v] = kv;
+        let valMb : Maybe Any = 
+            if (k == key) 
+            [ _ ->
+                let val = modify (castT v);
+                let kvts = [ [key, val] ,, kvts ];
+                -- let kvts = kvts |> justTrustMeCast Any (KvtWith key V);
+                yes (castT kvts)
+            , _ -> 
+                no
+            ];
+        -- see comments in fe4a.test.fe/keyValueTuple-set/kvtSet about this cast and the C-codegen
+        let valMb2 : Maybe T = castT valMb;
+        valMb2
+    , [kv ,, kvts] |=>
+        -- let kvts = kvts |> justTrustMeCast Any Void; -- (KvtWith key V);
+        let kvts = kvtMod (castT kvts);
+        let kvts2 = [kv ,, kvts];
+        castT kvts2
+    , [] |=>
+        panic ["kvtMod", "impossible, key not found in tuple", key]
+    ];
+

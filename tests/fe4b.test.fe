@@ -1,0 +1,1266 @@
+language ferrum/test/0.1
+
+[ 
+
+  [ ["name", "prelude"]
+  , ["language", "ferrum/0.1"]
+  , [ "type_check", "bidir" ]
+  , ["project", "../fe/fe-in-fe/fe4-prelude.proj.fe"]
+  , ["decls",
+    """
+       let x = 1;
+       let y = 2;
+       let z = 4;
+       let a = x+(y+z);
+       let b = a*7;
+    """
+    ]
+  , ["expect", "b", "value", "49", "type", "Int"]
+  ]
+
+, [ ["name", "first"]
+  , ["language", "ferrum/0.1"]
+  , [ "type_check", "bidir" ]
+  , ["project", "../fe/fe-in-fe/fe4.proj.fe"]
+  , ["decls",
+    """
+       let x = 1;
+       let y = 2;
+       let z = 4;
+       let a = x+(y+z);
+       let b = a*7;
+    """
+    ]
+  , ["expect", "b", "value", "49", "type", "Int"]
+  , ["expect", "nilPos", "value", "[0,0,0]"]
+  -- , ["expect", "nilLoc", "value", "[\"\",[[0,0,0],[0,0,0]]]"]
+  , ["expect", "nilLoc", "value", "[\"\",[0,0,0],[0,0,0]]"]
+  ]
+
+
+, [ ["name", "foldSum"]
+  , ["language", "ferrum/0.1"]
+  , [ "type_check", "bidir" ]
+  , ["project", "../fe/fe-in-fe/fe4.proj.fe"]
+  , ["decls",
+    """
+       let sum2 = (nums: List Int) -> foldl ((a:Int)-> (b:Int)-> a+b) 0 nums;
+       let nums = [1,2,3,4,5];
+    """
+    ]
+  , ["expect", "sum2 nums", "value", "15", "type", "Int"]
+  ]
+
+
+, [ [ "name", "scanSimple" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  -- , [ "project", "../fe/fe-in-fe/fe4-prelude.proj.fe" ]
+  , [ "decls",
+      """
+       let toks = -> scanSimple "apple banana carrot";
+       let toks2 = -> map ([tag, value, loc]->value) (toks[]);
+      """
+    ]
+  , [ "expect", "toks2[]", "value",
+      """
+       ["apple","banana","carrot"]
+      """
+    ]
+  ]
+
+
+, [ [ "name", "scanWord" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  -- , [ "project", "../fe/fe-in-fe/fe4-prelude.proj.fe" ]
+  , [ "decls",
+      """
+       let toks1 = -> scan "  apple ";
+       let toks2 = -> scan 
+              """  
+                 apple
+                  +
+                   123
+              """
+              ;
+       let toks3 = -> scan 
+              """  
+                 -- a comment
+                  " a string\n "
+                   123
+              """
+              ;
+       
+        let toks4 = -> scan
+            """
+             """
+              abc
+             """
+               """
+                  def
+                   +
+                    "ghi"
+       
+               """
+       
+            """
+            ;
+
+      """
+    ]
+  , [ "expect", "toks1[]", "value",
+      """
+       [["WORD","apple",["",[1,3,2],[1,8,7]]],["EOF","",["",[1,9,8],[1,9,8]]]]
+      """
+    ]
+  , [ "expect", "toks2[]", "value",
+      """
+       [["WORD","apple",["",[1,3,2],[1,8,7]]],["OPER","+",["",[2,4,11],[2,5,12]]],["NUMBER",123,["",[3,5,17],[3,8,20]]],["EOF","",["",[3,8,20],[3,8,20]]]]
+      """
+    ]
+  , [ "expect", "toks3[]", "value",
+      """
+       [["STRING"," a string\n ",["",[2,4,18],[2,18,32]]],["NUMBER",123,["",[3,5,37],[3,8,40]]],["EOF","",["",[3,8,40],[3,8,40]]]]
+      """
+    ]
+  , [ "expect", "toks4[]", "value",
+      """
+       [["STRING","abc",["",[1,1,0],[3,4,12]]],["STRING","  def\n   +\n    \"ghi\"\n",["",[4,3,15],[9,6,55]]],["EOF","",["",[10,1,56],[10,1,56]]]]
+      """
+    ]
+  ]
+
+
+, [ [ "name", "scanHex" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  -- , [ "project", "../fe/fe-in-fe/fe4-prelude.proj.fe" ]
+  , [ "decls",
+      """
+       -- let toks = -> scan "\"\\x41\"";
+       let toks = -> scan 
+          """
+           "\x41\x70\x70\x6C\x65"
+          """
+          ;
+       -- let toks = -> scan "\"\\t\" ";
+       let toks2 = -> map ([tag, value, loc]->value) (toks[]);
+      """
+    ]
+  , [ "expect", "toks2[]", "value",
+      """
+       ["Apple",""]
+      """
+    ]
+  ]
+
+
+
+
+, [ [ "name", "parse1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+       let s1 = -> scan "123";
+       -- let p1 = -> testParse "EXP" s1;
+       let p1 = -> testParseExpr (s1[]);
+       let s2 = -> scan "123 + abc";
+       -- let p2 = -> testParse "EXP" s2;
+       let p2 = -> testParseExpr (s2[]);
+      """
+    ]
+  , [ "expect", "s1[]", "value",
+      """
+       [["NUMBER",123,["",[1,1,0],[1,4,3]]],["EOF","",["",[1,4,3],[1,4,3]]]]
+      """
+    ]
+  , [ "expect", "p1[]", "value", "\"Test PASSED\""]
+  , [ "expect", "p2[]", "value", "\"Test PASSED\""]
+  ]
+
+
+, [ [ "name", "parse2" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+       -- let s1 = scan "123";
+       -- let p1 = testParse2 "EXP" s1;
+       -- let s2 = scan "f 123 abc";
+       -- let p2 = testParse2 "EXP" s2;
+       -- let s3 = scan "f x + 123 * abc";
+       -- let p3 = testParse2 "EXP" s3;
+       -- let s4 = scan "f x * 123 + abc";
+       -- let p4 = testParse2 "EXP" s4;
+
+       let s1 = -> scan "123";
+       let p1 = -> parseExpr (s1[]);
+       let s2 = -> scan "f 123 abc";
+       let p2 = -> parseExpr (s2[]);
+       let s3 = -> scan "f x + 123 * abc";
+       let p3 = -> parseExpr (s3[]);
+       let s4 = -> scan "f x * 123 + abc";
+       let p4 = -> parseExpr (s4[]);
+      """
+    ]
+  , [ "expect", "s1[]", "value",
+      """
+       [["NUMBER",123,["",[1,1,0],[1,4,3]]],["EOF","",["",[1,4,3],[1,4,3]]]]
+      """
+    ]
+  , [ "expect", "p1[]", "value", 
+      """
+       ["ELit",123]
+      """
+    ]
+  , [ "expect", "p2[]", "value", 
+      """
+       ["EApply",["EApply",["EVar","f"],["ELit",123]],["EVar","abc"]]
+      """
+    ]
+  , [ "expect", "p3[]", "value", 
+      -- """
+      --  ["EApply",["EApply",["EVar","+"],["EApply",["EVar","f"],["EVar","x"]]],["EApply",["EApply",["EVar","*"],["ELit",123]],["EVar","abc"]]]
+      -- """
+
+      """
+       ["EOper","+",[["EApply",["EVar","f"],["EVar","x"]],["EOper","*",[["ELit",123],["EVar","abc"]]]]]
+      """
+    ]
+  , [ "expect", "p4[]", "value", 
+      -- """
+      --  ["EApply",["EApply",["EVar","+"],["EApply",["EApply",["EVar","*"],["EApply",["EVar","f"],["EVar","x"]]],["ELit",123]]],["EVar","abc"]]
+      -- """
+
+      """
+       ["EOper","+",[["EOper","*",[["EApply",["EVar","f"],["EVar","x"]],["ELit",123]]],["EVar","abc"]]]
+      """
+    ]
+  ]
+
+
+, [ [ "name", "eval1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  -- , [ "project", "../fe/fe-in-fe/fe4-eval.proj.fe" ]
+  , [ "decls",
+      """
+       let t1 = _ -> evalStr "4 + 5 * 6";
+       let t2 = _ -> evalStr "4 * 5 + 6";
+       let t3 = _ -> evalStr "9 - 5 - 2";
+       let t4 = _ -> evalStr "let a=7; a";
+       let t5 = _ -> evalStr "let a=3; let b=4; let c=5; a + b * c";
+       let t6 = _ -> evalStr "( a -> a * a ) 3";
+       let t7 = _ -> evalStr "( a -> b -> c -> a + b * c ) 3 4 5";
+      """
+    ]
+  , [ "expect", "t1 []", "value", "34"]
+  , [ "expect", "t2 []", "value", "26"]
+  , [ "expect", "t3 []", "value", "2"]
+  , [ "expect", "t4 []", "value", "7"]
+  , [ "expect", "t5 []", "value", "23"]
+  , [ "expect", "t6 []", "value", "9"]
+  , [ "expect", "t7 []", "value", "23"]
+
+  ]
+
+
+
+, [ [ "name", "instantiate1_cps" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+         let t1 = -> instantiateStrToNodes "1 + 2";
+
+      """
+    ]
+  -- , [ "expect", "instTmp3", "value", "2" ]  
+  , [ "expect", "t1[]", "value", "[[\"HValue\",1],[\"HValue\",2],[\"HOper\",\"+\",[0,1]]]" ]  
+   
+        
+  ]
+ 
+-- , [ [ "name", "instantiate1_step" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "decls",
+--       """
+--              let t1 = -> instantiateStrToNodes "1 + 2";
+--       """
+--     ]
+--   , [ "expect", "t1[]", "value", "[[\"HValue\",1],[\"HValue\",2],[\"HOper\",\"+\",[0,1]]]" ]  
+--   ]
+
+, [ [ "name", "readback1_cps" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+         let t1 = -> instantiateReadBack "1 + 2";
+      """
+    ]
+  -- , [ "expect", "addr1", "value", "2" ]  
+  , [ "expect", "t1[]", "value", 
+    """
+     ["EOper","+",[["ELit",1],["ELit",2]]]
+    """
+    ]  
+  ]
+
+-- , [ [ "name", "readback1_step" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "decls",
+--       """
+--          let t1 = -> instantiateReadBack "1 + 2";    
+--       """
+--     ]
+--   -- , [ "expect", "expr2", "value", 
+--   , [ "expect", "t1[]", "value", 
+--     """
+--      ["EOper","+",[["ELit",1],["ELit",2]]]
+--     """
+--     ]  
+--   ]
+
+, [ [ "name", "graph1_cps" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+         let t1 = -> graphReduceStrToExpr "1 + 2";
+      """
+    ]
+  -- , [ "expect", "addr1", "value", "2" ]  
+  , [ "expect", "t1[]", "value", 
+    """
+     ["ELit",3]
+    """
+    ]  
+  ]
+
+-- , [ [ "name", "graph1_step" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "decls",
+--       """
+--          let t1 = -> graphReduceStrToExpr "1 + 2";    
+--       """
+--     ]
+--   -- , [ "expect", "addr1", "value", "2" ]  
+--   , [ "expect", "t1[]", "value", 
+--     """
+--      ["ELit",3]
+--     """
+--     ]  
+--   ]
+
+, [ [ "name", "graph2_cps" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "decls",
+      """
+        let input1 = "1 + 2";
+        let input2a = "( a -> a ) 7";
+        let input2 = "( a -> a*a ) ( 3 + 4 )";
+        let input3a = "( a -> a a )";
+        let input3b = "( b -> b )";
+        let input3 = "( a -> a a ) ( b -> b )";
+        let input4 = "( a -> b -> a a ) ( b -> b )";
+
+      """
+    ]
+  , [ "expect", "graphReduceStr input1", "value", "\"3\""]
+  , [ "expect", "graphReduceStr input2a", "value", "\"7\""]
+  , [ "expect", "graphReduceStr input2", "value", "\"49\""]
+  , [ "expect", "graphReduceStr input3", "value", "\"(v1->v1)\""]
+  , [ "expect", "graphReduceStr input3a", "value", "\"(v1->v1 v1)\""]
+  , [ "expect", "graphReduceStr input3b", "value", "\"(v1->v1)\""]
+  -- , [ "expect", "graphReduceStr input4", "value", "\"(v1->(v1->v1) (v1->v1))\""]
+  -- , [ "expect", "graphReduceStr input4", "value", "\"(v1->let v1_1=(v1->v1);v1_1 v1_1)\""]
+  , [ "expect", "graphReduceStr input4", "value", "\"let v0_1=(v1->v1);(v1->v0_1 v0_1)\""]
+
+
+
+  ]
+
+-- , [ [ "name", "graph2_step" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "project", "../fe/fe-in-fe/fe4c.proj.fe" ]
+--   , [ "decls",
+--       """
+--         let input1 = "1 + 2";
+--         let input2 = "( a -> a*a ) ( 3 + 4 )";
+--         let input3a = "( a -> a a )";
+--         let input3b = "( b -> b )";
+--         let input3 = "( a -> a a ) ( b -> b )";
+--         let input4 = "( a -> b -> a a ) ( b -> b )";
+-- 
+--       """
+--     ]
+--   , [ "expect", "graphReduceStr input1", "value", "\"3\""]
+--   , [ "expect", "graphReduceStr input2", "value", "\"49\""]
+--   , [ "expect", "graphReduceStr input3", "value", "\"(v1->v1)\""]
+--   , [ "expect", "graphReduceStr input3a", "value", "\"(v1->v1 v1)\""]
+--   , [ "expect", "graphReduceStr input3b", "value", "\"(v1->v1)\""]
+--   -- , [ "expect", "graphReduceStr input4", "value", "\"(v1->(v1->v1) (v1->v1))\""]
+--   -- , [ "expect", "graphReduceStr input4", "value", "\"(v1->let v1_1=(v1->v1);v1_1 v1_1)\""]
+--   , [ "expect", "graphReduceStr input4", "value", "\"let v0_1=(v1->v1);(v1->v0_1 v0_1)\""]
+-- 
+--   ]
+
+, [ ["name", "parseTwo"]
+  , ["language", "ferrum/0.1"]
+  , [ "type_check", "bidir" ]
+  , ["project", "../fe/fe-in-fe/fe4.proj.fe"]
+  , ["decls",
+    """
+      -- let t1 = a -> testParse4Scan "1";
+      -- let t2 = a -> testParse4Scan " 1 + 2 ";
+      -- let t3 = a -> testParse4Scan " [ 3 ] ";
+      -- let t4 = a -> testParse4Scan " [ 1, 2, 3 ]  ";
+      let t1 = a -> parseExprStr "1";
+      let t2 = a -> parseExprStr " 1 + 2 ";
+      let t3 = a -> parseExprStr " [ 3 ] ";
+      let t4 = a -> parseExprStr " [ 1, 2, 3 ]  ";
+    """
+    ]
+  , ["expect", "t1[]", "value", "[\"ELit\",1]"]
+  , ["expect", "t2[]", "value", "[\"EOper\",\"+\",[[\"ELit\",1],[\"ELit\",2]]]"]
+  , ["expect", "t3[]", "value", "[\"EList\",[[\"ELit\",3]],[]]"]
+  , ["expect", "t4[]", "value", "[\"EList\",[[\"ELit\",1],[\"ELit\",2],[\"ELit\",3]],[]]"]
+  ]
+
+-- , [ ["name", "cg_fibs"]
+--   , ["language", "ferrum/0.1"]
+--   , [ "type_check", "bidir" ]
+--   , ["project", "../fe/fe-in-fe/fe4.proj.fe"]
+--   -- , ["expr", "eval_cg_expr_str \"let f = fix <| f -> n -> a -> b -> if (n == 0) [ -> [], -> [a,, f (n - 1) b (a + b)]]; f 10 1 1\""]
+--   , ["expr", "evalJsCgExpr (  parseExpr (  scan \"let f = fix <| f -> n -> a -> b -> if (n == 0) [ -> [], -> [a,, f (n - 1) b (a + b)]]; f 10 1 1\")) "]
+--   , ["expr", "evalJsCgExpr <| parseExpr <| scan \"let f = fix <| f -> n -> a -> b -> if (n == 0) [ -> [], -> [a,, f (n - 1) b (a + b)]]; f 10 1 1\" "]
+--   -- , ["expr", "eval_cg_expr_str \"let f = fix <| f -> n -> a -> b -> match n [ 0 |=> [], _ -> [a,, f (n - 1) b (a + b)] ]; f 10 1 1\""]
+--   -- , ["expr", "eval_cg2_expr_str \"let {f = fix \\\\f-> \\\\n-> \\\\a-> \\\\b-> (if (n == 0) then () else (a, f (n - 1) b (a + b)));} in f 10 1 1\""]
+--   -- , ["expr", "eval_cg2_expr_str \"let {f = fix \\\\f-> \\\\n-> \\\\a-> \\\\b-> case n of { 0-> (); _-> (a, f (n - 1) b (a + b));};} in f 10 1 1\""]
+--   -- , ["expr", "eval_cg_project \"let {f = fix \\\\f-> \\\\n-> \\\\a-> \\\\b-> case n of { 0-> (); _-> (a, f (n - 1) b (a + b));};} in f 10 1 1\""]
+--   -- , ["expr", "eval_cg2_project \"let {f = fix \\\\f-> \\\\n-> \\\\a-> \\\\b-> case n of { 0-> (); _-> (a, f (n - 1) b (a + b));};} in f 10 1 1\""]
+-- 
+--   , ["expected_value", "[1,1,2,3,5,8,13,21,34,55]"]
+--   ]
+
+, [ ["name", "cg_fibs"]
+  , ["language", "ferrum/0.1"]
+  , [ "type_check", "bidir" ]
+  , ["project", "../fe/fe-in-fe/fe4.proj.fe"]
+  , ["decls",
+      """
+        let t1 = -> evalJsCgExpr (  parseExpr (  scan "let f = fix <| f -> n -> a -> b -> if (n == 0) [ -> [], -> [a,, f (n - 1) b (a + b)]]; f 10 1 1"));
+        let t2 = -> evalJsCgExpr <| parseExpr <| scan "let f = fix <| f -> n -> a -> b -> if (n == 0) [ -> [], -> [a,, f (n - 1) b (a + b)]]; f 10 1 1";
+      """
+    ]
+  , ["expectValue", "t1[]", "[1,1,2,3,5,8,13,21,34,55]"]
+  , ["expectValue", "t2[]", "[1,1,2,3,5,8,13,21,34,55]"]
+  ]
+
+, [ ["name", "cg"]
+  , ["language", "ferrum/0.1"]
+  , [ "type_check", "bidir" ]
+  , ["project", "../fe/fe-in-fe/fe4.proj.fe"]
+  , ["decls",
+    """
+      -- let c1 = _ -> cgExprStmt (parseExpr (scan "1"));
+      -- let c2 = _ -> cgExprStmt (parseExpr (scan "1 + 2"));
+      -- let c3 = _ -> cgExprStmt (parseExpr (scan "( a-> a*a ) 7"));
+
+      let ev = (c: { [] -> Str }) -> jsEval (c[]);
+
+      -- let e1 = _ -> ev c1;
+      -- let e2 = _ -> ev c2;
+      -- let e3 = _ -> ev c3;
+
+      let ev0 : { Str -> Any } = input -> jsEval (cgExpr (parseExpr (scan input)));
+      -- let ev1 : { Str -> Any } = input -> jsEval (cgExprStmt (parseExpr (scan input)));
+      -- let ev2 : { Str -> Any } = input -> jsEval (dtShowJoin (cgExprTree (parseExpr (scan input))));
+
+      -- let ev3 : { Str -> Any } = input -> 
+      --   let exprDt = cgExprJs_HPS_DT cghInitEnv (parseExpr (scan input));
+      --   jsEval (dtShowJoin exprDt);
+
+      let ev3 : { Str -> Any } = input -> 
+        let toks = scan input;
+        let expr = parseExpr toks;
+        -- debug2 ["expr", expr] <| ->
+        let dt = cgExprJs_HPS_DT cghInitEnv expr;
+        -- debug2 ["dt", dt] <| ->
+        let jsSrc = dtShowJoin dt;
+        -- debug2 ["jsSrc", jsSrc] <| ->
+        let result = jsEval jsSrc;
+        result;
+
+      let fibsSrc1 = "let f0 = fix <| f -> n -> a -> b -> if (n == 0) [ -> [], -> [a,, f (n - 1) b (a + b)]]; f0 10 1 1";
+      let fibsSrc2 = 
+        """
+         let callMaybe : { X @ Any -> F @ { X -> (Maybe Any) } -> G @{ X -> Any } -> (Domain F) -> { (Hd {F X}) | {G X} } } = 
+             x -> then -> else ->
+             ifNil (then x) [ -> else x, [y] -> y ];
+         let f = fix <| f -> n -> a -> b -> callMaybe n ( 0 |=> [] ) ( n2 -> [a ,, f (n2 - 1) b (a + b)] ); 
+         f 10 1 1
+        """
+        ;
+
+      let fibs01 = _ -> ev0 fibsSrc1;
+      let fibs02 = _ -> ev0 fibsSrc2;
+      -- let fibs11 = _ -> ev1 fibsSrc1;
+      -- let fibs12 = _ -> ev1 fibsSrc2;
+      -- let fibs21 = _ -> ev2 fibsSrc1;
+      -- let fibs22 = _ -> ev2 fibsSrc2;
+      let fibs31 = _ -> ev3 fibsSrc1;
+      let fibs32 = _ -> ev3 fibsSrc2;
+
+    """
+    ]
+  -- , ["expect", "c1[]", "value", "\"( () => { return (1) } )()\""]
+  -- , ["expect", "c2[]", "value", "\"( () => { return ((1 + 2)) } )()\""]
+  -- , ["expect", "e1[]", "value", "1"]
+  -- , ["expect", "e2[]", "value", "3"]
+  -- , ["expect", "e3[]", "value", "49"]
+  , ["expect", "fibs01[]", "value", "[1,1,2,3,5,8,13,21,34,55]"]
+  , ["expect", "fibs02[]", "value", "[1,1,2,3,5,8,13,21,34,55]"]
+  -- , ["expect", "fibs11[]", "value", "[1,1,2,3,5,8,13,21,34,55]"]
+  -- , ["expect", "fibs12[]", "value", "[1,1,2,3,5,8,13,21,34,55]"]
+  -- , ["expect", "fibs21[]", "value", "[1,1,2,3,5,8,13,21,34,55]"]
+  -- , ["expect", "fibs22[]", "value", "[1,1,2,3,5,8,13,21,34,55]"]
+  , ["expect", "fibs31[]", "value", "[1,1,2,3,5,8,13,21,34,55]"]
+  , ["expect", "fibs32[]", "value", "[1,1,2,3,5,8,13,21,34,55]"]
+  ]
+
+, [ ["name", "dt"]
+  , ["language", "ferrum/0.1"]
+  , [ "type_check", "bidir" ]
+  , ["project", "../fe/fe-in-fe/fe4.proj.fe"]
+  , ["decls",
+    """
+        let dt1 = ["Leaf", "1"];
+        let lines1 = -> dtShow dt1;
+
+        let lines2 = -> 
+          -- let dt2 = displayAny2 [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+          -- let dt2 = displayAny2 [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,,100];
+          let dt2 = displayAny2 [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,,100];
+          let result = dtShow dt2;
+          let _ = debug dt2;
+          let _ = debug (strJoin "\n" result);
+          result;
+
+        let lines3 = -> 
+          -- let dt2 = displayExpr (parseExprStr " 1 + 2 ");
+          let dt2 = displayExpr (parseExprStr " (nums: List Int) -> foldl ((a:Int)-> (b:Int)-> a+b) 0 nums ");
+          let result = dtShow dt2;
+          let _ = debug dt2;
+          let _ = debug (strJoin "\n" result);
+          result;
+    """
+    ]
+  , ["expect", "lines1[]", "value", "[\"1\"]"]
+  -- , ["expect", "lines2[]", "value", "TODO"]
+  -- , ["expect", "lines3[]", "value", "TODO"]
+  ]
+
+, [ ["name", "guard2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Maybe = (A: Type) -> { [] | [A] };
+
+      -- let ifStr2 : { A @ Any -> F @ [ Str -> Any, {A \ Str} -> Any ] -> (Codomain F) } =
+
+
+      let guardStr : { Any -> F @ { Str -> Any } -> { [] | {F Str} } } =
+          a -> (f : F @ { Str -> Any }) ->
+          ifStr a
+          [ a2 -> f a2
+          , _ -> []
+          ];
+
+      let f1 : { Any -> (Maybe Int) } =
+        a ->
+        ifStr a
+        [ a2 -> [7]
+        , _ -> []
+        ];
+
+      let f2 : { Any -> (Maybe Int) } =
+        a ->
+        guardStr a <| a2 ->
+        [7];
+
+      let f3 : { Any -> (Maybe Int) } =
+        a ->
+        guardStr a <| a2 =>
+        7;
+
+    """
+    ]
+  , ["expect", "f1 0"          , "value", "[]"   ]
+  , ["expect", "f1 \"\" "      , "value", "[7]"  ]  -- TODO fixup bug meaning a string cannot be the last thing before the EOF
+  , ["expect", "f2 0"          , "value", "[]"   ]
+  , ["expect", "f2 \"\" "      , "value", "[7]"  ]
+  , ["expect", "f3 0"          , "value", "[]"   ]
+  , ["expect", "f3 \"\" "      , "value", "[7]"  ]
+  ]
+
+, [ ["name", "guard3"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Maybe = (A: Type) -> { [] | [A] };
+      let reverse : { A @ (List Any) -> (List (Elem A)) } = (a : A @ (List Any)) -> a;
+
+
+      -- let Guard : { Type -> Type } =
+      --     T -> 
+      --     -- { Any -> F @ { T -> Any } -> { [] | {F T} } };
+      --     -- { Any -> F @ { T -> Any } -> { [] | (Codomain F) } };
+      --     { Any -> F @ { T -> (Codomain F) } -> { [] | (Codomain F) } };
+      --     -- { Any -> F @ { T -> Any } -> { [] | (Codomain F) } };
+
+      let Guard : { Type -> Type } = T -> { Any -> F @ { T -> Any } -> { [] | (Codomain F) } };
+
+
+      let guardStr : { Any -> F @ { Str -> Any } -> { [] | {F Str} } } =
+          a -> (f : F @ { Str -> Any }) ->
+          ifStr a
+          [ a2 -> f a2
+          , _ -> []
+          ];
+      
+      let guardStr2 : Guard Str = guardStr;
+      
+      let guardInt : { Any -> F @ { Int -> Any } -> { [] | {F Int} } } =
+          a -> (f : F @ { Int -> Any }) ->
+          ifInt a
+          [ a2 -> f a2
+          , _ -> []
+          ];
+      
+      -- -- let Guard : { Type -> Type } = T -> { Any -> F @ { T -> Any } -> { [] | (Codomain F) } };
+      -- let guardList : { G @ (Guard Void) -> Any -> F @ { (List (Domain (Codomain G))) -> Any } -> { [] | { F (List (Domain (Codomain G))) } } } =
+      --     (g : G @ (Guard Void)) -> a -> (f : F @ { (List (Domain (Codomain G))) -> Any }) ->
+      --     loop1 ( [a : Any, ys : List (Domain (Codomain G))] ->
+      --         ifNil a 
+      --         [ ->
+      --             break (f (reverse ys))
+      --         , _ -> 
+      --             ifPair a
+      --             [ [aHd ,, aTl] ->
+      --                 ifNil (g aHd ( (aHd2 : (Domain (Codomain G))) -> [aHd2] ))
+      --                 [ -> 
+      --                     break []
+      --                 , [aHd3] ->
+      --                     continue [aTl, [aHd3,,ys]]
+      --                 ]
+      --             , _ ->
+      --                 break []
+      --             ]
+      --         ]
+      --     ) [a, []];
+      
+      let guardList : { G @ (Guard Any) -> Any -> F @ { (List (Domain (Domain (Codomain G)))) -> Any } -> { [] | { F (List (Domain (Domain (Codomain G)))) } } } =
+          (g : G @ (Guard Any)) -> a -> (f : F @ { (List (Domain (Domain (Codomain G)))) -> Any }) ->
+          loop1 ( [a : Any, ys : List (Domain (Domain (Codomain G)))] ->
+              ifNil a 
+              [ ->
+                  break (f (reverse ys))
+              , _ -> 
+                  ifPair a
+                  [ [aHd ,, aTl] ->
+                      -- let k : { (Domain (Domain (Codomain G))) -> [(Domain (Domain (Codomain G)))] } = (aHd2 : (Domain (Domain (Codomain G)))) -> [aHd2];
+                      let k : { (Domain (Domain { G Any })) -> [(Domain (Domain { G Any }))] } = (aHd2 : (Domain (Domain { G Any }))) -> [aHd2];
+                      let aHd2 : (Maybe (Domain (Domain (Codomain G)))) = g aHd k;
+                      ifNil aHd2
+                      [ -> 
+                          break []
+                      , [aHd3] ->
+                          continue [aTl, [aHd3,,ys]]
+                      ]
+                  , _ ->
+                      break []
+                  ]
+              ]
+          ) [a, []];
+      
+      let guardListStr : Guard (List Str) = guardList guardStr;
+
+
+      let f1 : { Any -> (Maybe Int) } =
+        a ->
+        ifStr a
+        [ a2 -> [7]
+        , _ -> []
+        ];
+
+      let f2 : { Any -> (Maybe Int) } =
+        a ->
+        guardStr a <| a2 ->
+        [7];
+
+      let f3 : { Any -> (Maybe Int) } =
+        a ->
+        guardStr a <| a2 =>
+        7;
+
+    """
+    ]
+  , ["expect", "f1 0"          , "value", "[]"   ]
+  , ["expect", "f1 \"\" "      , "value", "[7]"  ]  -- TODO fixup bug meaning a string cannot be the last thing before the EOF
+  , ["expect", "f2 0"          , "value", "[]"   ]
+  , ["expect", "f2 \"\" "      , "value", "[7]"  ]
+  , ["expect", "f3 0"          , "value", "[]"   ]
+  , ["expect", "f3 \"\" "      , "value", "[7]"  ]
+  ]
+
+
+, [ [ "name", "ioState1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let mkInitVal = -> [];
+        let prog1 = 
+          ioSet "a" "apple" <| ->
+          ioSet "b" "banana" <| ->
+          ioGet "a" mkInitVal <| a -> 
+          ioGet "b" mkInitVal <| b -> 
+          ioGet "c" mkInitVal <| c -> 
+          io2Print ["abc", a, b, c] <| ->
+          io2Exit 7; 
+      """
+    ]
+  , [ "expect", "ioDo prog1", "value", "7"]
+  ]
+
+
+, [ [ "name", "ioState2" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let mkInitVal = -> [];
+        let prog1 = 
+          -- ioCreateState -- TODO
+          ioSet "a" "apple" <| ->
+          ioSet "b" "banana" <| ->
+          ioGet "a" mkInitVal <| a -> 
+          ioGet "b" mkInitVal <| b -> 
+          ioGet "c" mkInitVal <| c -> 
+          io2Print ["abc", a, b, c] <| ->
+          io2Exit 7; 
+      """
+    ]
+  , [ "expect", "ioDo prog1", "value", "7"]
+  ]
+
+-- , [ [ "name", "cpsLoop" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "decls",
+--       """
+--         let State = Int;
+--         
+--         let cpsAdd : { Int -> (CPS Nil State) } =
+--             a -> (k : K @ { Nil -> State -> Any }) -> state ->
+--             k [] (state + a);
+-- 
+--         let cpsAddList : { (List Int) -> (CPS Nil Int) } =
+--             xs -> (k : K @ { Nil -> State -> Any }) ->
+--             cpsLoop2 Int xs (
+--               xs -> (k : K @ { ["break", []] | ["continue", (List Int)] -> State -> Any }) ->
+--               match xs
+--               [ [] |=> 
+--                 k <| break []
+--               , [x1 ,, xs] |=>
+--                 cpsAdd x1 <| ->
+--                 k <| continue xs
+--               ]
+--             ) <| _ ->
+--             k [];
+-- 
+--         let cpsAddSquareList : { (List Int) -> (CPS (List Int) Int) } =
+--             xs -> (k : K @ { (List Int) -> State -> Any }) ->
+--             cpsLoop2 Int [xs, []: List Int] (
+--               [xs, ys] -> (k : K @ { ["break", (List Int)] | ["continue", (List Int)] -> State -> Any }) ->
+--               match xs
+--               [ [] |=>
+--                 k <| break (reverse ys)
+--               , [x1 ,, xs] |=>
+--                 cpsAdd x1 <| ->
+--                 k <| continue [xs, [x1 * x1 ,, ys]]
+--               ]
+--             ) <| ys ->
+--             k ys;
+-- 
+--         let t1 : Int = cpsAddList [1,2,3,4] ( _ -> state -> state ) 0;
+--         let t2 : { -> Int } = -> cpsAddList [1,2,3,4] ( _ -> state -> state ) 0;
+--         let t3 : { [Int, (List Int)] } = cpsAddSquareList [1,2,3,4] ( val -> state -> [state, val] ) 0;
+--         let t4 : { -> [Int, (List Int)] } = -> cpsAddSquareList [1,2,3,4] ( val -> state -> [state, val] ) 0;
+-- 
+--       """
+--     ]
+--   , [ "expect", "t1", "value", "10"]
+--   , [ "expect", "t2[]", "value", "10"]
+--   , [ "expect", "t3", "value", "[10,[1,4,9,16]]"]
+--   , [ "expect", "t4[]", "value", "[10,[1,4,9,16]]"]
+--   ]
+
+, [ [ "name", "cpsLoop1" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let State = Int;
+        
+        let cpsAdd : { Int -> (CPS Nil State) } =
+            a -> (k : K @ { Nil -> State -> Any }) -> state ->
+            k [] (state + a);
+
+        let cpsAddList : { (List Int) -> (CPS Nil Int) } =
+            xs0 -> (k : K @ { Nil -> State -> Any }) ->
+            cpsLoop1 State (
+              (xs : List Int) -> 
+              (kBreak : KB @ { [] -> State -> Any }) ->
+              (kContinue : KC @ { (List Int) -> State -> Any }) ->
+              match xs
+              [ [] |=> 
+                kBreak []
+              , [x1 ,, xs2] |=>
+                cpsAdd x1 <| ->
+                kContinue xs2
+              ]
+            ) xs0 <| _ ->
+            k [];
+
+        let cpsAddSquareList : { (List Int) -> (CPS (List Int) Int) } =
+            xs0 -> (k : K @ { (List Int) -> State -> Any }) ->
+            cpsLoop1 Int (
+              [xs : List Int, ys : List Int] -> 
+              (kBreak : KB @ { (List Int) -> State -> Any }) ->
+              (kContinue : KC @ { [(List Int), (List Int)] -> State -> Any }) ->
+              match xs
+              [ [] |=>
+                kBreak (reverse ys)
+              , [x1 ,, xs2] |=>
+                cpsAdd x1 <| ->
+                kContinue [xs2, [x1 * x1 ,, ys]]
+              ]
+            ) [xs0, []: List Int] <| ys ->
+            k ys;
+
+        let t1 : Int = cpsAddList [1,2,3,4] ( _ -> state -> state ) 0;
+        let t2 : { -> Int } = -> cpsAddList [1,2,3,4] ( _ -> state -> state ) 0;
+        let t3 : { [Int, (List Int)] } = cpsAddSquareList [1,2,3,4] ( val -> state -> [state, val] ) 0;
+        let t4 : { -> [Int, (List Int)] } = -> cpsAddSquareList [1,2,3,4] ( val -> state -> [state, val] ) 0;
+
+      """
+    ]
+  , [ "expect", "t1", "value", "10"]
+  , [ "expect", "t2[]", "value", "10"]
+  , [ "expect", "t3", "value", "[10,[1,4,9,16]]"]
+  , [ "expect", "t4[]", "value", "[10,[1,4,9,16]]"]
+  ]
+
+
+, [ [ "name", "cpsLoop2" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let State = Int;
+        
+        let cpsAdd : { Int -> (CPS Nil State) } =
+            a -> (k : K @ { Nil -> State -> Any }) -> state ->
+            k [] (state + a);
+
+        let cpsAddList : { (List Int) -> (CPS Nil Int) } =
+            xs0 -> (k : K @ { Nil -> State -> Any }) ->
+            cpsLoop2 State xs0 (
+              xs -> 
+              (kBreak : KB @ { [] -> State -> Any }) ->
+              (kContinue : KC @ { (List Int) -> State -> Any }) ->
+              match xs
+              [ [] |=> 
+                kBreak []
+              , [x1 ,, xs2] |=>
+                cpsAdd x1 <| ->
+                kContinue xs2
+              ]
+            ) <| _ ->
+            k [];
+
+        let cpsAddSquareList : { (List Int) -> (CPS (List Int) Int) } =
+            xs0 -> (k : K @ { (List Int) -> State -> Any }) ->
+            cpsLoop2 Int [xs0, []: List Int] (
+              [xs, ys] -> 
+              (kBreak : KB @ { (List Int) -> State -> Any }) ->
+              (kContinue : KC @ { [(List Int), (List Int)] -> State -> Any }) ->
+              match xs
+              [ [] |=>
+                kBreak (reverse ys)
+              , [x1 ,, xs2] |=>
+                cpsAdd x1 <| ->
+                kContinue [xs2, [x1 * x1 ,, ys]]
+              ]
+            ) <| ys ->
+            k ys;
+
+        let t1 : Int = cpsAddList [1,2,3,4] ( _ -> state -> state ) 0;
+        let t2 : { -> Int } = -> cpsAddList [1,2,3,4] ( _ -> state -> state ) 0;
+        let t3 : { [Int, (List Int)] } = cpsAddSquareList [1,2,3,4] ( val -> state -> [state, val] ) 0;
+        let t4 : { -> [Int, (List Int)] } = -> cpsAddSquareList [1,2,3,4] ( val -> state -> [state, val] ) 0;
+
+      """
+    ]
+  , [ "expect", "t1", "value", "10"]
+  , [ "expect", "t2[]", "value", "10"]
+  , [ "expect", "t3", "value", "[10,[1,4,9,16]]"]
+  , [ "expect", "t4[]", "value", "[10,[1,4,9,16]]"]
+  ]
+
+
+, [ [ "name", "cpsWhile" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  , [ "decls",
+      """
+        let State = Int;
+        
+        -- let cpsAdd : { Int -> K @ { Nil -> State -> Any} -> State -> K Nil State } =
+        let cpsAdd : { Int -> (CPS Nil State) } =
+            a -> (k : K @ { Nil -> State -> Any }) -> state ->
+            k [] (state + a);
+
+        let cpsAddList : { (List Int) -> (CPS Nil Int) } =
+            xs -> (k : K @ { Nil -> State -> Any }) ->
+            cpsWhile Int xs (
+              [x ,, xs] |=> 
+              (k : K @ { (List Int) -> State -> Any }) ->
+              cpsAdd x <| ->
+              k xs
+            ) <| _ ->
+            k [];
+
+        let cpsAddSquareList : { (List Int) -> (CPS (List Int) Int) } =
+            xs -> (k : K @ { (List Int) -> State -> Any }) ->
+            cpsWhile Int [xs, []: List Int] (
+              [[x ,, xs], ys] |=> 
+              (k : K @ { [(List Int), (List Int)] -> State -> Any }) ->
+              cpsAdd x <| ->
+              k [xs, [x*x ,, ys]]
+            ) <| [_, ys] ->
+            k (reverse ys);
+
+        let t1 : Int = cpsAddList [1,2,3,4] ( _ -> state -> state ) 0;
+        let t2 : { -> Int } = -> cpsAddList [1,2,3,4] ( _ -> state -> state ) 0;
+        let t3 : { [Int, (List Int)] } = cpsAddSquareList [1,2,3,4] ( val -> state -> [state, val] ) 0;
+        let t4 : { -> [Int, (List Int)] } = -> cpsAddSquareList [1,2,3,4] ( val -> state -> [state, val] ) 0;
+
+      """
+    ]
+  , [ "expect", "t1", "value", "10"]
+  , [ "expect", "t2[]", "value", "10"]
+  , [ "expect", "t3", "value", "[10,[1,4,9,16]]"]
+  , [ "expect", "t4[]", "value", "[10,[1,4,9,16]]"]
+  ]
+
+-- , [ [ "name", "cpsCond" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+--   , [ "type_check", "bidir" ]
+--   -- , [ "type_check", "none" ]
+--   , [ "decls",
+--       """
+--         let State = Int;
+-- 
+--         -- let cpsCond0 : 
+--         --     {   { State : Type } 
+--         --     ->  C @ (List (CpsA State (Maybe Any)))
+--         --     ->  (CpsA State (Elem (Domain (Domain (Elem C)))))
+--         --     } =
+--         --     (State : Type) ->
+--         --     (conds : C @ (List (CpsA State (Maybe Any)))) ->
+--         --     (k : K @ CpsK State (Elem (Domain (Domain (Elem C))))) ->
+--         --     let conds0 : List (Elem C) = conds;
+--         --     let resultMb0 : Maybe (Elem (Domain (Domain (Elem C)))) = [];
+--         --     cpsWhile State [conds0, resultMb0] (
+--         --         [[c ,, cc], []] |=>
+--         --         (k : K @ CpsK State { [(List (Elem C)), (Maybe (Elem (Domain (Domain (Elem C)))))] }) ->
+--         --         c <| (resultMb : Domain (Domain (Elem C))) ->
+--         --         match resultMb
+--         --         [ [r] |=>
+--         --             k [[], [r]]
+--         --         , [] |=>
+--         --             k [cc, []]
+--         --         ]
+--         --     ) <| cr @ [conds2, resultMb2] ->
+--         --     match cr 
+--         --     [ [ _, [result2] ] |=>
+--         --         k result2
+--         --     , [ [], [] ] |=>
+--         --         error ["cpsCond", "exhausted all conditions, but nothing succeeded"]
+--         --     , [ [c ,, cc], [] ] |=>
+--         --         error ["cpsCond", "impossible"]
+--         --     ];
+-- 
+--         -- let cpsSuccess : { { State : Type } -> A @ Any -> (CpsA State (Maybe A)) } =
+--         --     (State : Type) ->
+--         --     (a : A @ Any) ->
+--         --     (k : K @ CpsK State (Maybe A)) ->
+--         --     (state : State) ->
+--         --     k [a] state;
+-- 
+--         -- let cpsFailure : { { State : Type } -> (CpsA State Nil) } =
+--         --     (State : Type) ->
+--         --     (k : K @ CpsK State Nil) ->
+--         --     (state : State) ->
+--         --     k [] state;
+-- 
+--         let ct1 = 
+--             cpsCond1 State
+--             [ cpsFailure1 State 
+--             , cpsSuccess1 State 17
+--             ];
+-- 
+--         let t1 = -> ct1 (result -> state -> result) 0;
+-- 
+-- 
+--         -- let cpsMaybe2 : 
+--         --     {  { State : Type } 
+--         --     -> A @ Any 
+--         --     -> F @ { A -> (Maybe (CpsMbA State Any)) } 
+--         --     -> (CpsMbA State (Domain (Hd (Domain (Hd { F A })))))
+--         --     } =
+--         --     (State : Type) ->
+--         --     (a : A @ Any) ->
+--         --     (f : F @ { A -> (Maybe (CpsMbA State Any)) }) ->
+--         --     (k @ [kT, kF] : K @ CpsMbK State (Domain (Hd (Domain (Hd { F A }))))) ->
+--         --     (state : State) ->
+--         --     match (f a)
+--         --     [ [b] |=>
+--         --         b k state
+--         --     , [] |=>
+--         --         kF [] state
+--         --     ];
+-- 
+-- 
+--         let ct2 = 
+--             cpsCond2 State
+--             [ cpsFailure2 State 
+--             -- , cpsMaybe2 State ["a", 10] <| ["b" : Str, b] |=>
+--             --   cpsSuccess2 State b
+--             , cpsMaybe2 State [17] <| [a] |=>
+--               cpsSuccess2 State a
+--             ];
+-- 
+--         -- let ct2 = 
+--         --     cpsCond2 State
+--         --     [  cpsMaybe2 State [17] <| _ |=>
+--         --        cpsSuccess2 State 17
+--         --     ];
+-- 
+--         let t2 = -> ct2 (result -> state -> result) 0;
+-- 
+--         let cpsGet : CpsA State State = 
+--           (k : K @ CpsK State State) ->
+--           (state : State) ->
+--           k state state;
+-- 
+--         let cpsSet : { State -> (CpsA State Nil) } =
+--             (val : State) ->
+--             (k : K @ CpsK State Nil) ->
+--             (state : State) ->
+--             k [] val;
+-- 
+--         let ct3 : CpsA State Int = 
+--             (k : K @ CpsK State Int) ->
+--             cpsSet 4 <| ->
+--             -- cpsMatch State 7 [];
+--             -- cpsMatch State 7 (castT [ _ |=> cpsSuccess2 State 23] : Void);
+--             -- cpsMatch State 7 [ _ |=> cpsSuccess2 State 23] k;
+--             cpsMatch State 7
+--             [ 4 |=>
+--                 cpsSuccess2 State 11
+--             , 7 |=> 
+--                 cpsGuard State cpsGet <| 3 |=>
+--                 cpsSuccess2 State 7
+--             , 7 |=> 
+--                 cpsGuard State cpsGet <| 4 |=>
+--                 cpsSuccess2 State 23
+--             , 7 |=> 
+--                 cpsGuard State (cpsSet 5) <| [] |=>
+--                 cpsGuard State cpsGet <| 4 |=>
+--                 cpsSuccess2 State 23
+--             ] <| result ->
+--             k result;
+--             
+-- 
+--         let t3 = -> ct3 (result -> state -> result) 0;
+-- 
+-- 
+--       """
+--     ]
+--   , [ "expect", "t1[]", "value", "17"]
+--   , [ "expect", "t2[]", "value", "17"]
+--   , [ "expect", "t3[]", "value", "23"]
+--   ]
+
+, [ [ "name", "cpsMatch" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        let State = Int;
+
+        let cpsGet : CpsA State State = 
+          (k : K @ CpsK State State) ->
+          (state : State) ->
+          k state state;
+
+        let cpsSet : { State -> (CpsA State Nil) } =
+            (val : State) ->
+            (k : K @ CpsK State Nil) ->
+            (state : State) ->
+            k [] val;
+
+        let ct3 : CpsA State Int = 
+            (k : K @ CpsK State Int) ->
+            cpsSet 4 <| ->
+            cpsMatch State 7
+            [ 4 |=>
+                cpsMatchOk State 11
+            , 7 |=> 
+                cpsMatchGuard State cpsGet <| 3 |=>
+                cpsMatchOk State 7
+            , 7 |=> 
+                cpsMatchGuard State cpsGet <| 4 |=>
+                cpsMatchOk State 23
+            , 7 |=> 
+                cpsMatchGuard State (cpsSet 5) <| [] |=>
+                cpsMatchGuard State cpsGet <| 4 |=>
+                cpsMatchOk State 23
+            ] <| result ->
+            k result;
+
+        let t3 = -> ct3 (result -> state -> result) 0;
+
+      """
+    ]
+  , [ "expect", "t3[]", "value", "23"]
+  ]
+
+
+, [ [ "name", "stepMatch" ]
+  , [ "language", "ferrum/0.1" ]
+  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "type_check", "bidir" ]
+  -- , [ "type_check", "none" ]
+  , [ "decls",
+      """
+        let Step = 
+          Rec <| S -> 
+            { [ ["Get",    []],       Int     -> S ]
+            | [ ["Set",    Int],      []      -> S ]
+            | [ ["Done",   Int],      []           ]
+            };
+
+        let stepGet : { { Int -> Step } -> Step } = 
+          (k : { Int -> Step }) ->
+          [["Get", []], k];
+
+        let stepSet : { Int -> { Nil -> Step } -> Step } = 
+          (val : Int) ->
+          (k : { Nil -> Step }) ->
+          [["Set", val], k];
+
+        let stepDone : { Int -> Step } = 
+          (val : Int) ->
+          [["Done", val], []];
+
+        let ct3 : Step = 
+            stepSet 4 <| ->
+            stepMatch Step 7
+            [ 4 |=>
+                stepMatchOk Step 11
+            , 7 |=> 
+                stepMatchGuard Step stepGet <| 3 |=>
+                stepMatchOk Step 7
+            , 7 |=> 
+                stepMatchGuard Step stepGet <| 4 |=>
+                stepMatchOk Step 23
+            , 7 |=> 
+                stepMatchGuard Step (stepSet 5) <| [] |=>
+                stepMatchGuard Step stepGet <| 4 |=>
+                stepMatchOk Step 23
+            ] <| result ->
+            stepDone result;
+
+        let stepper : { Int -> Step -> Int } =
+          val -> program ->
+          loop2 [program, val] <| [step, val] ->
+          match step
+          [ [["Get",  []], k] |=>
+              let next : Step = k val;
+              continue [next, val]
+          , [["Set",  val2], k] |=>
+              let next : Step = k [];
+              continue [next, val2]
+          , [["Done", val2], []] |=>
+              break val2
+          ];
+
+        let t1 = -> stepper 0 ct3;
+
+      """
+    ]
+  , [ "expect", "t1[]", "value", "23"]
+  ]
+
+
+
+]
+
+

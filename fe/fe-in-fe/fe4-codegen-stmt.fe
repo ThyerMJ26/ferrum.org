@@ -1,0 +1,2411 @@
+language ferrum/0.1
+
+let cgDebug = msg -> [];
+-- let cgDebug = msg -> debug msg;
+
+let cgDebug2 = msg -> debug2Skip [];
+-- let cgDebug2 = msg -> debug2 msg;
+
+
+let patBindValJs1 : { Expr -> (Maybe JsExpr) } = 
+    rec <| ( pbv : { Expr -> (Maybe JsExpr) } ) ->
+    pat ->
+    match pat
+    [ ["EVar", var] |=> []
+    , ["ELit", val] |=> [ jsDatum val ]
+    , ["EList", elems, listTail] |=>
+        let tlJs : Maybe JsExpr = 
+            match listTail
+            [ [] |=> [ jsNil ]
+            , [t] |=> pbv t
+            ];
+        let [_, result] = 
+            while [reverse elems: List Expr, tlJs: Maybe JsExpr] <|
+            [[x,,xs], listJs] |=> [xs, [ jsList [pbv x, listJs] ] ];
+        result
+    , ["EType", exp, ty] |=> pbv exp
+    , ["EAs", pat2, exp] |=> pbv exp
+    , ["ETermBrackets", exp] |=> pbv exp
+    , _ |=> error ["missing case patBindValJs1", pat]
+    ];
+
+-- generate the value part of a pattern, suitable for use in a call to rt.matchPat
+let patBindValJs2 : { Expr -> JsExpr } = 
+    pat ->
+    match (patBindValJs1 pat)
+    [ [] |=> jsVar "undefined"
+    , [patJs] |=> patJs
+    ];
+
+-- generates a list of all the subsequent EAs bindings that need to be performed
+-- after the top-most binding has been handled
+let patBindAs : { Expr -> (List {[Str, Expr]}) } =
+    rec <| (pba : { Expr -> (List {[Str, Expr]}) }) ->
+    expr0 ->
+    -- let _ = debug ["PBA", show2 expr];
+    match expr0
+    [ ["EAs", name, asExpr] |=> 
+        let asPats1 = pba asExpr;
+        let asPats2 = [ [name, asExpr],, asPats1];
+        asPats2
+    , ["EList", listElems, listTail] |=>
+        let elems = append listElems listTail;
+        let asPats = concat (map pba elems);
+        asPats
+    , ["ETermBrackets", expr] |=>
+        pba expr
+    , ["EType", expr, typ] |=>
+        pba expr
+    , ["EVar", _] |=> []
+    , ["ELit", _] |=> []
+    , _ |=> error ["missing case patBindAs", expr0]
+    ];
+
+let jsVarPrim : { Str -> JsExpr } =
+    name ->
+    jsVar <| strCat ["_.", name];
+
+let jsLet2 : { (Maybe JsExpr) -> JsExpr -> JsStmt } =
+    pat -> defn ->
+    match pat
+    [ [] |=>
+        jsExpr defn
+    , [pat2] |=>
+        jsLet pat2 defn
+    ];
+
+let cghPatVar : { Expr -> (Maybe ExprVar) } =
+    rec <| (pv : { Expr -> (Maybe ExprVar) }) ->
+    expr ->
+    match expr 
+    [ ["EVar", var] |=> [["EVar", var]]
+    , ["EAs", name, _] |=> [["EVar", name]]
+    , ["ETermBrackets", expr2] |=> pv expr2
+    , ["EType", tm, ty] |=> pv tm
+    , _ |=> error ["cghPatVar", "missing case / invalid pattern", expr]
+    ];
+
+let guardPatVar : { Expr -> K @ { ExprVar -> Any } -> [] | K Expr } =
+    expr -> (k : K @ { ExprVar -> Any }) ->
+    ifNil (cghPatVar expr)
+    [ -> []
+    , [var] -> k var
+    ];
+
+let CgAnnotation = 
+    { ["Annot_hpsAction"     , JsExpr, Str, Int]
+    | ["Annot_hpsFunc"       , JsExpr, Int]
+    | ["Annot_hpsHandlerMk"  , JsExpr]
+    | ["AnnotUnknown"        , JsExpr ,, (List Any)]
+    | ["AnnotFailed"         , JsExpr ,, (List Any)]
+    | ["Uncurried"           , JsExpr, Int]
+    };
+
+-- TODO (one day), add type and representation
+let CghEnvEntry = { [JsExpr, (Maybe CgAnnotation)] };
+let CghEnv = List { [Str, CghEnvEntry] };
+
+let cghInitEnv : CghEnv = 
+    forMap initEnv <| [name, _] -> [name, [jsVar <| strCat ["_.", name], []]];
+
+
+-- we need a flat list of vars when declaring all the variables 
+-- that will later be assigned to via pattern/destructinging assignment.
+let cghFlatVars : { Expr -> (List Str) } = 
+    rec <| (fv : { Expr -> (List Str) }) -> 
+    (pat: Expr) ->
+    match pat
+    [ ["EVar", var] |=> 
+        [var]
+    , ["ELit", val] |=> 
+        []
+    , ["EPair", h, t] |=> 
+        append (fv h) (fv t)
+    , ["EList", elems, tlMb] |=> 
+        concat <| concat [map fv elems, map fv tlMb]
+    , ["EType", exp, ty] |=> 
+        fv exp
+    , ["EAs", name, exp] |=> 
+        [name ,, fv exp]
+    , ["ETermBrackets", exp] |=> 
+        fv exp
+    , _ |=> 
+        error ["missing case cghFlatVars", pat]
+    ];
+
+
+
+
+let cghLookupVarAnnot : { Str -> CghEnv -> { [JsExpr, (Maybe CgAnnotation)] } } =
+    var -> env ->
+    ifNil (lookup var env)
+    [ ->
+        -- error ["cghLookupVarAnnot", "unknown variable", var, "in", env]
+        -- TODO this currently misfires in a harmless way when handling continuations,
+        -- TODO   presumably the "k" isn't in scope because one of the mixins has better ideas
+        -- debug2 ["cghLookupVarAnnot", "FAILED_LOOKUP", var] <| ->
+        [jsVar (strCat ["FAILED_LOOKUP_", var]), []]
+    , [varAnnot @ [varJs, annotMb]] ->
+        varAnnot
+    ];
+
+let cghLookupVar : { Str -> CghEnv -> JsExpr } =
+    var -> env ->
+    let [varJs, annotMb] = cghLookupVarAnnot var env;
+    varJs;
+
+-- generate the binding part of a pattern, suitable for the LHS of a let, or argument pos of a lambda
+let cghPatBindVarJs : { CghEnv -> Expr -> (Maybe JsExpr) } = 
+    env ->
+    rec <| ( pbv : { Expr -> (Maybe JsExpr) } ) ->
+    pat ->
+    match pat
+    [ ["EVar", "_"] |=> []
+    , ["EVar", var] |=> [ cghLookupVar var env ]
+    , ["ELit", val] |=> []
+    , ["EList", elems, listTail] |=>
+        let tlJs : Maybe JsExpr = 
+            match listTail
+            [ [] |=> []
+            , [t] |=> pbv t
+            ];
+        let [_, result] = 
+            while [reverse elems: List Expr, tlJs: Maybe JsExpr] <|
+            [[x,,xs], listJs] |=> [xs, [ jsList [pbv x, listJs] ] ];
+        result
+    , ["EType", exp, ty] |=> pbv exp
+    , ["EAs", name, exp] |=> [ cghLookupVar name env ]
+    , ["ETermBrackets", exp] |=> pbv exp
+    , _ |=> error ["cghPatBindVarJs", "missing case", pat]
+    ];
+
+-- make sure we have a valid JS var for every pattern in a list,
+-- missing patterns are permitted in destructuring assignments to arrays,
+-- but not in function argument lists
+let cghPatAddUnused : { (List (Maybe JsExpr)) -> (CgA (List JsExpr)) } =
+    patMbsJs ->
+    (k : K @ CgK (List JsExpr)) ->
+    cghForMap patMbsJs (
+        patMbJs ->
+        (k : K @ CgK JsExpr) ->
+        ifNil patMbJs
+        [ ->
+            cghFreshVar <| patJs ->
+            k patJs
+        , [patJs] ->
+            k patJs
+        ]
+    ) <| patsJs ->
+    k patsJs;
+
+
+let cghPatEnvAnnot : { (Maybe CgAnnotation) -> (List Expr) -> (CgA CghEnv) } =
+    annotMb -> pats ->
+    (k : K @ CgK CghEnv) ->
+    cghWhile [pats, [] : CghEnv] (
+        [ [arg1 ,, args2], env] |=>
+        (k : K @ CgK ({ [(List Expr), CghEnv] })) ->
+        let vars = cghFlatVars arg1;
+        cghWhile [vars, env] (
+            [ [var1 ,, vars2], env] |=>
+            (k : K @ CgK ({ [(List Str), CghEnv] })) ->
+            cghFreshVar0 <| freshVarName ->
+            let newVarName = jsVar <| strCat [freshVarName, "_", var1];
+            let newEnv = [ [var1, [newVarName, annotMb]] ,, env];
+            k [vars2, newEnv]
+        ) <| [_, env2] ->
+        k [args2, env2]
+    ) <| [_, env3] ->
+    k env3;
+
+let cghPatEnv : { (List Expr) -> (CgA CghEnv) } =
+    pats ->
+    cghPatEnvAnnot [] pats;
+
+let cghWithNewContext : { (CgA JsExpr) -> (CgA { [JsStmts, JsExpr] }) } =
+    action ->
+    (k : K @ CgK { [JsStmts, JsExpr] }) ->
+    cghPushStmts <| ->
+    action <| exprJs ->
+    cghPopStmts <| stmtsJs ->
+    k [stmtsJs, exprJs];
+
+
+
+let skipCC : { JsStmts -> CghCtx } =
+    rec <| (skipCC : { JsStmts -> CghCtx }) ->
+    stmtsJs1 ->
+    [ ["skipCC", stmtsJs1]
+    , stmtsJs2 -> expJsMb -> 
+        ifNil expJsMb
+        [ ->
+            let resultStmts = concat [stmtsJs1, stmtsJs2];
+            [resultStmts, []]
+        , [expJs] ->
+            error ["skipCC", "unexpected expr", expJs]
+        ]
+    , stmtsJs2 -> 
+        (k : K @ CgK { [CghCtx, CghCtx] }) ->
+        -- k (skipCC (append stmtsJs1 stmtsJs2))
+        cghAddStmts stmtsJs1 <| ->
+        cghAddStmts stmtsJs2 <| ->
+        let parentCtx = skipCC [];
+        let childCtx = skipCC [];
+        k [parentCtx, childCtx]
+    ];
+
+let assignCC : { JsExpr -> JsStmts -> CghCtx } =
+    rec <| (assignCC : { JsExpr -> JsStmts -> CghCtx }) ->
+    pat -> stmtsJs1 ->
+    [ ["assignCC", pat, stmtsJs1]
+    , stmtsJs2 -> expJsMb -> 
+        ifNil expJsMb
+        [ ->
+            -- error ["assignCC", "expected expr"]
+            [append stmtsJs1 stmtsJs2, []]
+        , [expJs] ->
+            let _ = 
+                match [pat, expJs]
+                [ [["JsVar", a], ["JsVar", b]] |=>
+                    -- guardEq [a,b] <| _ |=>
+                        -- let _ = cgDebug ["CG-ASSIGN", a, b];
+                        0
+                , _ |=>
+                    0
+                ];
+
+            let assignStmt = jsAssign pat expJs;
+            let resultStmts : List JsStmt = concat [stmtsJs1, stmtsJs2, [assignStmt]];
+            [resultStmts, []]
+        ]
+    , stmtsJs2 -> 
+        (k : K @ CgK { [CghCtx, CghCtx] }) ->
+        -- k (assignCC pat stmtsJs2)
+        cghAddStmts stmtsJs1 <| ->
+        let parentCtx = skipCC [];
+        let childCtx = assignCC pat stmtsJs2;
+        k [parentCtx, childCtx]
+    ];
+
+-- TODO rather than take a "breakVar", this should take a nested context. 
+-- TODO   that way a loop can directly assign to the result, or directly return from a function
+let breakContinueCC : { [JsExpr, JsExpr] -> JsStmts -> CghCtx } =
+    rec <| (breakContinueCC : { [JsExpr, JsExpr] -> JsStmts -> CghCtx }) ->
+    [breakVar, continueVar] -> stmtsJs1 ->
+    [ ["breakContinueCC", [breakVar, continueVar], stmtsJs1]
+    , stmtsJs2 -> expJsMb -> 
+        ifNil expJsMb
+        [ ->
+            -- TODO do/should we ever get here
+            [append stmtsJs1 stmtsJs2, []]
+        , [expJs] ->
+            let breakContinueStmts = 
+                match expJs
+                [ ["JsList", [ [["JsDatum", "break"]], [val] ]] |=>
+                    [jsAssign breakVar val, jsBreak]
+                , ["JsList", [ [["JsDatum", "continue"]], [val] ]] |=>
+                    [jsAssign continueVar val, jsContinue]
+                , ["JsCall", ["JsVar", "_.break"], [val]] |=>
+                    [jsAssign breakVar val, jsBreak]
+                , ["JsCall", ["JsVar", "_.continue"], [val]] |=>
+                    [jsAssign continueVar val, jsContinue]
+                , ["JsCall", ["JsVar", "_.error"], _] |=>
+                    [jsExpr expJs]
+                , _ |=>
+                    error ["breakContinueCC", "expected break/continue/error, not", expJs]
+                ];
+            let resultStmts : List JsStmt = concat [stmtsJs1, stmtsJs2, breakContinueStmts];
+            [resultStmts, []]
+        ]
+    , stmtsJs2 -> 
+        (k : K @ CgK { [CghCtx, CghCtx] }) ->
+        cghAddStmts stmtsJs1 <| ->
+        let parentCtx = skipCC [];
+        let childCtx = breakContinueCC [breakVar, continueVar] stmtsJs2;
+        k [parentCtx, childCtx]
+    ];
+
+-- let breakContinueCC2 : { [CghCtx, JsExpr] -> JsStmts -> CghCtx } =
+--     rec <| (breakContinueCC2 : { [CghCtx, JsExpr] -> JsStmts -> CghCtx }) ->
+--     [breakCtx, continueVar] -> stmtsJs1 ->
+--     [ ["breakContinueCC", [breakCtx, continueVar], stmtsJs1]
+--     , stmtsJs2 -> expJsMb -> 
+--         ifNil expJsMb
+--         [ ->
+--             -- TODO do/should we ever get here
+--             [append stmtsJs1 stmtsJs2, []]
+--         , [expJs] ->
+--             let [_, breakClose, _] = breakCtx;
+--             let breakContinueStmts = 
+--                 match expJs
+--                 [ ["JsList", [ [["JsDatum", "break"]], [val] ]] |=>
+--                     let [stmts, _] = breakClose stmtsJs2 expJsMb;
+--                     -- TODO break after assign is needed, 
+--                     -- TODO break after return is redundant, 
+--                     -- TODO break after break is erroneous, do we want to support generating labeled breaks? 
+--                     -- probably simplest overall to not delegate calling "break"
+--                     -- if each instance of "break" in the source code leads to only one generated "break", things are simpler
+--                     append stmts [jsBreak]
+--                 , ["JsList", [ [["JsDatum", "continue"]], [val] ]] |=>
+--                     [jsAssign continueVar val, jsContinue]
+--                 , ["JsCall", ["JsVar", "_.break"], [val]] |=>
+--                     let [stmts, _] = breakClose stmtsJs2 expJsMb;
+--                     append stmts [jsBreak]
+--                 , ["JsCall", ["JsVar", "_.continue"], [val]] |=>
+--                     [jsAssign continueVar val, jsContinue]
+--                 , ["JsCall", ["JsVar", "_.error"], _] |=>
+--                     [jsExpr expJs]
+--                 , _ |=>
+--                     error ["breakContinueCC", "expected break/continue/error, not", expJs]
+--                 ];
+--             let resultStmts : List JsStmt = concat [stmtsJs1, stmtsJs2, breakContinueStmts];
+--             [resultStmts, []]
+--         ]
+--     , stmtsJs2 -> 
+--         (k : K @ CgK { [CghCtx, CghCtx] }) ->
+--         cghAddStmts stmtsJs1 <| ->
+--         let parentCtx = skipCC [];
+--         let childCtx = breakContinueCC2 [breakCtx, continueVar] stmtsJs2;
+--         k [parentCtx, childCtx]
+--     ];
+
+let letAssignCC : { JsExpr -> (List { [JsExpr, JsExpr] }) -> (Maybe JsExpr) -> JsStmts -> CghCtx } =
+    rec <| (letAssignCC : { JsExpr -> (List { [JsExpr, JsExpr] }) -> (Maybe JsExpr) -> JsStmts -> CghCtx }) ->
+    rootPat -> asPats -> resultMb -> stmtsJs1 ->
+    -- let _ = cgDebug ["CG-letAssignCC", rootPat, resultMb, asPats];
+    [ ["letAssignCC", rootPat, asPats, resultMb, stmtsJs1]
+    , stmtsJs2 -> expJsMb -> 
+        ifNil expJsMb
+        [ ->
+            let letStmt : JsStmt = 
+                jsLetUndefined3 (jsFlatVars rootPat);
+            let asStmts : List JsStmt = 
+                for asPats <| [asLhs, asRhs] ->
+                jsLet asLhs asRhs; 
+            let resultStmts : List JsStmt = 
+                concat [stmtsJs1, [letStmt], stmtsJs2, asStmts];
+            -- let _ = cgDebug ["CG-letAssignCC-2", asStmts];
+            -- [resultStmts, [rootPat]]
+            -- [resultStmts, []]
+            [resultStmts, resultMb]
+        , [expJs] ->
+            error ["letAssignCC", "attempts to close a letAssignCC with an expression"]
+        ]
+    , stmtsJs2 -> 
+        (k : K @ CgK { [CghCtx, CghCtx] }) ->
+        let parentCtx = skipCC [];
+        let childCtx = assignCC rootPat (append stmtsJs1 stmtsJs2);
+        k [parentCtx, childCtx]
+    ];
+
+let letBindCC : { JsExpr -> (List { [JsExpr, JsExpr] }) -> CghCtx } =
+    rootPat -> asPats ->
+    -- let _ = cgDebug ["CG-letBindCC", rootPat, asPats];
+    [ ["letBindCC", rootPat, asPats]
+    , stmtsJs -> expJsMb -> 
+        ifNil expJsMb
+        [ ->
+            error ["letBindCC", "expected expr"]
+        , [expJs] ->
+            -- let letStmtMb : Maybe JsStmt = 
+            --     match [rootPat, expJs]
+            --     [ [["JsVar", a], ["JsVar", b]] |->
+            --         guardEq [a,b] <| _ |=>
+            --         let _ = cgDebug ["CG-letBind-2", a, b];
+            --         []
+            --     , [a, b] |->
+            --         guardDataEq [a,b] <| _ |=>
+            --         let _ = cgDebug ["CG-letBind-2", a, b];
+            --         []
+            --     , _ |=>
+            --         [jsLet rootPat expJs]
+            --     ];
+            let letStmtMb : Maybe JsStmt = [jsLet rootPat expJs];
+            let asStmts = 
+                forMap asPats <| [asVar, asExpr] ->
+                jsLet asExpr asVar; 
+            let resultStmts = concat [stmtsJs, letStmtMb, asStmts];
+            -- let _ = cgDebug ["CG-letBindCC-stmtsJs",     stmtsJs    ];
+            -- let _ = cgDebug ["CG-letBindCC-letStmtMb",   letStmtMb  ];
+            -- let _ = cgDebug ["CG-letBindCC-asStmts",     asStmts    ];
+            -- let _ = cgDebug ["CG-letBindCC-resultStmts", resultStmts];
+            [resultStmts, []]
+        ]
+    , stmtsJs -> 
+        (k : K @ CgK { [CghCtx, CghCtx] }) ->
+        let parentCtx = letAssignCC rootPat asPats [] stmtsJs;
+        let childCtx = assignCC rootPat [];
+        k [parentCtx, childCtx]
+    ];
+
+let returnCC : { -> CghCtx } =
+    rec <| (returnCC : { -> CghCtx }) ->
+    [] ->
+    [ ["returnCC"]
+    , stmtsJs -> expJsMb -> 
+        ifNil expJsMb
+        [ ->
+            error ["returnCC", "expected expr"]
+            -- TODO skipCC stmtsJs
+        , [expJs] ->
+            let returnStmt = jsReturn expJs;
+            let resultStmts = concat [stmtsJs, [returnStmt]];
+            [resultStmts, []]
+        ]
+    , stmtsJs -> 
+        (k : K @ CgK { [CghCtx, CghCtx] }) ->
+        cghAddStmts stmtsJs <| ->
+        let parentCtx = skipCC [];
+        let childCtx = returnCC[];
+        k [parentCtx, childCtx]
+    ];
+
+let exprCC : { -> CghCtx } =
+    -> 
+    [ ["exprCC"]
+    , stmtsJs -> expJsMb ->
+        ifNil expJsMb
+        [ [] ->
+            error ["exprCC2", "expected expr"]
+        , [expJs] ->
+            [ stmtsJs, [expJs] ]
+        ]
+    , stmtsJs -> 
+        -- when delegating from an expr-ctx we need to generate a fresh var, and move to a let-bind-ctx
+        (k : K @ CgK { [CghCtx, CghCtx] }) ->
+        cghFreshVar <| var ->
+        let parentCtx = letAssignCC var [] [var] stmtsJs;
+        let childCtx = assignCC var [];
+        k [parentCtx, childCtx]
+    ];
+
+let stmtExprCC : { -> CghCtx } =
+    rec <| (stmtExprCC : { -> CghCtx }) ->
+    [] ->
+    [ ["stmtExprCC"]
+    , stmtsJs -> expJsMb -> 
+        ifNil expJsMb
+        [ ->
+            -- error ["stmtExprCC", "expected expr"]
+            -- if the context has been delegated, then there won't be an expression
+            -- TODO should we ever get here? we should be closing the replacement context, not this one?
+            [stmtsJs, []]
+        , [expJs] ->
+            let exprStmt = jsExpr expJs;
+            let resultStmts = concat [stmtsJs, [exprStmt]];
+            [resultStmts, []]
+        ]
+    , stmtsJs -> 
+        (k : K @ CgK { [CghCtx, CghCtx] }) ->
+        cghAddStmts stmtsJs <| ->
+        let parentCtx = skipCC [];
+        let childCtx = stmtExprCC [];
+        k [parentCtx, childCtx]
+    ];
+
+
+-- let cghWithExprCtx1 : { CghCtx -> (CgA JsExpr) -> (CgA JsStmts) } =
+--     ccc @ [info, exit, fork] -> action ->
+--     (k : K @ CgK JsStmts) ->
+--     cghPushStmts <| ->
+--     action <| exprJs ->
+--     cghPopStmts <| stmtsJs ->
+--     -- let _ = cgDebug ["EXIT", exprJs];
+--     let [stmtsJs2, _] = exit stmtsJs [exprJs];
+--     k stmtsJs2;
+
+
+let cghCtxClose : { CghCtx -> JsStmts -> (Maybe JsExpr) -> [JsStmts, (Maybe JsExpr)] } =
+    ctx @ [info, close, delegate] -> stmtsJs -> exprJsMb ->
+    -- ctx -> stmtsJs -> exprJsMb ->
+    -- let [info, close, delegate] = ctx;
+    let _ = cgDebug ["cg/close", info, exprJsMb];
+    close stmtsJs exprJsMb;
+
+let cghCtxDelegate : { CghCtx -> JsStmts -> (CgA { [CghCtx, CghCtx] }) } =
+    ctx @ [info, close, delegate] -> stmtsJs -> 
+    -- ctx -> stmtsJs -> 
+    -- let [info, close, delegate] = ctx;
+    (k : K @ CgK { [CghCtx, CghCtx] }) ->
+    delegate stmtsJs k;
+
+
+
+let cghStmtsExpr : { JsStmts -> JsExpr -> JsExpr } =
+    stmtsJs -> exprJs ->
+    -- cgDebug2 ["STMTS4", isNil stmtsJs, length stmtsJs] <| ->
+    ifNil stmtsJs
+    [ ->
+        exprJs
+    , _ ->
+        jsCall (jsLambdaStmt [] (append stmtsJs [jsReturn exprJs])) []
+    ];
+
+-- let CghExprJs  = { CghCtx -> Expr -> (CgA (Maybe JsExpr)) };
+let CghExprJs  = { CghCtx -> CghEnv -> Expr -> (CgA (Maybe JsExpr)) };
+
+
+-- TODO ? if cgExprJs is called without a context, then do     return an expression
+-- TODO ?   but if       called with    a context, then do not return an expression  
+-- let CghExprJs  = { (Maybe CghCtx) -> Expr -> (CgA (Maybe JsExpr)) };
+-- let CghExprJs  = 
+--     { { [CghCtx] -> Expr -> (CgA { [] }) }
+--     & { []       -> Expr -> (CgA { [JsExpr] })) }
+--     };
+-- 
+
+-- let cghExpr : { CghExprJs -> [      ] -> CghEnv -> Expr -> (CgA { [JsExpr] }) } =
+let cghExpr : { CghExprJs -> [      ] -> CghEnv -> Expr -> (CgA JsExpr) } =
+    cg -> [] -> env -> exprFe -> 
+    (k : K @ CgK JsExpr) ->
+    let ctx = exprCC [];
+    cg ctx env exprFe <| exprJsMb ->
+    ifNil exprJsMb 
+    [ -> 
+        error ["cghExpr", "expected expression"]
+    , [exprJs] ->
+        k exprJs
+    ];
+
+
+let cghCtx  : { CghExprJs -> [CghCtx] -> CghEnv -> Expr -> (CgA JsStmts) } =
+    cg -> [ctx] -> env -> exprFe -> (k : K @ CgK JsStmts) ->
+    cghPushStmts <| ->
+    cg ctx env exprFe <| exprJsMb ->
+    cghPopStmts <| stmtsJs ->
+    ifNil exprJsMb
+    [ -> 
+        k stmtsJs
+    , [other] ->
+        error ["cghCtx", "unexpected expression", other, ctx]
+    ];
+
+
+
+
+-- let CghBody    = { CghExprJs -> CghExprJs };
+
+-- Codegen-mixins need to take in both a recursive self-reference, and a fallback function.
+-- "self" here means the whole "self", the combination of all the mixins and the final fallback function.
+let CghMixin   = { CghExprJs -> CghExprJs -> CghExprJs };
+
+
+
+
+let annotationFuncNames = 
+    [ 
+      "hFunc0", "hFunc1", "hFunc2"
+    , "hpsAction0", "hpsAction1", "hpsAction2"
+    , "annotate_HandlerMk"
+    , "annotate_Handler" -- TODO annotate handlers as well as handler constructors
+    , "heapFunc0", "heapFunc1", "heapFunc2", "heapFunc3", "heapFunc4", "heapFunc5"
+    ];
+
+let cghPatRoot : { Expr -> (CgA JsExpr) } =
+    rec <| (cgpr : { Expr -> (CgA JsExpr) }) ->
+    pat ->
+    (k : K @ CgK JsExpr) ->
+    match pat
+    [ ["EVar", var] |=>
+        cghFreshVar2 var <| varJs ->
+        k varJs
+    , ["EAs", var, _] |=>
+        cghFreshVar2 var <| varJs ->
+        k varJs
+    , ["EType", exp, typ] |=>
+        cgpr exp k
+    , ["ETermBrackets", exp] |=>
+        cgpr exp k
+    , _ |=>
+        cghFreshVar <| varJs ->
+        k varJs
+    ];
+
+
+
+let cgHpsAction : { Str -> Int -> (CgA JsExpr) } =
+    methodName -> arity ->
+    (k : K @ CgK JsExpr) ->
+    cghFreshVar2 methodName <| varJs ->
+    let varNums = intFromToLt 0 arity;
+    let argsJs = forMap varNums <| vn -> jsVar (strCat ["arg", show vn]);
+    let argsJs2 = [jsVar "handler" ,, argsJs];
+    let callJs = jsCall (jsMethod (jsVar "handler") methodName) argsJs;
+    let funcJs = jsLambdaExpr argsJs2 callJs;
+    cghAddStmts [jsLet varJs funcJs] <| ->
+    k varJs;
+
+let cgAnnot_hpsAction : { Str -> Int -> Expr -> Expr -> (CgA CgAnnotation) } =
+    annotName -> arity -> pat -> expr ->
+    (k : K @ CgK CgAnnotation) ->
+    cghPatRoot pat <| varJs ->
+    match expr
+    [ ["ELambda", ["ETermBrackets", ["EType",["EVar","k"], _] ], lamBodyK] |->
+      pipeFwd lamBodyK <| ["ELambda", ["ETermBrackets", ["EType", ["EVar", "handler"], _] ], lamBodyH] |->
+      pipeFwd lamBodyH <| ["EApply", ["EApply", ["EApply", func, arg1], arg2], arg3] |->
+      pipeFwd func <| ["EVar", "handler"] |->
+      pipeFwd arg1 <| ["ELit", methodName] |->
+      pipeFwd arg3 <| ["EVar","k"] |->
+      guardStr methodName <| methodName2 =>
+      cgHpsAction methodName2 0 <| funcJs ->
+      let annot = ["Annot_hpsAction", funcJs, methodName2, arity] : CgAnnotation;
+      k annot
+    , ["ELambda", _, lamBody1] |->
+      pipeFwd lamBody1 <| ["ELambda", ["ETermBrackets", ["EType",["EVar","k"], _] ], lamBodyK] |->
+      pipeFwd lamBodyK <| ["ELambda", ["ETermBrackets", ["EType", ["EVar", "handler"], _] ], lamBodyH] |->
+      pipeFwd lamBodyH <| ["EApply", ["EApply", ["EApply", func, arg1], arg2], arg3] |->
+      pipeFwd func <| ["EVar", "handler"] |->
+      pipeFwd arg1 <| ["ELit", methodName] |->
+      pipeFwd arg3 <| ["EVar","k"] |->
+      guardStr methodName <| methodName2 =>
+      cgHpsAction methodName2 1 <| funcJs ->
+      let annot = ["Annot_hpsAction", funcJs, methodName2, arity] : CgAnnotation;
+      k annot
+    , ["ELambda", _, lamBody1] |->
+      pipeFwd lamBody1 <| ["ELambda", _, lamBody2] |->
+      pipeFwd lamBody2 <| ["ELambda", ["ETermBrackets", ["EType",["EVar","k"], _] ], lamBodyK] |->
+      pipeFwd lamBodyK <| ["ELambda", ["ETermBrackets", ["EType", ["EVar", "handler"], _] ], lamBodyH] |->
+      pipeFwd lamBodyH <| ["EApply", ["EApply", ["EApply", func, arg1], arg2], arg3] |->
+      pipeFwd func <| ["EVar", "handler"] |->
+      pipeFwd arg1 <| ["ELit", methodName] |->
+      pipeFwd arg3 <| ["EVar","k"] |->
+      guardStr methodName <| methodName2 =>
+      cgHpsAction methodName2 2 <| funcJs ->
+      let annot = ["Annot_hpsAction", funcJs, methodName2, arity] : CgAnnotation;
+      k annot
+    , _ |=>
+        k ["AnnotFailed", jsDatum annotName, expr]
+    ];
+    
+
+
+
+let cgPatVarName : { Expr -> (Maybe Str) } =
+    rec <| (pvni : { Expr -> (Maybe Str) }) ->
+    expr ->
+    match expr
+    [ ["EVar", var] |=>
+        [var]
+    , ["EAs", var, _] |=>
+        [var]
+    , ["EType", expr2, _] |=>
+        pvni expr2
+    , ["ETermBrackets", expr2] |=>
+        pvni expr2
+    , _ |=>
+        []
+    ];
+
+-- let cgPatVarNameIs : { Str -> Expr -> Bool } =
+--     name ->
+--     rec <| (pvni : { Expr -> Bool }) ->
+--     expr ->
+--     match expr
+--     [ ["EVar", var] |=>
+--         var == name
+--     , ["EAs", var, _] |=>
+--         var == name
+--     , ["EType", expr2, _] |=>
+--         pvni expr2
+--     , ["ETermBrackets", expr2] |=>
+--         pvni expr2
+--     , _ |=>
+--         false
+--     ];
+
+
+let cghLet : { CghEnv -> Expr -> JsExpr -> (CgA (List JsStmt)) } =
+    env -> pat -> expJs ->
+    (k : K @ CgK (List JsStmt)) ->
+    let patJsMb = cghPatBindVarJs env pat;
+    match [patJsMb, expJs]
+    [ [[], ["JsVar", _]] |=>
+        k []
+    , [[], _] |=>
+        k [ jsExpr expJs ]
+    , [[patJs], _] |=>
+        let letStmt = 
+            jsLet patJs expJs;
+        let asStmts = 
+            for (patBindAs pat) <| [asName, asExpr] ->
+            let patJs = cghPatBindVarJs env asExpr;
+            let defnJs = cghLookupVar asName env;
+            jsLet2 patJs defnJs;
+        k [ letStmt ,, asStmts ]
+    ];
+
+
+let cghVarFor : { JsExpr -> (CgA JsExpr) } =
+    exprJs ->
+    (k : K @ CgK JsExpr) ->
+    match exprJs
+    [ ["JsVar", _] |=>
+        k exprJs
+    , _ |=>
+        cghFreshVar <| condVar ->
+        let condStmt = jsLet condVar exprJs;
+        cghAddStmts [condStmt] <| ->
+        k condVar
+    ];
+
+
+let ExprLambdaMaybe = { ["ELambdaMaybe", Expr, Expr] };
+
+let guardLambdaMaybe : Guard2 Expr ExprLambdaMaybe =
+    expr -> (f : F @ { ExprLambdaMaybe -> Any }) ->
+    match expr
+    [ expr2 @ ["ELambdaMaybe", _, _] |=>
+        f expr2
+    , _ |=> 
+        []
+    ];
+
+let CgContinuation = { [ Str, { JsExpr -> JsStmts } ] };
+let CgContinuations = List CgContinuation;
+
+let cgHps : { CghExprJs -> CghEnv -> CgContinuations -> Expr -> (CgA JsStmts) } =
+    cg -> 
+    rec <| (cgHps : { CghEnv -> CgContinuations -> Expr -> (CgA JsStmts) }) ->
+    env -> conts -> expr ->
+    (k : K @ CgK JsStmts) ->
+    let cgExpr = cghExpr cg [];
+    match expr
+    [ ["ELets", decls, body] |=>
+        -- TODO call into the standard "ELet" handling code, so as to spot annotations.
+        -- TODO currently, the "rbAddrToExpr" function isn't being coverted because it
+        -- TODO   occurs directly within another function ("readbackAddr0") which is being converted
+        -- TODO nesting "hpsFunc" annotated functions results in an exponential number of versions of them,
+        -- TODO   for example, "rbAddrToExprOrName" is triple nested, so there could be 8 variants generated.
+        -- TODO we might be better avoiding annotated functions within annotated functions.
+        cghPushStmts <| ->
+        cghWhile [decls, env] (
+            [ [decl1 ,, decls2], env] |=>
+            (k : K @ CgK { [Decls, CghEnv] }) ->
+            let [pat, defn] = decl1;
+            cgExpr env defn <| defnJs ->
+            cghPatEnv [pat] <| patEnv ->
+            let env2 = append patEnv env;
+            cghLet patEnv pat defnJs <| letStmts ->
+            cghAddStmts letStmts <| ->
+            k [decls2, env2]
+        ) <| [_, env2] ->
+        cghPopStmts <| defnStmts ->
+        cgHps env2 conts body <| bodyStmts ->
+        k (append defnStmts bodyStmts)
+
+    -- , ["EApply", ["EApply", ["EApply", ["EVar", "hLoop2"], initVal], ["ETermBrackets", ["ELambda", loopPat, loopBody]]], ["ELambda", nextPat, nextBody]] |->
+    , ["EApply", ["EApply", ["EApply", func, arg1], arg2], arg3] |->
+        pipeFwd func <| ["EVar", "hLoop2"] |->
+        pipeFwd arg1 <| initVal |->
+        pipeFwd arg2 <| ["ETermBrackets", ["ELambda", loopPat, loopBody]] |->
+        pipeFwd arg3 <| ["ELambda", nextPat, nextBody] |->
+        pipeFwd loopBody <| 
+            ["ELambda", kb, ["ELambda", kc, loopBody2]] |=>
+        cghExpr cg [] env initVal <| initValJs ->
+        cghPatEnv [loopPat] <| loopEnv ->
+        cghFreshVar <| breakVar ->
+        cghFreshVar <| continueVar ->
+        let env2 = append loopEnv env;
+        let loopPatJs = cghPatBindVarJs env2 loopPat;
+        let loopPatJs2 = ifNil loopPatJs [ -> error ["missing pat"], [pat] -> pat];
+        let contBreak    = ifNil (cgPatVarName kb) [ -> error ["expected a continuation"], [name] -> name];
+        let contContinue = ifNil (cgPatVarName kc) [ -> error ["expected a continuation"], [name] -> name];
+        let conts2 : CgContinuations = 
+            [ [contBreak, valJs -> [jsAssign breakVar valJs, jsBreak]]
+            , [contContinue, valJs -> [jsAssign continueVar valJs, jsContinue]]
+            ,, conts
+            ];
+        cgHps env2 conts2 loopBody2 <| loopBodyJs ->
+        cghLet env2 loopPat continueVar <| loopPatAssign ->
+        let loopBodyJs2 = 
+            concat [loopPatAssign, loopBodyJs];
+
+        cghPatEnv [nextPat] <| nextEnv ->
+        cghLet nextEnv nextPat breakVar <| nextLetJs ->
+        let env3 = append nextEnv env2;
+        cgHps env3 conts nextBody <| nextBodyJs ->
+        
+        let stmts = 
+            concat <|
+            [ [ jsLetUndefined breakVar
+              , jsLet continueVar initValJs
+              , jsWhile (jsVar "true") loopBodyJs2
+              ]
+            , nextLetJs
+            , nextBodyJs
+            ];
+        k stmts
+
+    , ["EApply", action, ["ELambda", actionResult, next]] |=>
+        -- collect together all the arguments, call the function uncurried, pass the handler as an argument too
+        let [func, args] = 
+            while [action, []: List Expr] <|
+            [ ["EApply", fn, arg], args] |=>
+            [ fn, [arg ,, args] ];
+        cgExpr env func <| funcJs ->
+        -- check if funcJs is statically annotated with a hpsFunc/hpsAction, 
+        --   if so use the annotated form
+        --   if not insert a call to hpsObjCall to check the dynamic annotation, and add convert at run-time if needed
+        match func
+        [ ["EVar", var] |=>
+            (k : K @ CgK JsExpr) ->
+            let [varJs, annotMb] = cghLookupVarAnnot var env;
+            match annotMb
+            [ [["Annot_hpsAction", varObjJs,,_]] |=>
+                k varObjJs
+            , [["Annot_hpsFunc", varObjJs,,_]] |=>
+                k varObjJs
+            , _ |=>
+                cgExpr env func <| funcJs ->
+                let callObjJs = jsCall (jsVar "_.primHpsObjCall") [funcJs];
+                k callObjJs
+            ]
+        , _ |=>
+            (k : K @ CgK JsExpr) ->
+            cgExpr env func <| funcJs ->
+            let callObjJs = jsCall (jsVar "_.primHpsObjCall") [funcJs];
+            k callObjJs
+        ] <| funcImpJs ->
+        cghWhile [args, []: List JsExpr] (
+            [ [arg ,, args], argsJs ] |=>
+            (k : K @ CgK { [(List Expr), (List JsExpr)]}) ->
+            cgExpr env arg <| argJs ->
+            k [args, [argJs ,, argsJs]]
+        ) <| [_, argsJs] ->
+        let handlerVar = jsVar "handler";
+        let argsJs2 = [handlerVar ,, reverse argsJs];
+        let actionJs = jsCall funcImpJs argsJs2;
+        cghPatEnv [actionResult] <| resultEnv ->
+        cghLet resultEnv actionResult actionJs <| letStmts ->
+        let env2 = append resultEnv env;
+        cgHps env2 conts next <| nextStmts ->
+        k (append letStmts nextStmts)
+
+    -- match "match" without a following continuation
+    , ["EApply", ["EApply", ["EVar", "match"], arg], ["EList", branches, []]] |->
+        guardList2 guardLambdaMaybe branches <| branches2 =>
+
+        cghPushStmts <| ->
+        cghExpr cg [] env arg <| argJs ->
+        cghVarFor argJs <| matchVar ->
+        cghPopStmts <| argStmtsJs ->
+
+        let defaultStmt = jsExpr (jsCall (jsVar "_.error") [jsList [[jsDatum "missing case"], [matchVar]]]);
+
+        cghWhile [reverse branches2, defaultStmt] (
+            [ [branchFirst ,, branchesRest], elseStmt] |=>
+            (k2 : K @ CgK { [(List ExprLambdaMaybe), JsStmt] }) ->
+            let [_, pat, expr] = branchFirst;
+            let branchTest = jsCall (jsVar "rt.matchPat") [matchVar, patBindValJs2 pat];
+            cghPatEnv [pat] <| env2 ->
+            let env3 = append env2 env;
+            cghLet env2 pat matchVar <| branchAssign ->
+            cgHps env3 conts expr <| branchBody ->
+            let branchStmts = append branchAssign branchBody;
+            let branchStmt = jsIfElse branchTest branchStmts [elseStmt];
+            k2 [branchesRest, branchStmt]
+        ) <| [_, matchStmt] ->
+
+        k (append argStmtsJs [matchStmt])
+
+    , ["EApply", ["EVar", kName], val] |->
+        guardLookup kName conts <| kFunc =>
+        cghExpr cg [] env val <| valJs ->
+        let stmts = (kFunc valJs);
+        k stmts
+
+    , ["EApply",["EVar","error"], val] |=>
+        cghExpr cg [] env val <| valJs ->
+        let stmt = jsExpr <| jsCall (jsVar "_.error") [valJs];
+        k [stmt]
+
+    -- TODO match "match" followed by a continuation
+    -- , ["EApply", ["EApply", ["EApply", ["EVar", "match"], cond, ["EList", branches, []]]], kExpr] |=>
+
+    , other @ [tag ,, _] |=>
+        let comment = jsCommentStmt (strCat ["cgHps TODO ", show expr]);
+        k [comment]
+    ];
+
+
+let cgAnnot_hpsFunc : { CghExprJs -> Int -> CghEnv -> JsExpr -> Expr -> Expr -> (CgA CgAnnotation) } =
+    cg -> arity -> env -> selfVarJs -> pat -> expr ->
+    (k : K @ CgK CgAnnotation) ->
+
+    cghPatRoot pat <| varJs ->
+
+    let annot : CgAnnotation = 
+        ["Annot_hpsFunc", varJs, arity];
+
+    let [expr2, recVarNameMb] = 
+        match expr
+        [ ["EApply", ["EVar", "rec"], ["ELambda", recPat, expr2]] |-> 
+            guardPatVar recPat <| ["EVar", recVarName] =>
+            [expr2, [recVarName]]
+        , _ |=> 
+            [expr, []]
+        ];
+
+    let selfNameEnv : CghEnv = forMap recVarNameMb <| name -> [name, [selfVarJs, [annot]]];
+
+    let env2 = append selfNameEnv env;
+
+
+
+    let [lambdaPatsRev, body] =
+        while [[] : List Expr, expr2] <|
+        [lamPats, ["ELambda", pat, body]] |=>
+        [[pat ,, lamPats], body];
+
+    let [contName, argPats] =
+        ifNil lambdaPatsRev
+        [ -> 
+            error ["hpsFunc", "expected lambdas", expr]
+        , [kPat ,, argPats] ->
+            let contNameMb = cgPatVarName kPat;
+            ifNil contNameMb
+            [ ->
+                error ["hpsFunc", "expected last argument to be a continuation"]
+            , [contName] ->
+                [contName, reverse argPats]
+            ]
+        ];
+
+    let kReturn : { JsExpr -> JsStmts } = valJs -> [jsReturn valJs];
+    let conts : CgContinuations = [ [contName, kReturn] ];
+
+    cghPatEnv argPats <| lambdaPatEnv ->
+    let env3 = append lambdaPatEnv env2;
+    let argsJs = forMap lambdaPatEnv <| [_, [patJs,_]] -> patJs;
+    let handlerVar = jsVar "handler";
+    let argsJs2 = [handlerVar ,, reverse argsJs];
+
+    let commentStmt = jsCommentStmt <| strCat ["hpsFunc ", showAny argPats];
+
+    let env4 = env3;
+
+    cghPushStmts <| ->
+    cgHps cg env4 conts body <| bodyStmts2 ->
+    cghPopStmts <| bodyStmts1 ->
+    let bodyStmts = append bodyStmts1 bodyStmts2;
+    let stmts = concat [[commentStmt], bodyStmts];
+
+    let funcJs = jsLambdaStmt argsJs2 stmts;
+
+    cghAddStmts [jsLet varJs funcJs] <| ->
+
+    k annot;
+
+
+
+let ifLikeFuncNames : List Str =
+    ["if", "ifNil", "ifBool", "ifInt", "ifStr"];
+
+let cghIsConvertible : { { Expr -> Bool } -> Expr -> Bool } =
+    (fallback : { Expr -> Bool }) ->
+    rec <| (ic : { Expr -> Bool }) ->
+    expr ->
+    match expr
+    [ ["EApply", ["EApply", ["EVar", funcName], arg], ["EList", [["ELambda", thenVar, kT], ["ELambda", elseVar, kF]], []]] |->
+        guardTrue (isElem funcName ifLikeFuncNames) <| _ =>
+        (ic kT && ic kF)
+    , ["ELets", decls, body] |=>
+        ic body
+    -- -- TODO handle match and loop forms too
+    -- , ["EApply", ["EApply", ["EVar", "match"], arg], ["EList", branches, []]] |->
+    --     guardList2 guardLambdaMaybe branches <| branches2 =>
+    --     let branchDefns = forMap branches2 <| [_, pat, defn] -> defn;
+    --     listAllTrue branchDefns ilf
+    , _ |=> 
+        fallback expr
+    ];
+
+
+
+let cghIsSimpleCpsExpr : { Expr -> Bool } =
+    expr ->
+    match expr
+    -- TODO don't hard-code the variable name "k"
+    -- TODO make sure the stateVal calls the expected Mk function
+    [ ["EApply", ["EApply", ["EVar", "k"], resultVal], stateVal] |=>
+        true
+    , ["EApply", ["EVar", "error"], val] |=>
+        true
+    , _ |=> 
+        cgDebug2 ["cghIsSimpleCpsExpr", "failed", expr] <| ->
+        false
+    ];
+
+let cghIsConvertibleCpsExpr : { Expr -> Bool } =
+    cghIsConvertible cghIsSimpleCpsExpr;
+
+
+let cghControlFlow : { CghExprJs -> { CghEnv -> Expr -> (CgA JsStmts) } -> CghEnv -> Expr -> (CgA JsStmts) } =
+    cg -> 
+    cgFallback -> 
+    rec <| (cgFlow : { CghEnv -> Expr -> (CgA JsStmts) }) -> 
+    env ->
+    expr -> 
+    (k : K @ CgK JsStmts) ->
+    let cgExpr = cghExpr cg [];
+    match expr
+    [ ["EApply", ["EApply", ["EVar", funcName], arg], ["EList", [["ELambda", thenVar, kT], ["ELambda", elseVar, kF]], []]] |->
+        guardTrue (isElem funcName ifLikeFuncNames) <| _ =>
+        cghPushStmts <| ->
+        cgExpr env arg <| argJs ->
+        cghVarFor argJs <| condVar ->
+        cghPatEnv [thenVar] <| thenEnv0 ->
+        cghPatEnv [elseVar] <| elseEnv0 ->
+        let thenEnv = append thenEnv0 env;
+        let elseEnv = append elseEnv0 env;
+        cghLet thenEnv thenVar condVar <| thenAssign ->
+        cghLet elseEnv elseVar condVar <| elseAssign ->
+        cgFlow thenEnv kT <| thenStmts ->
+        cgFlow elseEnv kF <| elseStmts ->
+        cghPopStmts <| poppedStmts ->
+        let cond = 
+            match funcName
+            [ "if"     |=> condVar
+            , "ifNil"  |=> jsOp "==" [condVar, jsDatum []]
+            , "ifBool" |=> jsOp "==" [jsCall (jsVar "typeof") [condVar], jsDatum "boolean"]
+            , "ifInt"  |=> jsOp "==" [jsCall (jsVar "typeof") [condVar], jsDatum "number"] 
+            , "ifStr"  |=> jsOp "==" [jsCall (jsVar "typeof") [condVar], jsDatum "string"] 
+            ];
+        let ifStmt = 
+            jsIfElse cond 
+              (concat [thenAssign, thenStmts])
+              (concat [elseAssign, elseStmts]);
+        let stmts = append poppedStmts [ifStmt];
+        k stmts
+
+    , ["ELets", decls, body] |=>
+        let stmts0 = [] : JsStmts;
+        cghWhile [decls, env, stmts0] (
+            [[decl1 ,, decls2], env2, stmts1] |=>
+            (k : K @ CgK { [Decls, CghEnv, JsStmts] }) ->
+            let [pat, defn] = decl1;
+            cgExpr env2 defn <| defnJs ->
+            cghPatEnv [pat] <| patEnv ->
+            cghLet patEnv pat defnJs <| letStmts ->
+            let env3 = append patEnv env2;
+            let stmts2 = append letStmts stmts1;
+            k [decls2, env3, stmts2]
+        ) <| [_, env4, stmts3] ->
+        cgFlow env4 body <| bodyStmts ->
+        let stmts4 = append (reverse stmts3) bodyStmts;
+        k stmts4
+
+    -- -- TODO handle match and loop control-flow forms
+    -- , ["EApply", ["EApply", ["EVar", "match"], arg], ["EList", branches, []]] |->
+    
+    , _ |=>
+        cgFallback env expr <| fallbackStmts ->
+        k fallbackStmts
+    ];    
+
+let cghConvertCps : { Str -> JsExpr -> CghExprJs -> CghEnv -> Expr -> (CgA JsStmts) } =
+    mkName -> stateVarJs ->
+    cg -> env -> 
+    expr ->
+    (k : K @ CgK JsStmts) ->
+    let cgExpr = cghExpr cg [];
+    match expr
+    -- TODO don't hard-code the "k" variable
+    [ ["EApply", ["EApply", ["EVar", "k"], result], ["ETermBrackets", ["EApply", mkFunc, state]]] |=>
+        -- TODO check the expected mkFunc is called ? (should probably have already have checked this)
+        cgExpr env result <| resultJs ->
+        cgExpr env state <| stateJs ->
+        let stmts : JsStmts =
+            -- [ jsAssign (jsVar "handlerState") stateJs
+            [ jsAssign stateVarJs stateJs
+            , jsReturn resultJs
+            ];
+        k stmts
+    , ["EApply", ["EVar", "error"], errorMsg] |=>
+        cgExpr env errorMsg <| errorMsgJs ->
+        let stmts : JsStmts =
+            [ jsExpr (jsCall (jsVar "_.error") [errorMsgJs]) ];
+        k stmts
+    , _ |=> 
+        error ["cghConvertCps", "unable to convert", expr]
+    ];
+
+
+let cghMethod : { CghExprJs -> CghEnv -> Str -> JsExpr -> Expr -> (CgA JsExpr) } =
+    cg -> env ->
+    mkName -> stateVarJs ->
+    expr -> 
+    (k : K @ CgK JsExpr) ->
+    -- cgDebug2 ["cghMethod", expr] <| ->
+    match expr
+    [ ["ELambda", argList, ["ELambda", k2, body]] |=>
+
+        let args = 
+            match argList
+            [ ["EList", args, []] |=> args
+            , ["ELit", []] |=> []
+            , _ |=> error ["cghMethod2", "expected an argument list, not ", show argList]
+            ];
+
+        cgDebug2 ["cghMethod/match", args, k2] <| ->
+        cghPatEnv args <| env2 ->
+        let env3 = append env2 env;
+        -- TODO traverse the "if"s handle the "k"s and errors
+        cghWithNewContext (cghExpr cg [] env3 body) <| [stmtsJs, bodyJs] ->
+
+        if (cghIsConvertible cghIsConvertibleCpsExpr body)
+        [ ->
+            -- cghControlFlow cghExp0 (cghConvertCps mkName stateVarJs cghExp0) env3 body
+            (k : K @ CgK JsStmts) -> 
+            -- cghPushStmts <| ->
+            cghControlFlow cg (cghConvertCps mkName stateVarJs cg) env3 body <| stmtsJs ->
+            -- cghPopStmts <| stmtsJs2 ->
+            -- k <| append stmtsJs2 stmtsJs
+            k <| stmtsJs
+        , ->
+            (k : K @ CgK JsStmts) -> 
+            k [jsCommentStmt "not-convertible"]
+        ]  <| stmtsJsCps ->
+
+        let patJs = forFlatMap args (cghPatBindVarJs env2);
+
+        let argsPats : List {[Str, Expr]} = concat <| map patBindAs args;
+        let patStmts = 
+            forMap argsPats <| 
+            [name, expr2] -> 
+            let patJs = cghPatBindVarJs env3 expr2;
+            let defnJs = cghLookupVar name env3;
+            jsLet2 patJs defnJs;
+        let stmtsJs2 = append patStmts stmtsJs;
+        let stmtsJsCps2 = append patStmts stmtsJsCps;
+
+        let lambdaJsCps = jsLambdaStmt patJs stmtsJsCps2;
+
+        k lambdaJsCps
+    , _ |=>
+        cgDebug2 ["cghMethod/other", expr] <| ->
+        k <| jsCommentExpr (show ["cghMethod", "unexpected method form", expr]) (jsDatum [])
+    ];
+
+let cghHandlerObject : { CghExprJs -> CghEnv -> Str -> JsExpr -> (List Expr) -> (CgA JsExpr) } =
+    (cg : CghExprJs) -> (env : CghEnv) ->
+    mkName -> stateVarJs -> methods -> 
+    (k : K @ CgK JsExpr) ->
+    let methodNameFuncs = 
+        forFlatMap methods <| m ->
+        match m
+        [ ["EList", [["ELit", name], func], []] |->
+            guardStr name <| name2 =>
+            [[name2,func]]
+        , _ |=> []
+        ];
+
+    cghForMap methodNameFuncs (
+        [mName, mFunc] -> 
+        (k : K @ CgK { [Str, JsExpr] }) ->
+        -- TODO spot uses of the mkName and kName and generate appropriate code
+        -- TODO assign new value to the stateName
+        cghMethod cg env mkName stateVarJs mFunc <| mFuncJs ->
+        k [mName, mFuncJs]
+    ) <| methodNameFuncsJs ->
+
+    let objJs = jsObject methodNameFuncsJs;
+
+    let result = jsCommentExpr (show (map hd methodNameFuncs)) objJs;
+    -- let result = jsDatum (show (map hd methodNameFuncs));
+    k result;
+    
+
+
+let cghHandlerMk : { CghExprJs -> CghEnv -> JsExpr -> Expr -> (CgA JsExpr) } = 
+    (cg : CghExprJs) ->
+    (env : CghEnv) ->
+    (selfVarJs : JsExpr) ->
+    (expr0 : Expr) -> 
+    (k : K @ CgK JsExpr) ->
+
+    match expr0 
+    -- this is the pattern we wish to match, 
+    -- unfortunately type-checking large lambda-maybe patterns with large sum-product types is very slow ( 95 minutes )
+    -- ( most likely calculating the domain of the mismatch part of the resulting intersected function type gets very large.
+    --   there's no support for type-sharing in ferrum-in-typescript, things should be better in ferrum-in-ferrum )
+    -- fortunately, breaking the pattern up into chunks makes type-checking work at a usable speed again, as seen below.
+    -- [   ["EApply"
+    --     ,   ["EVar", "annotate_HandlerMk"]
+    --     ,   ["EApply"
+    --         ,   ["EVar", "rec"]
+    --         ,   ["ELambda"
+    --             ,   ["EType", ["EVar", mkName], _]
+    --             ,   ["ELambda"
+    --                 ,   ["EVar", stateName]
+    --                 ,   ["EApply"
+    --                     ,   ["EApply"
+    --                         ,   _ -- ["EVar", "hpsDispatch"]
+    --                         ,   _
+    --                         ]
+    --                     , _ --     , ["EList", methods, []]
+    --                     ]
+    --                 ]
+    --             ]
+    --         ]
+    --     ] |=>
+    [   ["EApply"
+        ,   ["EVar", "annotate_HandlerMk"]
+        ,   ["EApply"
+            ,   ["EVar", "rec"]
+            , recFunc
+            ]
+        ] |->
+        cgDebug2 ["cgMixinHandlerMk", "rec matched", recFunc] <| ->
+        pipeFwd recFunc <|
+                ["ELambda"
+                ,   ["ETermBrackets", ["EType", ["EVar", mkName], _]]
+                ,   ["ELambda"
+                    ,   ["EVar", stateName]
+                    ,   dispatchApply
+                    ]
+                ] |->
+        cgDebug2 ["cgMixinHandlerMk", "apply matched"] <| ->
+        pipeFwd dispatchApply <|
+                        ["EApply"
+                        ,   ["EApply"
+                            ,   ["EVar", "hpsDispatch"]
+                            ,   _  -- HPS type/interface name
+                            ]
+                        , ["EList", methods, []]
+                        ] |=>
+        cgDebug2 ["cgMixinHandlerMk", "dispatch matched"] <| ->
+
+        let comment = strCat ["annotate_HandlerMk ", mkName, " ", stateName];
+
+        cgDebug2 ["cgMixinHandlerMk", "comment", comment] <| ->
+
+        cghFreshVar2 mkName <| mkNameVarJs ->
+        cghFreshVar2 stateName <| stateVarJs ->
+
+        -- let env2 = [ [stateName, [stateVarJs, []]] ,, env];
+        let env2 = 
+            [ [stateName, [stateVarJs, []]] 
+            -- , [mkName, [mkNameVarJs, []]]
+            , [mkName, [selfVarJs, []]] -- TODO add static annotation
+            ,, env
+            ];
+
+        cghHandlerObject cg env2 mkName stateVarJs methods <| handlerObjectJs ->
+
+        let mkFuncJs = 
+            jsLambdaStmt [stateVarJs] 
+            [ jsCommentStmt comment
+            , jsReturn handlerObjectJs
+            ];
+
+        cghAddStmts [jsLet mkNameVarJs mkFuncJs] <| ->
+        k mkNameVarJs
+
+        -- cgFallback ctx env expr0 <| expJsMb ->
+        -- cgDebug2 ["cgMixinHandlerMk", "expr", expJsMb] <| ->
+        -- k expJsMb
+
+    , other |=>
+        -- TODO report error
+        -- TODO   the code style did not meet the expectations of the "annotate_HandlerMk" annotation
+        cghExpr cg [] env other k 
+    ];
+
+
+let cgAnnot_hpsHandlerMk : { CghExprJs -> CghEnv -> JsExpr -> Expr -> Expr -> (CgA CgAnnotation) } =
+    cg -> env -> selfVarJs -> pat -> expr ->
+    (k : K @ CgK CgAnnotation) ->
+    cghPatRoot pat <| varJs ->
+    let expr2 = ["EApply", ["EVar", "annotate_HandlerMk"], expr];
+    cghHandlerMk cg env selfVarJs expr2 <| valJs ->
+    cghVarFor valJs <| varJs ->
+    k ["Annot_hpsHandlerMk", varJs];
+
+
+
+
+let cghAnnotation : { CghExprJs -> CghEnv -> Str -> JsExpr -> Expr -> Expr -> (CgA CgAnnotation) } =
+    cg -> env -> annotName -> selfVarJs -> pat -> expr ->
+    (k : K @ CgK CgAnnotation) ->
+    match annotName
+    [ "hpsAction0" |=> cgAnnot_hpsAction  annotName 0 pat expr k
+    , "hpsAction1" |=> cgAnnot_hpsAction  annotName 1 pat expr k
+    , "hpsAction2" |=> cgAnnot_hpsAction  annotName 2 pat expr k
+    , "hFunc0"     |=> cgAnnot_hpsFunc cg 0 env selfVarJs pat expr k
+    , "hFunc1"     |=> cgAnnot_hpsFunc cg 1 env selfVarJs pat expr k
+    , "hFunc2"     |=> cgAnnot_hpsFunc cg 2 env selfVarJs pat expr k
+    , "heapFunc0"     |=> cgAnnot_hpsFunc cg 0 env selfVarJs pat expr k
+    , "heapFunc1"     |=> cgAnnot_hpsFunc cg 1 env selfVarJs pat expr k
+    , "heapFunc2"     |=> cgAnnot_hpsFunc cg 2 env selfVarJs pat expr k
+    , "heapFunc3"     |=> cgAnnot_hpsFunc cg 3 env selfVarJs pat expr k
+    , "heapFunc4"     |=> cgAnnot_hpsFunc cg 4 env selfVarJs pat expr k
+    , "heapFunc5"     |=> cgAnnot_hpsFunc cg 5 env selfVarJs pat expr k
+    , "annotate_HandlerMk" |=> cgAnnot_hpsHandlerMk cg env selfVarJs pat expr k
+    , _ |=>
+        -- (k : K @ CgK CgAnnotation) ->
+        k ["AnnotUnknown", jsDatum annotName, expr]
+    ];
+    -- cghPatRoot pat <| varJs ->
+    -- let annotMsg = strCat ["Annot ", annotName, " ", showAny pat, " ", showAny varJs];
+    -- -- let annotMsg = strCat [annotName, " ", showAny varJs, " ", showAny env2];
+    -- cghAddStmts [jsLet varJs (jsDatum annotMsg)] <| ->
+    -- let annot : CgAnnotation = ["AnnotVarJs", annotMsg];
+    -- k annot;
+
+
+let cghUncurried : { CghExprJs -> CghEnv -> JsExpr -> Expr -> Expr -> (CgA (Maybe CgAnnotation)) } = 
+    cg -> env -> selfVar -> pat -> expr -> (k : K @ CgK (Maybe CgAnnotation)) ->
+
+    let [recNameMb, expr2] = 
+        match expr
+        [ ["EApply", ["EVar", "rec"], ["ELambda", recPat, body2]] |-> 
+            guardPatVar recPat <| ["EVar", recName] =>
+            -- debug2 ["cghUncurried/rec", selfVar, recName] <| ->
+            [[recName], body2]
+        , _ |=> 
+            [[], expr]
+        ];
+
+    let [body, lambdaPatsRev] = 
+        while [expr2, [] : List Expr] <|
+        [ ["ELambda", pat, body], pats] |=>
+        [body, [pat ,, pats]];
+
+    let lambdaPats = reverse lambdaPatsRev;
+
+    let arity = length lambdaPats;
+
+    if (arity < 2)
+    [ ->
+        k []
+    , -> 
+
+        cghPatRoot pat <| selfUcVar ->
+        let annot : CgAnnotation = 
+            ["Uncurried", selfUcVar, arity];
+
+        let selfRefEnv : CghEnv = forMap recNameMb <| recName -> [recName, [selfVar, [annot]]];
+        let env2 = append selfRefEnv env;
+
+        -- let [selfRefEnv, body2] = [[], body];
+
+
+        cghPatEnv lambdaPats <| lambdaPatEnv ->
+        let env3 = append lambdaPatEnv env2;
+
+        let argMbsJs = forMap lambdaPats (cghPatBindVarJs lambdaPatEnv);
+        cghPatAddUnused argMbsJs <| argsJs ->
+
+        let argsPats : List {[Str, Expr]} = 
+            concat <| map patBindAs lambdaPats;
+        let patStmts = 
+            forMap argsPats <| 
+            [name, expr2] -> 
+            let patJs = cghPatBindVarJs env3 expr2;
+            let defnJs = cghLookupVar name env3;
+            jsLet2 patJs defnJs;
+
+        let ctx = returnCC [];
+        cghPushStmts <| ->
+        cghCtx cg [ctx] env3 body <| bodyStmts2 ->
+        cghPopStmts <| bodyStmts1 ->
+        let bodyStmts = append bodyStmts1 bodyStmts2;
+        let commentStmt = jsCommentStmt <| strCat ["Uncurried ", show lambdaPats];
+        -- let commentStmt2 = jsCommentStmt <| strCat ["Uncurried ", show argsJs];
+        let stmts = concat [[commentStmt], patStmts, bodyStmts];
+    
+        let funcJs = jsLambdaStmt argsJs stmts;
+        cghAddStmts [jsLet selfUcVar funcJs] <| ->
+        k [annot]
+    ];
+
+-- TODO Rather than build 
+-- TODO   let fCurried = (a) => (b) => (c) => fUncurried (a,b,c)
+-- TODO build
+-- TODO   let fCurried = (a) => { 
+-- TODO       let fa = (b) => { 
+-- TODO           let fab = (c) => {
+-- TODO               return fUncurried(a,b,c)
+-- TODO           }
+-- TODO           return fab 
+-- TODO       }
+-- TODO       return fa 
+-- TODO   }
+-- TODO This means we get named rather than anonymous functions in the call stack
+-- TODO Probably not worth it in practice, seeing the name once is sufficient,
+-- TODO   seeing the same name repeated suggests recursive invocation, which is more misleading than helpful
+
+
+let cghCurriedWrapper : { CghExprJs -> JsExpr -> JsExpr -> Expr -> Expr -> (CgA JsStmts) } = 
+    cg -> selfVar -> funcUcJs -> topPat -> expr ->
+    (k : K @ CgK JsStmts) ->
+
+    let [recNameMb, expr2] = 
+        match expr
+        [ ["EApply", ["EVar", "rec"], ["ELambda", recPat, body2]] |-> 
+            guardPatVar recPat <| ["EVar", recName] =>
+            [[recName], body2]
+        , _ |=> 
+            [[], expr]
+        ];
+
+    let [_, lambdaPatsRev] = 
+        while [expr2, [] : List Expr] <|
+        [ ["ELambda", pat, body], pats] |=>
+        [body, [pat ,, pats]];
+    let lambdaPats = reverse lambdaPatsRev;
+    cghForMap lambdaPats (
+        lamPat ->
+        (k : K @ CgK JsExpr) ->
+        cghPatRoot lamPat <| argJs ->
+        k argJs
+    ) <| argsJs ->
+
+    let call = jsCall funcUcJs argsJs;
+
+    let abs = 
+        forFoldRight call argsJs <|
+        body -> argJs -> jsLambdaExpr [argJs] body;
+    let stmt = jsLet selfVar abs;
+    k [stmt];
+
+    -- cghForMap lambdaPats (
+    --     lamPat ->
+    --     (k : K @ CgK JsExpr) ->
+    --     cghPatRoot topPat <| funcJs ->
+    --     k funcJs
+    -- ) <| funcsJs ->
+    -- let retsJs = 
+    --     match (reverse funcsJs)
+    --     [ [] |=> error ["impossible"]
+    --     , [_ ,, funcsJs2] |=>
+    --         -- append (reverse funcsJs2) [call]
+    --         reverseOnto funcsJs2 [call]
+    --     ];
+    -- let funcsJs2 = append [selfVar] funcsJs;
+    -- let funcsArgsRetsJs = zip funcsJs2 (zip argsJs retsJs);
+    -- let absStmts = 
+    --     forFoldRight ([]:JsStmts) funcsArgsRetsJs <|
+    --     body -> [funcJs, [argJs, retJs]] -> 
+    --     [ jsLet funcJs (jsLambdaStmt [argJs] (append body [jsReturn retJs])) ];
+    -- k absStmts;
+
+
+
+let CghDeclJs = { CghExprJs -> CghEnv -> [Expr,Expr] -> (CgA { [CghEnv, (List JsStmt)] }) };
+let cghDeclJs : CghDeclJs =
+    cg -> env -> [pat,exp] ->
+    (k : K @ CgK { [CghEnv, (List JsStmt)] }) ->
+
+    cghPatEnvAnnot [] [pat] <| patEnv ->
+    let env2 = append patEnv env;
+    let rootPatMb : (Maybe JsExpr) = 
+        cghPatBindVarJs env2 pat;
+
+    match exp
+    [ ["EApply", ["EVar", annotName], exp2] |->
+        guardTrue (isElem annotName annotationFuncNames) <| _ ->
+        pipeFwd rootPatMb <| [selfVar @ ["JsVar", selfName]] |=>
+        (k : K @ CgK { [(Maybe CgAnnotation), Expr]}) ->
+        cghAnnotation cg env annotName selfVar pat exp2 <| annot ->
+        let annotMb = [annot];
+        k [annotMb, exp2]
+    , _ |=>
+        (k : K @ CgK { [(Maybe CgAnnotation), Expr]}) ->
+        k [[], exp]
+    ] <| [annotMb, exp2] ->
+
+    -- generate uncurried variants of functions
+    -- and enable uncurried functions to directly call themselves
+    match annotMb
+    [ [] |->
+        pipeFwd rootPatMb <| [selfVar @ ["JsVar", selfName]] |->
+        guardTrue true <| _ =>
+        cghUncurried cg env selfVar pat exp2 <| annotMb ->
+        let env2b = forMap patEnv <| [name, [defn, _]] -> [name, [defn, annotMb]];
+        let env3 = append env2b env;
+        let asPats : List { [JsExpr, JsExpr] } = 
+            concat <|
+            forMap (patBindAs pat) <| 
+            [asName, asExpr] ->
+            let rhsMb = cghPatBindVarJs env2 asExpr;
+            ifNil rhsMb
+            [ -> []
+            , [rhs] ->
+                [ [ cghLookupVar asName env2, rhs ] ]
+            ];
+        let ctx = letBindCC selfVar asPats;
+
+        match annotMb
+        [ [] |=> 
+            (k : K @ CgK Nil) ->
+            cghCtx cg [ctx] env exp2 <| stmtsJs ->
+            cghAddStmts stmtsJs <| ->
+            k []
+        , [["Uncurried", funcUcJs, arity]] |=>
+            (k : K @ CgK Nil) ->
+            cghCurriedWrapper cg selfVar funcUcJs pat exp2 <| stmtsJs ->
+            -- only static "Uncurried" annotations are checked at present
+            -- nothing is currently checking for "Uncurried" annotations, so dropping this assignment for now
+            -- let annotAssignJs = [jsAssign (jsMethod selfVar "Uncurried") funcUcJs];
+            let annotAssignJs = [];
+            let stmtsJs2 = append stmtsJs annotAssignJs;
+            cghAddStmts stmtsJs2 <| ->
+            k []
+        ] <| _ ->
+
+        k [env3, []]
+        -- TODO change the curried variant to call into the unccurried version,
+        -- TODO   so as not to generate all the code twice
+    , _ |=> 
+        let env2b = forMap patEnv <| [name, [defn, _]] -> [name, [defn, annotMb]];
+        let env3 = append env2b env;
+    
+        let _ = cgDebug ["cg/Decl", pat, env2];
+    
+        let asPats : List { [JsExpr, JsExpr] } = 
+            concat <|
+            forMap (patBindAs pat) <| 
+            [asName, asExpr] ->
+            let rhsMb = cghPatBindVarJs env2 asExpr;
+            ifNil rhsMb
+            [ -> []
+            , [rhs] ->
+                [ [ cghLookupVar asName env2, rhs ] ]
+            ];
+    
+        let ctx = 
+            ifNil rootPatMb
+            [ ->
+                stmtExprCC []
+            , [rootPat] ->
+                letBindCC rootPat asPats
+            ];
+        cghCtx cg [ctx] env exp2 <| stmtsJs ->
+        let annotCommentStmt = forMap annotMb <| annot -> jsCommentStmt <| strCat ["Annotation: ", showAny annot];
+        let assignAnnotStmt = 
+            match [annotMb, rootPatMb]
+            [ [ [annot], [rootPat] ] |=>
+                let [annotName, annotJs ,, _] = annot;
+                -- [jsAssign (jsMethod rootPat "annotation") (jsDatum (show annot))]
+                [jsAssign (jsMethod rootPat annotName) annotJs]
+            , _ |=>
+                []
+            ];
+        let stmtsJs2 = concat [annotCommentStmt, stmtsJs, assignAnnotStmt];
+        k [env3, stmtsJs2]
+
+
+    ];
+
+
+
+
+
+let CghDeclsJs = { CghExprJs -> CghEnv -> (List {[Expr,Expr]}) -> (CgA CghEnv) };
+let cghDeclsJs : CghDeclsJs =
+    cg -> env -> decls ->
+    (k : K @ CgK CghEnv) ->
+    cghWhile [decls, env] (
+        [ [decl1 ,, decls2], env2 ] |=>
+        (k1 : K @ CgK { [(List Decl), CghEnv] }) ->
+        (cghDeclJs cg env2 decl1) <| [env3, declsJsList] -> 
+        cghAddStmts declsJsList <| ->
+        k1 [decls2, env3]
+    ) <| [_, env4] ->
+    k env4;
+
+
+
+let cghLambdaStmtExpr : { (List JsExpr) -> JsStmts -> JsExpr -> JsExpr } =
+    pat -> stmts -> body ->
+    -- cgDebug2 ["STMTS", isNil stmts, length stmts] <| ->
+    ifNil stmts
+    [ -> 
+        jsLambdaExpr pat body
+    , _ ->
+        let stmtsBody = append stmts [jsReturn body];
+        jsLambdaStmt pat stmtsBody
+    ];
+
+
+let cghExprJs0 : { CghExprJs -> CghExprJs } = 
+    (cg0 : CghExprJs) -> 
+    (ctx : CghCtx) ->
+    (env : CghEnv) ->
+    (expr : Expr) -> 
+    (k0 : K @ CgK (Maybe JsExpr)) ->
+    let cg = cghExpr cg0 [] env;
+    let cgEnv = cghExpr cg0 [];
+    let k = (exprJs : JsExpr) -> 
+        cghPopStmts <| stmtsJs ->
+        let [stmtsJs2, exprJsMb] = cghCtxClose ctx stmtsJs [exprJs];
+        cghAddStmts stmtsJs2 <| ->
+        k0 exprJsMb;
+
+    cghPushStmts <| ->
+
+    -- cgDebug2 ["EXPR", expr] <| ->
+    match expr
+    [ ["EVar", "if"] |=> 
+        k <| jsVar "_.if2"
+    , ["EVar", var] |=> 
+        let varJs = cghLookupVar var env;
+        k varJs
+
+    , ["ELambda", arg, body] |=> 
+
+        let [args, body2] = splitFuncBody expr;
+        let argsPats : List {[Str, Expr]} = reverse <| concat (map patBindAs args);
+
+        cghPatEnv args <| env3 ->
+        let env2 = append env3 env;     
+
+        let _ = cgDebug ["cg/Pats", args];
+        let _ = cgDebug ["cg/NewEnv", env3];
+
+        -- TODO ? call cghFreshVar for each var name in argsPats, generate readable, but unique var names ?
+        -- TODO ? optionally generate unique names for every var ?
+        -- TODO we can't automatically rely on the original code being well-scoped 
+        -- TODO   to mean the generated code will be well-scoped, after the various mixins have been applied.
+
+        -- cgDebug2 ["CG", env2, body2] <| ->
+
+        cghWithNewContext (cgEnv env2 body2) <| [stmtsJs, bodyJs] ->
+
+        -- cgDebug2 ["STMTS2", isNil stmtsJs, length stmtsJs] <| ->
+        ifNil stmtsJs
+        [ ->
+            let [_, bodyJs2] = 
+                while [argsPats, bodyJs: JsExpr] <| 
+                [ [ [name, asPat],,pbas], bodyJs3 ] |=>
+                let varJs = cghLookupVar name env3;
+                let patJs = cghPatBindVarJs env3 asPat;
+                [ pbas, jsCall (jsVar "rt.as") [varJs, jsLambdaExpr patJs bodyJs3] ];
+    
+            let [_, lamJs] =
+                while [reverse args, bodyJs2] <|
+                [ [arg1 ,, args2], bodyJs4 ] |=>
+                let patJs = cghPatBindVarJs env3 arg1;
+                [ args2, jsLambdaExpr patJs bodyJs4 ];
+    
+            k lamJs
+
+        , _ ->
+            match (reverse args)
+            [ [] |=> error "impossible"
+            , [arg1 ,, argss] |=>
+
+                let argsPats2 : List {[Str, Expr]} = concat (map patBindAs args);
+                let patStmts = 
+                    forMap argsPats2 <| 
+                    [name, expr2] -> 
+                    let patJs = cghPatBindVarJs env3 expr2;
+                    let defnJs = cghLookupVar name env3;
+                    jsLet2 patJs defnJs;
+
+                let returnJs = jsReturn bodyJs;
+                let patJs0 = cghPatBindVarJs env3 arg1;
+                let lamJs0 = jsLambdaStmt patJs0 (concat [patStmts, stmtsJs, [returnJs]]);
+
+                let [_, lamJs] =
+                    while [argss, lamJs0] <|
+                    [ [arg2 ,, args2], bodyJs4 ] |=>
+                    let patJs = cghPatBindVarJs env3 arg2;
+                    [ args2, jsLambdaExpr patJs bodyJs4 ];
+        
+                k lamJs
+            ]
+        ]
+
+    -- TODO improve integration of lambda-maybe/just/nothing scope 
+    -- TODO   with any statements added when handling the body
+    , ["ELambdaYes", arg, body] |=> 
+        cghPatEnv [arg] <| env2 ->
+        let env3 = append env2 env;
+        cghWithNewContext (cgEnv env3 body) <| [stmtsJs, bodyJs] ->
+        let [_, bodyJs2] = 
+            while [reverse (patBindAs arg): List {[Str, Expr]}, bodyJs: JsExpr] <| 
+            [ [ [name, asPat],,pbas], bodyJs3 ] |=>
+            let varJs = cghLookupVar name env2;
+            let patJs = cghPatBindVarJs env2 asPat;
+            [ pbas, jsCall (jsVar "rt.as") [varJs, jsLambdaExpr patJs bodyJs3] ];
+        let patJs = cghPatBindVarJs env2 arg;
+        let bodyJs3 = jsList [[bodyJs2], [jsNil]];
+        k <| cghLambdaStmtExpr patJs stmtsJs bodyJs3
+
+    , ["ELambdaMaybe", arg, body] |=> 
+        cghPatEnv [arg] <| env2 ->
+        let env3 = append env2 env;
+        cghWithNewContext (cgEnv env3 body) <| [stmtsJs, bodyJs] ->
+        let bodyJs1 = cghStmtsExpr stmtsJs bodyJs;
+        let [_, bodyJs2] = 
+            while [reverse (patBindAs arg): List {[Str, Expr]}, bodyJs1: JsExpr] <| 
+            [ [[name, asPat],,pbas], bodyJs3] |=>
+            let varJs = cghLookupVar name env2;
+            let patJs = cghPatBindVarJs env2 asPat;
+            [pbas, jsCall (jsVar "rt.as") [varJs, jsLambdaExpr patJs bodyJs3] ];
+        let patJs = cghPatBindVarJs env2 arg;
+        let patValJs = patBindValJs2 arg;
+        k <| jsCall (jsVar "rt.lambdaMaybe") [patValJs, jsLambdaExpr patJs bodyJs2]
+
+    , ["ELambdaNo", arg, body] |=> 
+        cghPatEnv [arg] <| env2 ->
+        let env3 = append env2 env;
+        cghWithNewContext (cgEnv env3 body) <| [stmtsJs, bodyJs] ->
+        let bodyJs1 = cghStmtsExpr stmtsJs bodyJs;
+        let [_, bodyJs2] = 
+            while [reverse (patBindAs arg): List {[Str, Expr]}, bodyJs1: JsExpr] <| 
+            [ [[name, asPat],,pbas], bodyJs3] |=>
+            let varJs = cghLookupVar name env2;
+            let patJs = cghPatBindVarJs env2 asPat;
+            [pbas, jsCall (jsVar "rt.as") [varJs, jsLambdaExpr patJs bodyJs3] ];
+        let patJs = cghPatBindVarJs env2 arg;
+        let patValJs = patBindValJs2 arg;
+        k <| jsCall (jsVar "rt.lambdaNothing") [patValJs, jsLambdaExpr patJs bodyJs2]
+
+    , ["EApply", func, arg] |=> 
+        cg arg <| argJs ->
+        cg func <| funcJs ->
+        k <| jsCall funcJs [argJs]
+    , ["ELit", val] |=> 
+        k <| jsDatum val
+
+    , ["ELets", letDecls, letExpr] |=> 
+        cghDeclsJs cg0 env letDecls <| env2 ->
+        let env3 = append env2 env;
+        cg0 ctx env3 letExpr <| exprJsMb ->
+        cghPopStmts <| stmtsJs ->
+        cghAddStmts stmtsJs <| ->
+        k0 exprJsMb
+
+
+    , ["EType", exp, ty] |=> 
+        cg exp k
+    , ["ETermBrackets", exp] |=>
+        cg exp k
+
+    , ["ETypeBrackets", ty] |=>
+        let typeJsStr = jsDatum (showExpr3 "Type" ty);
+        k <| jsCall (jsVar "_.MkType") [typeJsStr]
+
+    , ["EOper", "pgEq", [a, b, c]] |=>
+        cg a <| aJs ->
+        cg b <| bJs ->
+        cg c <| cJs ->
+        k <| jsCall (jsVar "rt.pgEq") [aJs, bJs, cJs]
+    , ["EOper", "pgPair", [a, b]] |=>
+        cg a <| aJs ->
+        cg b <| bJs ->
+        k <| jsCall (jsVar "rt.pgPair") [aJs, bJs]
+    , ["EOper", "|=", [a, b]] |=>
+        cg a <| aJs ->
+        cg b <| bJs ->
+        k <| jsOp "?:" [aJs, jsList [[bJs], [jsNil]], jsNil ]
+    , ["EOper", "|-", [a, b]] |=>
+        cg a <| aJs ->
+        cg b <| bJs ->
+        k <| jsOp "?:" [aJs, bJs, jsNil ]
+    -- , ["EOper", "^", [a, b]] |=>
+    --     cg a <| aJs ->
+    --     cg b <| bJs ->
+    --     k <| jsOp "+" [aJs, bJs]
+    , ["EOper", "::", [a, b]] |=>
+        cg a <| aJs ->
+        cg b <| bJs ->
+        k <| jsList [[aJs], [bJs]]
+    , ["EOper", opName, []] |=>
+        k <| jsVarPrim opName
+
+    -- these three operators should only be reached in a type-context
+    -- TODO plumb through which context we're currently in
+    , ["EOper", "|", [a, b]] |=>
+        cg a <| aJs ->
+        cg b <| bJs ->
+        k <| jsCall (jsVar "_.unionT") [aJs, bJs]
+    , ["EOper", "&", [a, b]] |=>
+        cg a <| aJs ->
+        cg b <| bJs ->
+        k <| jsCall (jsVar "_.intersectT") [aJs, bJs]
+    , ["EOper", "\\", [a, b]] |=>
+        cg a <| aJs ->
+        cg b <| bJs ->
+        k <| jsCall (jsVar "_.relcompT") [aJs, bJs]
+
+
+    , ["EOper", opName, args] |=>
+        cghForMap args cg <| argsJs ->
+        if (isAlpha opName)
+        [ -> k <| jsCall (jsVarPrim opName) argsJs
+        , -> k <| jsOp opName argsJs
+        ]
+    , ["EList", elems, maybeTail] |=>
+        match maybeTail
+        [ [] |=> 
+            (k1 : K @ CgK JsExpr) ->
+            k1 <| jsNil
+        , [t] |=>
+            (k2 : K @ CgK JsExpr) ->
+            cg t <| tlJs ->
+            k2 tlJs
+        ] <| tlJs ->
+        -- TODO write this using cgForEach
+        cghWhile [reverse elems, tlJs] (
+            [[x,,xs], tj] |=> 
+            (k2 : K @ CgK { [(List Expr), JsExpr] }) ->
+            cg x <| xJs ->
+            let tj2 = jsList [[xJs], [tj]];
+            k2 [xs, tj2]
+        ) <| [_, result] ->
+        k result
+            
+    , _ |=> error ["missing case", "cgExprJs", show expr]
+    ];
+
+
+
+
+
+
+let cghIsLoopifiableExpr : { Expr -> Bool } =
+    expr ->
+    match expr
+    [ ["EApply", ["EVar", "break"], val] |=>
+        true
+    , ["EApply", ["EVar", "continue"], val] |=>
+        true
+    , ["EApply", ["EVar", "error"], val] |=>
+        true
+    , _ |=> 
+        false
+    ];
+
+let cghIsLoopifiable : { Expr -> Bool } =
+    cghIsConvertible cghIsLoopifiableExpr;
+
+
+
+-- let cghIsLoopifiable_old : { Expr -> Bool } =
+--     rec <| (ilf : { Expr -> Bool }) ->
+--     expr ->
+--     match expr
+--     [ ["EApply", ["EVar", "break"], val] |=>
+--         true
+--     , ["EApply", ["EVar", "continue"], val] |=>
+--         true
+--     , ["EApply", ["EVar", "error"], val] |=>
+--         true
+--     , ["EApply", ["EApply", ["EVar", funcName], arg], ["EList", [["ELambda", thenVar, kT], ["ELambda", elseVar, kF]], []]] |->
+--         guardTrue (isElem funcName ifLikeFuncNames) <| _ =>
+--         (ilf kT && ilf kF)
+--     , ["EApply", ["EApply", ["EVar", "match"], arg], ["EList", branches, []]] |->
+--         guardList2 guardLambdaMaybe branches <| branches2 =>
+--         let branchDefns = forMap branches2 <| [_, pat, defn] -> defn;
+--         listAllTrue branchDefns ilf
+--     , ["ELets", decls, body] |=>
+--         ilf body
+--     , _ |=> 
+--         false
+--     ];
+
+
+
+let cghPatMatchTest1 : { JsExpr -> Expr -> (CgA (Maybe JsExpr)) } = 
+    rec <| (pmt : { JsExpr -> Expr -> (CgA (Maybe JsExpr)) }) ->
+    var -> pat ->
+    -- let _ = cgDebug ["PatMatchTest", var, pat];
+    (k : K @ CgK (Maybe JsExpr)) ->
+    match pat
+    [ ["EVar", _] |=>
+        k []
+    , ["ELit", datum] |=>
+        ifBool datum
+        [ datum2 ->
+            error ["impossible"] -- there's no way to have booleans in patterns at present
+        , _ ->
+            k [jsOp "==" [var, jsDatum datum]]
+        ]
+    , ["EAs", name, pat2] |=>
+        -- TODO switch from using "var" to "name"
+        -- TODO or better, make the parent context use "name" instead of a freshVar
+        -- TODO for now, just ignoring "name" and using the caller-generated freshVar is nevertheless correct
+        pmt var pat2 k
+    , ["EList", [elem1,,elems], tlMb] |=>
+        cghFreshVar <| hdVar ->
+        cghFreshVar <| tlVar ->
+        -- TODO ? collect the vars together
+        -- TODO ? only declare the ones that actually go on the be used
+        -- TODO ? only generate the ones that actually go on the be used
+        cghAddStmts [jsLetUndefined hdVar, jsLetUndefined tlVar] <| ->
+        pmt hdVar elem1 <| hdCond ->
+        pmt tlVar ["EList", elems, tlMb] <| tlCond ->
+        -- let _ = cgDebug ["PatMatchTest2", hdCond, tlCond];
+        let cond = 
+            match [hdCond, tlCond] 
+            [ [[]  , []  ] |=> 
+                okay <| jsInstanceOf var "Array"
+            , [[hc], []  ] |=> 
+                okay <| 
+                jsOp "&&" 
+                [ jsInstanceOf var "Array"
+                , jsSeq 
+                  [ jsAssignExpr hdVar (jsIndex var (jsDatum 0))
+                  , hc
+                  ] 
+                ]
+            , [[]  , [tc]] |=> 
+                okay <| 
+                jsOp "&&" 
+                [ jsInstanceOf var "Array"
+                , jsSeq 
+                  [ jsAssignExpr tlVar (jsIndex var (jsDatum 1))
+                  , tc
+                  ] 
+                ]  
+            , [[hc], [tc]] |=> 
+                okay <| 
+                jsOp "&&" 
+                [ jsInstanceOf var "Array"
+                , jsSeq 
+                  [ jsAssignExpr hdVar (jsIndex var (jsDatum 0))
+                  , jsAssignExpr tlVar (jsIndex var (jsDatum 1))
+                  , jsOp "&&" [hc, tc]
+                  ] 
+                ]
+            ];
+        k cond
+    , ["EList", [], [tlPat]] |=>
+        pmt var tlPat k
+    , ["EList", [], []] |=>
+        k []
+    ];
+
+-- let cghPatMatchTest2 : { JsExpr -> Expr -> (CgA JsExpr) } = 
+--     var -> pat -> (k : K @ (CgK JsExpr)) ->
+--     cghPatMatchTest1 var pat <| resultMb ->
+--     ifNil resultMb
+--     [ -> 
+--         k (jsDatum true)
+--     , [result] -> 
+--         k result
+--     ];
+
+let cghPatMatchTest3 : { JsExpr -> Expr -> (CgA JsExpr) } = 
+    var -> pat -> (k : K @ (CgK JsExpr)) ->
+    let testExprJs = jsCall (jsVar "rt.matchPat") [var, patBindValJs2 pat];
+    k testExprJs;
+
+let cghPatMatchTest = cghPatMatchTest3;
+
+let cghIfMixin2 : CghMixin = 
+    (cg : CghExprJs) ->
+    (cgFallback : CghExprJs) ->
+    (ctx : CghCtx) ->
+    (env : CghEnv) ->
+    (expr : Expr) -> 
+    (k : K @ CgK (Maybe JsExpr)) ->
+    match expr 
+    [ ["EApply", ["EApply", ["EVar", funcName], arg], ["EList", [["ELambda", thenVar, kT], ["ELambda", elseVar, kF]], []]] |->
+        guardTrue (isElem funcName ifLikeFuncNames) <| _ =>
+        -- let _ = cgDebug ["CG-IF", expr];
+        cghExpr cg [] env arg <| argJs ->
+        cghVarFor argJs <| condVar ->
+        -- let _ = cgDebug ["CG-COND", condVar];
+        cghCtxDelegate ctx [] <| [ctx2, childCtx] ->
+        cghPatEnv [thenVar] <| thenEnv0 ->
+        cghPatEnv [elseVar] <| elseEnv0 ->
+        let thenEnv = append thenEnv0 env;
+        let elseEnv = append elseEnv0 env;
+        cghLet thenEnv thenVar condVar <| thenAssign ->
+        cghLet elseEnv elseVar condVar <| elseAssign ->
+        -- let _ = cgDebug ["CG-THEN", thenVar];
+        cghCtx cg [childCtx] thenEnv kT <| thenStmts ->
+        -- let _ = cgDebug ["CG-ELSE", elseVar];
+        cghCtx cg [childCtx] elseEnv kF <| elseStmts ->
+        let cond = 
+            match funcName
+            [ "if"     |=> condVar
+            , "ifNil"  |=> jsOp "==" [condVar, jsDatum []]
+            , "ifBool" |=> jsOp "==" [jsCall (jsVar "typeof") [condVar], jsDatum "boolean"]
+            , "ifInt"  |=> jsOp "==" [jsCall (jsVar "typeof") [condVar], jsDatum "number"] 
+            , "ifStr"  |=> jsOp "==" [jsCall (jsVar "typeof") [condVar], jsDatum "string"] 
+            ];
+        -- TODO ? generate a ternary condition expression, rather than an if-statement, if the then+else branches are trivial ?
+        let ifStmt = 
+            jsIfElse 
+              cond 
+              (concat [thenAssign, thenStmts])
+              (concat [elseAssign, elseStmts]);
+        -- let _ = cgDebug ["CG-IF-END"];
+        let [stmtsJs, exprJsCMb] = cghCtxClose ctx2 [ifStmt] [];
+        -- let _ = cgDebug ["CG-IF-END2", exprJsCMb];
+        -- let _ = match exprJsCMb [ [["JsVar", "v_pos2"]] |=> cgDebug ["CG-IF-END2", stmtsJs] , _ |=> 0];
+        cghAddStmts stmtsJs <| ->
+        k exprJsCMb
+    , other |=>
+        cgFallback ctx env other k
+    ];
+
+let cghWhileMixin2 : CghMixin = 
+    (cg : CghExprJs) ->
+    (cgFallback : CghExprJs) ->
+    (ctx : CghCtx) ->
+    (env : CghEnv) ->
+    (expr : Expr) -> 
+    (k : K @ CgK (Maybe JsExpr)) ->
+    match expr
+    [ ["EApply", ["EApply", ["EVar", "while"], initVal], ["ELambdaMaybe", loopPat, loopBody]] |=> 
+
+        cghExpr cg [] env initVal <| initValJs ->
+        cghFreshVar <| loopVar ->
+        cghAddStmts [ jsLet loopVar initValJs ] <| ->
+
+        cghPatEnv [loopPat] <| env2 ->
+        let env3 = append env2 env;
+
+        let whileCtx = assignCC loopVar [];
+        cghCtx cg [whileCtx] env3 loopBody <| loopStmts0 ->
+        let [loopStmts, loopExprJsMb] = cghCtxClose whileCtx loopStmts0 [];
+
+        -- let loopPatJs = patBindVarJs2 loopPat;
+        let loopPatJs = cghPatBindVarJs env3 loopPat;
+        let loopInitStmts1 = [ jsLet2 loopPatJs loopVar ];
+
+        let loopInitStmts2 = 
+            forMap (patBindAs loopPat) <| 
+            [asName, asExpr] -> 
+            let patJs = cghPatBindVarJs env3 asExpr;
+            let defnJs = cghLookupVar asName env3;
+            jsLet2 patJs defnJs;
+
+        let loopBodyStmts = concat [loopInitStmts1, loopInitStmts2, loopStmts];
+        cghWithNewContext (cghPatMatchTest loopVar loopPat) <| [testStmts : JsStmts, testExpr] ->
+        let whileStmt : JsStmt = jsWhile testExpr loopBodyStmts;
+        let whileStmts = append testStmts [whileStmt];
+
+        let [stmtsJs, exprJsMb] = cghCtxClose ctx whileStmts [loopVar];
+        cghAddStmts stmtsJs <| ->
+
+        k exprJsMb
+    , other |=>
+        cgFallback ctx env other k
+    ];
+
+let cghLoopMixin2 : CghMixin = 
+    (cg : CghExprJs) ->
+    (cgFallback : CghExprJs) ->
+    (ctx : CghCtx) ->
+    (env : CghEnv) ->
+    (expr : Expr) -> 
+    (k : K @ CgK (Maybe JsExpr)) ->
+    match expr
+    [ ["EApply", ["EApply", ["EVar", "loop2"], initVal], ["ELambda", loopPat, loopBody]] |=> 
+        if (cghIsLoopifiable loopBody)
+        [ ->
+            let _ = cgDebug ["cg/loop", expr];
+            cghExpr cg [] env initVal <| initValJs ->
+            cghFreshVar <| breakVar ->
+            cghFreshVar <| continueVar ->
+            cghPatEnv [loopPat] <| env2 ->
+            let env3 = append env2 env;
+            cghLet env2 loopPat continueVar <| loopPatAssign ->
+            let loopCtx = breakContinueCC [breakVar, continueVar] [];
+            cghCtx cg [loopCtx] env3 loopBody <| bodyStmts ->
+            let bodyStmts2 = append loopPatAssign bodyStmts;
+            let stmtsJs = 
+                [ jsLetUndefined breakVar
+                , jsLet continueVar initValJs
+                , jsWhile (jsVar "true") bodyStmts2
+                ];
+            let [stmtsJs2, exprJsMb2] = cghCtxClose ctx stmtsJs [breakVar];
+            cghAddStmts stmtsJs2 <| ->
+            k exprJsMb2
+    -- [ ["EApply", ["EApply", ["EVar", "loop2"], initVal], ["ELambda", loopPat, loopBody]] |=> 
+    --     if (cghIsLoopifiable loopBody)
+    --     [ ->
+    --         cghExpr cg [] env initVal <| initValJs ->
+    --         cghFreshVar <| continueVar ->
+    --         cghPatEnv [loopPat] <| env2 ->
+    --         let env3 = append env2 env;
+    --         cghLet env2 loopPat continueVar <| loopPatAssign ->
+    --         cghCtxDelegate ctx [] <| [ctx2, childCtx] ->
+    --         let loopCtx = breakContinueCC2 [childCtx, continueVar] [];
+    --         cghCtx cg [loopCtx] env3 loopBody <| bodyStmts ->
+    --         let bodyStmts2 = append loopPatAssign bodyStmts;
+    --         let stmtsJs = 
+    --             [ jsLet continueVar initValJs
+    --             , jsWhile (jsVar "true") bodyStmts2
+    --             ];
+    --         let [stmtsJs2, exprJsMb2] = cghCtxClose ctx2 stmtsJs [];
+    --         cghAddStmts stmtsJs2 <| ->
+    --         k exprJsMb2
+        , ->
+            cghExpr cg [] env initVal <| initValJs ->
+            cghFreshVar <| tagVar ->
+            cghFreshVar <| loopVar ->
+            cghPatEnv [loopPat] <| env2 ->
+            let env3 = append env2 env;
+            cghLet env2 loopPat loopVar <| loopStartStmts ->
+            let loopCtx = assignCC (jsList [[tagVar], [jsList [[loopVar],[]]]]) [];
+            cghCtx cg [loopCtx] env3 loopBody <| bodyStmts ->
+            let [bodyStmts2, exprJsMb] = cghCtxClose loopCtx (append loopStartStmts bodyStmts) [];
+            let stmtsJs = 
+                [ jsLetUndefined tagVar
+                , jsLet loopVar initValJs
+                , jsDoWhile bodyStmts2 (jsOp "===" [tagVar, jsDatum "continue"])
+                , jsIf (jsOp "!==" [tagVar, jsDatum "break"]) [jsExpr (jsCall (jsVar "_.error") [jsDatum "loop tag must be 'break' or 'continue'"])]
+                ];
+            let [stmtsJs2, exprJsMb2] = cghCtxClose ctx stmtsJs [loopVar];
+            cghAddStmts stmtsJs2 <| ->
+            k exprJsMb2
+        ]
+    , other |=>
+        cgFallback ctx env other k
+    ];
+
+
+let cghMatchMixin : CghMixin = 
+    (cg : CghExprJs) ->
+    (cgFallback : CghExprJs) ->
+    (ctx : CghCtx) ->
+    (env : CghEnv) ->
+    (expr0 : Expr) -> 
+    (k : K @ CgK (Maybe JsExpr)) ->
+    match expr0 
+    [ ["EApply", ["EApply", ["EVar", "match"], arg], ["EList", branches, []]] |->
+        guardList2 guardLambdaMaybe branches <| branches2 =>
+
+        cghExpr cg [] env arg <| argJs ->
+        cghVarFor argJs <| matchVar ->
+        cghCtxDelegate ctx [] <| [ctx2, childCtx] ->
+
+        let defaultStmt = jsExpr (jsCall (jsVar "_.error") [jsList [[jsDatum "missing case"], [matchVar]]]);
+
+        cghWhile [reverse branches2, defaultStmt] (
+            [ [branchFirst ,, branchesRest], elseStmt] |=>
+            (k2 : K @ CgK { [(List ExprLambdaMaybe), JsStmt] }) ->
+            -- let ["ELambdaMaybe", pat, expr] = branchFirst;
+            let [_, pat, expr] = branchFirst;
+            -- let _ = cgDebug ["CG-match", pat];
+            let branchTest = jsCall (jsVar "rt.matchPat") [matchVar, patBindValJs2 pat];
+            cghPatEnv [pat] <| env2 ->
+            let env3 = append env2 env;
+            cghLet env2 pat matchVar <| branchAssign ->
+            cghCtx cg [childCtx] env3 expr <| branchBody ->
+            let branchStmts = append branchAssign branchBody;
+            let branchStmt = jsIfElse branchTest branchStmts [elseStmt];
+            k2 [branchesRest, branchStmt]
+        ) <| [_, matchStmt] ->
+
+        let [stmtsJs, exprJsCMb] = cghCtxClose ctx2 [matchStmt] [];
+        cghAddStmts stmtsJs <| ->
+        k exprJsCMb
+    , other |=>
+        cgFallback ctx env other k
+    ];
+
+
+
+
+
+
+
+
+
+let cgMixinHpsDo : CghMixin = 
+    (cg : CghExprJs) ->
+    (cgFallback : CghExprJs) ->
+    (ctx : CghCtx) ->
+    (env : CghEnv) ->
+    (expr0 : Expr) -> 
+    (k : K @ CgK (Maybe JsExpr)) ->
+
+    match expr0 
+    -- [ ["EApply", ["EApply", ["EApply", ["EApply", ["EVar", "hpsDo"], handlerType], ["EVar", action]], ["EVar", handlerMk]], initVal] |=>
+    [ ["EApply", ["EApply", ["EApply", ["EApply", func, arg1], arg2], arg3], arg4] |->
+        pipeFwd func <| ["EVar", "hpsDo"]   |->
+        pipeFwd arg1 <| handlerType         |->
+        pipeFwd arg2 <| ["EVar", action]    |->
+        pipeFwd arg3 <| ["EVar", handlerMk] |->
+        pipeFwd arg4 <| initVal =>
+
+        let [_, actionAnnot] = cghLookupVarAnnot action env;
+        let [_, handlerAnnot] = cghLookupVarAnnot handlerMk env;
+
+        -- let comment = strCat ["annotate_hpsDo ", show [handlerType, action, handlerMk, initVal]];
+        let comment = strCat ["annotate_hpsDo ", show [action, actionAnnot, handlerMk, handlerAnnot]];
+
+        -- match [actionAnnot, handlerAnnot]
+        -- [ [[["Annot_hpsFunc", impAction, _]],[["Annot_hpsHandlerMk", impHandler]]]  |=>
+        match [] 
+        [ -> 
+            pipeFwd actionAnnot <| [["Annot_hpsFunc", impAction, _]] |->
+            pipeFwd handlerAnnot <| [["Annot_hpsHandlerMk", impHandler]]  |=>
+            cghExpr cg [] env initVal <| initValJs ->
+            let call : JsExpr = jsCall impAction [jsCall impHandler [initValJs]];
+            cghAddStmts [jsCommentStmt comment] <| ->
+            -- cghCtxClose ctx [] [call] <| [stmts : JsStmts, exprMb : Maybe JsExpr] ->
+            let [stmts : JsStmts, exprMb : Maybe JsExpr] = cghCtxClose ctx [] [call];
+            cghAddStmts stmts <| ->
+            k exprMb
+        , _ |=>
+            let comment2 = strCat ["Failed: ", comment];
+            cgFallback ctx env expr0 <| expJsMb ->
+            ifNil expJsMb
+            [ [] -> 
+                cghAddStmts [jsCommentStmt comment2] <| ->
+                k []
+            , [expJs] ->
+                k [jsCommentExpr comment2 expJs]
+            ]
+        ]
+
+
+
+    , other |=>
+        cgFallback ctx env other k
+    ];
+
+
+
+let cgMixinApplyUc : CghMixin = 
+    (cg : CghExprJs) ->
+    (cgFallback : CghExprJs) ->
+    (ctx : CghCtx) ->
+    (env : CghEnv) ->
+    (expr : Expr) -> 
+    (k : K @ CgK (Maybe JsExpr)) ->
+
+    match expr
+    [ ["EApply", ["EApply", _, _], _] |=>
+        let [func, args] =
+            while [expr, [] : List Expr] <|
+            [ ["EApply", f, a], args] |=>
+            [f, [a ,, args]];
+    
+        let numArgs = length args;
+    
+        match func
+        [ ["EVar", funcName] |=>
+            let [funcC, funcAnnotMb] = cghLookupVarAnnot funcName env;
+            -- debug2 ["cgMixinApplyUc", funcAnnotMb, numArgs] <| ->
+            match funcAnnotMb
+            [ [["Uncurried", funcUc, arity]] |=>
+                -- debug2 ["cgMixinApplyUc", funcAnnotMb, numArgs, arity] <| ->
+                cghForMap args (cghExpr cg [] env) <| argsJs ->
+                let call = 
+                    if (numArgs == arity)
+                    [ ->
+                        -- debug2 ["cgMixinApplyUc/Uncurried", funcAnnotMb, numArgs, arity] <| ->
+                        jsCall funcUc argsJs
+                    , ->
+                        -- debug2 ["cgMixinApplyUc/Curried", funcAnnotMb, numArgs, arity] <| ->
+                        forFoldLeft funcC argsJs <|
+                        f -> a -> 
+                        jsCall f [a]
+                    ];
+                -- debug2 ["cgMixinApplyUc/Call", funcAnnotMb, numArgs, arity, call] <| ->
+                let [stmtsJs, result] = cghCtxClose ctx [] [call];
+                cghAddStmts stmtsJs <| ->
+                k result
+            , _ |=>
+                cgFallback ctx env expr k
+            ]
+        , _ |=>
+            cgFallback ctx env expr k
+        ]
+    , _ |=>
+        cgFallback ctx env expr k
+    ];
+
+
+
+let cgDump : CghMixin = 
+    (cg : CghExprJs) ->
+    (cgFallback : CghExprJs) ->
+    (ctx : CghCtx) ->
+    (env : CghEnv) ->
+    (expr : Expr) -> 
+    (k : K @ CgK (Maybe JsExpr)) ->
+    let [info, _, _] = ctx;
+    let _ = cgDebug ["cg/Expr", info, expr];
+    cgFallback ctx env expr k;
+
+let cghExprJs1 : CghExprJs = 
+    rec cghExprJs0;
+
+let cghExprJs4 : CghExprJs = 
+    rec <| (cg : CghExprJs) -> 
+    (cgDump           cg) <|
+    (cghIfMixin2      cg) <| 
+    (cghWhileMixin2   cg) <| 
+    (cghLoopMixin2    cg) <| 
+    (cghMatchMixin    cg) <| 
+    (cgMixinHpsDo     cg) <|
+    (cgMixinApplyUc   cg) <|
+    (cghExprJs0       cg);
+
+-- let cghExprJs : CghExprJs = cghExprJs1;
+let cghExprJs : CghExprJs = cghExprJs4;
+
+
+
+let cgExprJs_HPS : { CghEnv -> Expr -> JsExpr } =
+    env -> expr ->
+    let handler : CgHandler = codeGenMk cghInitState;
+
+    let ctx = exprCC [];
+
+    let cgStmtsExpr : CgA { [JsStmts, JsExpr] } = 
+        (k : K @ CgK { [JsStmts, JsExpr] }) ->
+        cghPushStmts <| ->
+        -- cgDebug2 ["CG-EXPR", expr] <| ->
+        cghExpr cghExprJs [] env expr <| exprJs ->
+        -- cgDebug2 ["CG-EXPR-JS", exprJs] <| ->
+        cghPopStmts <| stmtsJs2 ->
+        -- cgDebug2 ["CG-STMTS", stmtsJs2] <| ->
+        k [stmtsJs2, exprJs];
+
+    let k = (result : { [JsStmts, JsExpr] }) -> (h : CgHandler) -> result;
+    let [stmtsJs, exprJs] = cgStmtsExpr k handler;
+    let result =
+        -- cgDebug2 ["STMTS3", isNil stmtsJs, length stmtsJs, stmtsJs] <| ->
+        ifNil stmtsJs
+        [ -> 
+            exprJs
+        , _ ->
+            let stmtsJs2 = append stmtsJs [jsReturn exprJs];
+            jsCall (jsLambdaStmt [] stmtsJs2) []
+        ];
+
+    result;
+
+
+let cgDeclsJs_HPS2 : { CghEnv -> Decls -> CgHandler -> [JsStmts, CgHandler, CghEnv] } =
+    env -> decls -> handler ->
+
+    let cgStmtsExpr : CgA { [JsStmts, CghEnv] } = 
+        (k : K @ CgK { [JsStmts, CghEnv] }) ->
+        cghPushStmts <| ->
+        cghDeclsJs cghExprJs env decls <| env2 ->
+        let env3 = append env2 env;
+        cghPopStmts <| stmtsJs2 ->
+        k [stmtsJs2, env3];
+
+    let k = ([stmts, env] : { [JsStmts, CghEnv] }) -> (h : CgHandler) -> [stmts, h, env];
+    let [stmtsJs, handler2, env4] = cgStmtsExpr k handler;
+
+    [stmtsJs, handler2, env4];
+
+-- TODO switch to using the newer pretty-js code rather than the display-tree
+let cgExprJs_HPS_DT : { CghEnv -> Expr -> DisplayTree } =
+    env -> expr ->
+    let exprJs = cgExprJs_HPS env expr;
+    let exprDt = jsDisplayExpr exprJs;
+    -- let _ = cgDebug ["cgs/js", exprJs];
+    -- let _ = cgDebug ["cgs/dt", exprDt];
+    exprDt;
+
+-- let cghDeclsJsStr : { Decls -> Str } =
+--     decls ->

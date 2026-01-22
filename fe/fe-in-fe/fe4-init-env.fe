@@ -1,0 +1,121 @@
+language ferrum/0.1
+
+let Env = List { [Str, Any] };
+
+let initEnv : Env = 
+    
+    [ ["+",  (a: Int) -> (b: Int) -> a +  b ]
+    , ["-",  (a: Int) -> (b: Int) -> a -  b ]
+    , ["*",  (a: Int) -> (b: Int) -> a *  b ]
+    , ["==", (a: Int) -> (b: Int) -> a == b ]
+    , [">=", (a: Int) -> (b: Int) -> a >= b ]
+    , [">",  (a: Int) -> (b: Int) -> a >  b ]
+    , ["<",  (a: Int) -> (b: Int) -> a <  b ]
+    , ["<=", (a: Int) -> (b: Int) -> a <= b ]
+
+    -- , ["$!", (a: { Any -> Any }) -> (b: Any) -> a b ]
+    , ["<$", (a: { Any -> Any }) -> (b: Any) -> a b ]
+    , ["$?", (a: Any) -> (b: Any) -> b ]
+    , ["?", (a: Bool) -> [b,,c] -> if a [-> b, -> c] ]
+
+    , ["strOrd", strOrd]
+    , ["strChr", strChr]
+    , ["strLen", strLen]
+    , ["strAdd", strAdd]
+    , ["strCharAt", strCharAt]
+    , ["strCharAtMb", strCharAtMb]
+    , ["jsStrCat", jsStrCat]
+    , ["jsStrJoin", jsStrJoin]
+    , ["char_concat", char_concat]
+
+    , ["if", if]
+    , ["if2", if]
+    , ["||", (a: Bool) -> (b: Bool) -> a||b ]
+    , ["&&", (a: Bool) -> (b: Bool) -> a&&b ]
+    , ["|", (a: Type) -> (b: Type) -> { a | b } ]
+    , ["&", (a: Type) -> (b: Type) -> { a & b } ]
+    , ["|-", (a: Bool) -> (b: Any) -> a |- b ]
+    , ["|=", (a: Bool) -> (b: Any) -> a |= b ]
+    , ["not", not]
+    , ["true", true]
+    , ["false", false]
+
+    , ["head", head]
+    , ["tail", tail]
+    , ["hd", head]
+    , ["tl", tail]
+
+    , ["trace", trace]
+    , ["trace2", trace2]
+    , ["error", error]
+
+    , ["show", show]
+    , ["show2", show2]
+    , ["fix", fix]
+
+    , ["loop1", loop1]
+    , ["loop2", loop2]
+    , ["continue", continue]
+    , ["break", break]
+
+    -- , ["grLoop", grLoop]
+    -- , ["grWhile", grWhile]
+
+    , ["Int", Int]
+    , ["Str", Str]
+    , ["Char", Char]
+    , ["Bool", Bool]
+    , ["Any", Any]
+    , ["List", List]
+    , ["Type", Type]
+    , ["Elem", Elem]
+    , ["TupleMap", TupleMap]
+    , ["Single", Single]
+   
+    , ["ifNil", ifNil]
+    , ["ifBool", ifBool]
+    , ["ifInt", ifInt]
+    , ["ifStr", ifStr]
+
+    -- , ["opIfNil",  a -> [t,,f] -> ifNil  a [_ -> t, _ -> f ]]
+    -- , ["opIfBool", a -> [t,,f] -> ifBool a [_ -> t, _ -> f ]]
+    -- , ["opIfInt",  a -> [t,,f] -> ifInt  a [_ -> t, _ -> f ]]
+    -- , ["opIfStr",  a -> [t,,f] -> ifStr  a [_ -> t, _ -> f ]]
+
+
+    , ["ifPair", ifPair]
+    , ["ifType", ifType] -- for diagnostic purposes only
+    , ["showType", showType] -- for diagnostic purposes only
+
+
+
+    , ["Void", Void]
+    , ["castT", castT]
+    , ["Hd", Hd]
+    , ["Tl", Tl]
+    , ["Domain", Domain]
+    , ["Codomain", Codomain]
+    , ["Fix", Fix]
+    , ["Self", Self]
+    , ["SelfT", SelfT]
+
+    , ["jsEval", jsEval]
+    , ["jsEvalMaybe", jsEvalMaybe]
+
+    , ["Inverse", Inverse]
+    , ["primInverse", Inverse]
+    , ["InverseApply", InverseApply]
+    , ["primInverseApply", InverseApply]
+    
+    , ["primMkArrayFastAccessSlowCopy", primMkArrayFastAccessSlowCopy ]
+    , ["primMkArrayFastAccessNoCopy", primMkArrayFastAccessNoCopy ]
+    , ["primAssoc1MkPersistent", primAssoc1MkPersistent ]
+    , ["primAssoc1MkEphemeral", primAssoc1MkEphemeral ]
+
+    , ["ioDoPrim", ioDoPrim]
+    , ["primHpsHandlerMk", primHpsHandlerMk]
+    , ["primHpsDo", primHpsDo]
+    , ["primHpsCall", primHpsCall]
+    -- , ["primHpsObjCall", primHpsObjCall]
+    ];
+

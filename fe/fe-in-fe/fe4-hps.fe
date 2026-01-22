@@ -1,0 +1,114 @@
+language ferrum/0.1
+
+-- HPS - Handler Passing Style
+
+
+-- let HPS : { Type -> Type -> Type } =
+--     Arg -> Handler -> 
+--     { K @ { Arg -> Handler -> Any } -> Handler -> K Arg Handler };
+
+let HpsK : { Type -> Type -> Type } = 
+    H -> A -> { A -> H -> Any };
+
+let HpsA : { Type -> Type -> Type } = 
+    H -> A -> { K @ (HpsK H A) -> H -> K A H };
+
+
+
+-- TODO ?
+-- let HPS2 : { Type -> Type } =
+--     Arg ->
+--     { K @ { Arg -> Any } -> K Arg };
+
+
+-- let HpsDispatchApprox = { { Handler : Type } -> (List { [Str, Any] }) -> Str -> Any };
+let HpsDispatchApprox = { { Handler : Type } -> (List { [Str, (Codomain Handler)] }) -> Str -> (Codomain Handler) };
+
+let hpsDispatchApprox : HpsDispatchApprox =
+    (Handler : Type) ->
+    (handlerMethods) ->
+    method ->
+    match (lookup method handlerMethods)
+    [ [result] |=> 
+        result
+    , _ |=>
+        error ["dispatch", "unknown method name", "method"]
+    ];
+
+let HpsDispatch = { { Handler : Type } -> H @ (List { [(Domain Handler), Any] }) -> M @ (Domain Handler) -> (Hd (Tl (Elem { H & [M, Any] }))) };
+-- let HpsDispatch = { { Handler : Type } -> H @ (List (Self <| HM -> { [(Domain Handler), Handler (Hd HM)] })) -> M @ (Domain Handler) -> (Hd (Tl (Elem { H & [M, Any] }))) };
+
+let hpsDispatch = justTrustMeCast HpsDispatchApprox HpsDispatch hpsDispatchApprox;
+
+let annotate_HandlerMk = identityFunc;
+-- let annotate_hpsSyncHandlerMk = identityFunc; -- synchronous, not back-tracking, repetition or anything which would interfere with using objects to implement handlers in the code generator
+
+-- Turns out we can just reuse the CPS code, with the Handler serving as State.
+-- Perhaps we can eta-contract the types, and not specify the State/Handler type at all.
+-- This save specifying the type as an extra parameter and is more more in-line with the 
+--   approach of taking the types from the arguments, 
+--   as previously tried in the initial CPS attempts.
+let hpsWhile  = cpsWhile;
+let hpsMap    = cpsMap;
+let hpsLoop1  = cpsLoop1;
+let hpsLoop2  = cpsLoop2;
+-- let hpsLoop = hpsLoop1;
+
+let hpsMatch       = cpsMatch;
+let hpsMatchGuard  = cpsMatchGuard;
+let hpsMatchFail   = cpsMatchFail;
+let hpsMatchOk     = cpsMatchOk;
+
+let hpsFunc0     = cpsFunc0;
+let hpsFunc1     = cpsFunc1;
+let hpsFunc2     = cpsFunc2;
+let hpsFunc3     = cpsFunc3;
+let hpsFunc4     = cpsFunc4;
+let hpsFunc5     = cpsFunc5;
+let hpsFunc6     = cpsFunc6;
+let hpsFunc7     = cpsFunc7;
+
+let hpsAction0 = identityFunc;
+let hpsAction1 = identityFunc;
+let hpsAction2 = identityFunc;
+let hpsAction3 = identityFunc;
+let hpsAction4 = identityFunc;
+let hpsAction5 = identityFunc;
+
+-- TODO it should be possible to infer the argument type from the context type,
+-- TODO this would help reduce the number of type annotation needed
+-- TODO this might be easier to do in fe-in-fe than fe-in-ts
+-- let hpsAction1 : Self (S -> { A @ Any -> S A }) = x -> x;
+-- let hpsAction1 : Self (S -> { (Codomain S) -> (Codomain S) }) = x -> x;
+
+
+-- let hpsDo : { { H : Type } -> A @ (HpsA H Any) -> H -> [H, (Domain (Domain A))] } =
+--     (H : Type) -> (action : A @ HpsA H Any) -> (handler : H) -> 
+--     action (result -> handler -> [handler, result]) handler;
+
+let hpsDo : { { H : Type } -> A @ (HpsA H Any) -> H -> [H, (Domain (Domain A))] } =
+    (H : Type) -> 
+    justTrustMeCast
+    { Void -> Any }
+    { A @ (HpsA H Any) -> H -> [H, (Domain (Domain A))] }
+    primHpsDo;
+
+-- let hpsCall : { { H : Type } -> A @ (HpsA H Any) -> H -> (Domain (Domain A)) } =
+--     (H : Type) -> 
+--     justTrustMeCast
+--         { Void -> Any }
+--         { A @ (HpsA H Any) -> H -> (Domain (Domain A)) }
+--         primHpsCall;
+
+let hpsCall : { { H : Type } -> A @ (HpsA H Any) -> H -> (Domain (Domain A)) } =
+    (H : Type) -> (action : A @ HpsA H Any) -> (handler : H) -> 
+    let [handler2, result] = hpsDo H action handler;
+    result;
+
+let hpsHandlerMk : { { H : Type } -> M @ { Void -> H } -> (Domain M) -> H } =
+    (H : Type) -> 
+    justTrustMeCast
+        { Void -> Any }
+        { M @ { Void -> H } -> (Domain M) -> H }
+        primHpsHandlerMk;
+

@@ -1,0 +1,834 @@
+language ferrum/0.1
+
+let PrettyOrientation = 
+    { "V"  -- mandatory vertical layout
+    | "H"  -- horizontal if possible, otherwise veritcal
+    | "W"  -- wrapped layout, place multiple (single line) parts on a line, when possible, use multiple lines, when needed
+    | "P"  -- hanging-paragraph, first line unindented, subsequent lines (if any) indented
+    };
+
+let Pretty = 
+    Rec <| P ->
+    { ["PpText", Str] 
+    | ["PpLines", (List P)]
+    | ["PpTree", (List P)]
+    | ["PpConcat", PrettyOrientation, (List P)]
+    | ["PpList", [Str, Str, Str], (List P)] -- open, separator, close, elems
+    | ["PpList2", PrettyOrientation, [Str, Str, Str], (List P)] -- open, separator, close, elems
+    | ["PpBracket", PrettyOrientation, [Str, Str], (List P)] -- open, close, elems
+    | ["PpBracket2", PrettyOrientation, P, [Str, Str], (List P)] -- open, close, elems
+    | ["PpIndent", P]
+    | ["PpNewline", []]
+    | ["PpLabels", (List { [Str, P] })] -- list of label-content pairs
+    | ["PpTabular", (List (List P))] -- list of list of items, to be aligned, when vertical
+    };
+
+let PrettyTree = Pretty;
+
+let ppText : { Str -> Pretty } =
+    text -> ["PpText", text];
+
+let ppLines : { (List Pretty) -> Pretty } =
+    lines -> ["PpLines", lines];
+
+let ppTree : { (List Pretty) -> Pretty } =
+    branches -> ["PpTree", branches];
+
+let ppConcat : { PrettyOrientation -> (List Pretty) -> Pretty } =
+    orient -> parts ->
+    ["PpConcat", orient, parts];
+
+let ppNil = ppText "";
+
+let ppList : { [Str, Str, Str] -> (List Pretty) -> Pretty } =
+    opnSepCls -> parts ->
+    ["PpList", opnSepCls, parts];
+
+let ppList2 : { PrettyOrientation -> [Str, Str, Str] -> (List Pretty) -> Pretty } =
+    orient -> opnSepCls -> parts ->
+    ["PpList2", orient, opnSepCls, parts];
+
+let ppBracket : { PrettyOrientation -> [Str, Str] -> (List Pretty) -> Pretty } =
+    orient -> [opn,cls] -> parts ->
+    ppList2 orient [opn, "", cls] parts;
+
+let ppBracket2 : { PrettyOrientation -> Pretty -> [Str, Str] -> (List Pretty) -> Pretty } =
+    orient -> before -> [opn,cls] -> between ->
+    ["PpBracket2", orient, before, [opn, cls], between];
+
+let ppIndent : { Pretty -> Pretty } =
+    part ->
+    ["PpIndent", part];
+
+let ppNewline : Pretty =
+    ["PpNewline", []];
+
+let ppVert  = (parts : List Pretty) -> ppConcat "V" parts;
+let ppHoriz = (parts : List Pretty) -> ppConcat "H" parts; 
+let ppWrap  = (parts : List Pretty) -> ppConcat "W" parts; 
+
+let ppLV = (punct : { [Str, Str, Str] }) -> (parts : List Pretty) -> ppList2 "V" punct parts; 
+let ppLH = (punct : { [Str, Str, Str] }) -> (parts : List Pretty) -> ppList2 "H" punct parts; 
+let ppLW = (punct : { [Str, Str, Str] }) -> (parts : List Pretty) -> ppList2 "W" punct parts; 
+
+let ppBV = (punct : { [Str, Str] }) -> (parts : List Pretty) -> ppBracket "V" punct parts; 
+let ppBH = (punct : { [Str, Str] }) -> (parts : List Pretty) -> ppBracket "H" punct parts; 
+let ppBW = (punct : { [Str, Str] }) -> (parts : List Pretty) -> ppBracket "W" punct parts; 
+
+let ppB2V = (before : Pretty) -> (punct : { [Str, Str] }) -> (between : List Pretty) -> ppBracket2 "V" before punct between; 
+let ppB2H = (before : Pretty) -> (punct : { [Str, Str] }) -> (between : List Pretty) -> ppBracket2 "H" before punct between; 
+let ppB2W = (before : Pretty) -> (punct : { [Str, Str] }) -> (between : List Pretty) -> ppBracket2 "W" before punct between; 
+
+let ppV = ppVert;
+let ppH = ppHoriz;
+let ppW = ppWrap;
+let ppT = ppText;
+
+let ppI = ppIndent;
+let ppN = ppNewline;
+
+-- let ppAdd = 
+-- 
+-- let ppConcat = 
+
+
+let jspParen : { JsCtx -> JsExpr -> Pretty -> Pretty } =
+    ctx -> expr -> p ->
+    if (needsParens ctx expr)
+    [ ->
+        ppW [ppText "(", p, ppText ")"]
+        -- ppBH ["(", ")"] [p]
+    , ->
+        p
+    ];
+
+let jspParen2 : { JsCtx -> JsExpr -> Pretty -> Pretty } =
+    ctx -> expr -> p ->
+    if (needsParens ctx expr)
+    [ ->
+        -- ppW [ppText "(", p, ppText ")"]
+        ppBH ["(", ")"] [p]
+        -- ppBV ["(", ")"] [p]
+    , ->
+        p
+    ];
+
+let JsPretty = { JsCtx -> { JsExpr | JsStmt } -> PrettyTree };
+let JsPrettyExpr0 = { JsCtx -> JsExpr -> PrettyTree };
+let JsPrettyExpr = { JsExpr -> PrettyTree };
+let JsPrettyStmt0 = { JsPrettyExpr -> JsStmt -> PrettyTree };
+let JsPrettyStmt = { JsStmt -> PrettyTree };
+
+let jsPrettyStmts0 : { JsPrettyStmt -> JsStmts -> Pretty } = 
+    dispS -> stmts ->
+    ppV (map dispS stmts);
+
+let jsPrettyStmtBlock01 : { JsPrettyStmt -> JsStmts -> Pretty } = 
+    dispS -> stmts ->
+    let stmtsPP = map dispS stmts;
+    ppV <| concat [ [ppText "{"], stmtsPP, [ppText "}"] ];
+
+let jsPrettyStmtBlock02 : { JsPrettyStmt -> JsStmts -> Pretty } = 
+    dispS -> stmts ->
+    let stmtsPP = map dispS stmts;
+    ppList2 "V" ["{", "", "}"] stmtsPP;
+
+-- let jsPrettyStmtBlock0 = jsPrettyStmtBlock01;
+let jsPrettyStmtBlock0 = jsPrettyStmtBlock02;
+
+-- TODO ? add context/parens ?
+let jsPrettyMaybe0 : { JsPrettyExpr0 -> JsCtx -> (Maybe JsExpr) -> Pretty } =
+    dispE -> ctx -> exprMaybe ->
+    match exprMaybe
+    [ [] |=>
+        ppNil
+    , [expr] |=>
+        dispE ctx expr
+    ];
+
+
+let jsPrettyStmt0 : { JsPrettyExpr0 -> JsStmt -> PrettyTree } =
+    dispE0 ->
+    rec <| ( dispS : { JsStmt -> PrettyTree } ) -> 
+    let dispE = dispE0 jsDefaultCtx;
+    let dispSS = jsPrettyStmts0 dispS;
+    let dispSB = jsPrettyStmtBlock0 dispS;
+    js ->
+    match js
+    [ ["JsCommentStmt", msg] |=>
+        -- TODO quote the msg in a way that ensures the comment doesn't terminate prematurely
+        let comment = ppText <| strCat ["/* ", msg, " */"];
+        comment
+    , ["JsReturn", expr] |=>
+        ppW [ppText "return (", dispE expr, ppText ");"]
+    , ["JsAssign", lhs, rhs] |=>
+        ppH [ ppH [dispE lhs, ppText " = "], ppH [dispE rhs, ppText "; "]]
+    , ["JsExpr", expr] |=>
+        ppW [dispE expr, ppText ";"]
+    , ["JsLet", pat, [defn]] |=>
+        -- ppW [ppText "let ", dispE pat, ppText " = ", dispE defn, ppText "; "]
+        ppH [ ppW [ppT "let ", dispE pat, ppT " = "]
+            , ppW [dispE defn, ppT "; "] 
+            ]
+    , ["JsLet", pat, []] |=>
+        ppW [ppText "let ", dispE pat, ppText "; "]
+    , ["JsLetUndefined", vars] |=>
+        ppW [ppText "let ", ppText <| strJoin ", " vars, ppText "; "]
+    , ["JsIf", cond, then] |=>
+        -- ppW [ppText "if (", dispE cond, ppText ")", dispSB then]
+        ppV [ppW [ppT "if (", dispE cond, ppT ")"], dispSB then]
+
+    -- , ["JsIfElse", cond, then, else] |=>
+    --     let [elseFinal, condThens] = 
+    --         while [[js] : JsStmts, [] : List ({ [JsExpr, JsStmts] })] <|
+    --         [[["JsIfElse", cond2, then2, else2]], condThens] |=>
+    --         [else2, [[cond2, then2] ,, condThens]];
+    --     let [condThenFirst, condThenRest] =
+    --         match (reverse condThens)
+    --         [ [f ,, r] |=> [f , r]
+    --         , _ |=> error ["impossible"]
+    --         ];
+    --     let ifThenFirstDt : PrettyParts = 
+    --         let [cond3, then3] = condThenFirst;
+    --         [ ["if", dtZipBrackets ["(", "", ")"] [dtNil, dispE cond3] ]
+    --         , ["", dispSB then3]
+    --         ];
+    --     let ifThenRestDt : PrettyParts = 
+    --         concat <|
+    --         forMap condThenRest <| 
+    --         [cond4, then4] ->
+    --         [ ["else if", dtZipBrackets ["(", "", ")"] [dtNil, dispE cond4] ]
+    --         , ["", dispSB then4]
+    --         ];
+    --     let elseFinalDt : PrettyParts = [ ["else", dispSB elseFinal] ];
+    --     dtBranch <| concat [ifThenFirstDt, ifThenRestDt, elseFinalDt]
+
+    , ["JsIfElse", cond, then, else] |=>
+        -- ppW [ppText "if (", dispE cond, ppText ")", dispSB then, ppText "else", dispSB else]
+        ppV [ppW [ppT "if (", dispE cond, ppT ")"], dispSB then, ppT "else", dispSB else]
+    , ["JsWhile", cond, body] |=>
+        -- ppW [ppText "while (", dispE cond, ppText ")", dispSB body]
+        ppV [ppW [ppT "while (", dispE cond, ppT ")"], dispSB body]
+    , ["JsDoWhile", body, cond] |=>
+        ppV [ ppT "do", dispSB body, ppT "while (", dispE cond, ppT ")"]
+    , ["JsBreak"] |=>
+        ppT "break;"
+    , ["JsContinue"] |=>
+        ppT "continue;"
+    ];
+
+
+let jsPrettyExpr0 : { JsCtx -> JsExpr -> PrettyTree } =
+    rec <| ( dispE : { JsCtx -> JsExpr -> PrettyTree } ) -> 
+    ctx -> js ->
+    let dispS = jsPrettyStmt0 dispE;
+    let dispSS = jsPrettyStmts0 dispS;
+    let dispSB = jsPrettyStmtBlock0 dispS;
+    let dispM = jsPrettyMaybe0 dispE;
+    let result = 
+        match js
+        [ ["JsCommentExpr", msg, expr] |=>
+            -- TODO quote the msg in a way that ensures the comment doesn't terminate prematurely
+            let comment = ppT <| strCat ["/* ", msg, " */"];
+            ppW [comment, dispE ctx expr]
+        , ["JsVar", "if"] |=>
+            ppT "_.if2"
+        , ["JsVar", var] |=>
+            ppT var
+        , ["JsDatum", datum] |=>
+            ppT <|
+            ifNil datum 
+            [ -> "null"
+            , _ -> show datum
+            ]
+    
+        -- , js2 @ ["JsLambdaExpr", [pat], body] |=>
+        --     let [args, body2] = jsCollectCurriedArgs js2;
+        --     let [argsD, bodyD] =
+        --         match body2
+        --         [ ["JsLambdaStmt", [pat2], body3] |=>
+        --             let argsD = concat <| for (concat [args,[pat2]]) <| arg -> [ ["(", dispE [js, 1] arg], [") => ", dtNil] ];
+        --             let bodyD = dtBranch [ ["{ ", dispSS body3], [" }", dtNil] ];
+        --             [argsD, bodyD]
+        --         , _ |=>
+        --             let argsD = concat <| for args <| arg -> [ ["(", dispE [js, 1] arg], [") => ", dtNil] ];
+        --             let bodyD = dtBranch [ ["", dispE [js, 2] body2] ];
+        --             [argsD, bodyD]
+        --         ];
+        --     let result = dtBranch [ ["", dtBranch argsD], ["", bodyD] ];
+        --     result
+    
+        , ["JsLambdaExpr", pats, body] |=>
+            let paramsPP = ppList2 "H" ["(", ",", ") =>"] <| forMap pats <| pat -> dispE [js, 1] pat;
+            let bodyPP = dispE [js, 2] body;
+            ppW [paramsPP, bodyPP]
+    
+        , ["JsLambdaStmt", pats, body] |=>
+            let paramsPP = ppList2 "H" ["(", ",", ") =>"] <| forMap pats <| pat -> dispE [js, 1] pat;
+            let bodyPP = dispSB body;
+            ppW [paramsPP, bodyPP]
+    
+        , ["JsSeq", exprs @ [_ ,, _]] |=>
+            ppList2 "H" ["(", ", ", ")"] <| map (dispE [js, 1]) exprs
+            
+        , ["JsOp", op, [arg1, arg2]] |=>
+            ppW [dispE [js, 1] arg1, ppT op, dispE [js, 2] arg2]
+        , ["JsOp", "?:", [arg1, arg2, arg3]] |=>
+            ppW [dispE [js, 1] arg1, ppT "?", dispE [js, 2] arg2, ppT ":", dispE [js, 3] arg3]
+        , ["JsOp", op, args] |=>
+            error ["TODO", "JsOp", op, length args]
+        , ["JsInstanceOf", expr, className] |=>
+            ppW [dispE [js, 1] expr, ppT " instanceof ", ppT className]
+        , ["JsAssignExpr", arg1, arg2] |=>
+            ppW [dispE [js, 1] arg1, ppT " = ", dispE [js, 2] arg2]
+        , ["JsIndex", arg1, arg2] |=>
+            ppW [dispE [js, 1] arg1, ppT " [", dispE [js, 2] arg2, ppT "]"]
+        , ["JsCall", func, []] |=>
+            ppW [dispE [js, 1] func, ppT "()"]
+        , ["JsCall", func, [arg]] |=>
+            -- ppW [dispE [js, 1] func, ppT "(", dispE [js, 2] arg, ppT ")"]
+            -- ppW [dispE [js, 1] func, ppW [ppT "(", dispE [js, 2] arg, ppT ")"]]
+            -- ppW [dispE [js, 1] func, ppBH ["(", ")"] [dispE [js, 2] arg]]
+            ppB2H (dispE [js, 1] func) ["(", ")"] [dispE [js, 2] arg]
+        , ["JsCall", func, [arg1 ,, args]] |=>
+            ppW <| concat
+            [ [ dispE [js, 1] func, ppT "(" ]
+            , [ dispE [js, 2] arg1 ]
+            , concat <| forMap args <| arg -> [ppT ",", dispE [js, 2] arg]
+            , [ ppText ")" ]
+            ]
+            -- ppH 
+            -- [ dispE [js, 1] func
+            -- , ppT "("
+            -- , ppI <| ppH <| concat
+            --   [ [ dispE [js, 2] arg1 ]
+            --   , concat <| forMap args <| arg -> [ppT ",", dispE [js, 2] arg, ppN]
+            --   ]
+            -- , ppT ")"
+            -- ]
+        , ["JsMethod", obj, method] |=>
+            ppW [dispE [js, 1] obj, ppT ".", ppText method]
+
+        , ["JsList", []] |=>
+            ppT "[]"
+
+        -- , ["JsList", elems] |=>
+        --     let [elemFinalTl, elems2] = 
+        --         while [[js] : Maybe JsExpr, [] : List JsExpr] <|
+        --         [ [ ["JsList", [[elem], elems] ] ], elems3] |=>
+        --         [ elems, [elem ,, elems3] ];
+        --     let elems3 = reverse elems2;
+        --     match elemFinalTl
+        --     [ [ ["JsDatum", []] ] |=>
+        --         let elemsDt : PrettyParts = 
+        --             concat <| forMap elems3 <| elem -> [ ["[ ", dispM [js, 1] [elem]], [", ", dtNil] ];
+        --         let elemFinalDt : PrettyPart = ["", dtLeaf "null"];
+        --         let closeDt : PrettyPart = 
+        --             ["", dtLeaf <| strCat <| forMap elems3 <| _ -> " ]"];
+        --         dtBranch <| concat [elemsDt, [elemFinalDt], [closeDt]]
+        --     , _ |=>
+        --         match js
+        --         [ ["JsList", []] |=>
+        --             dtLeaf "[]"
+        --         , ["JsList", [elem1,,elems]] |=>
+        --             dtBranch <| concat
+        --             [ [ ["[", dispM [js, 1] elem1] ]
+        --             , forMap elems <| elem ->
+        --                 [",", dispM [js, 1] elem]
+        --             , [ ["]", dtNil] ]
+        --             ]
+        --         ]
+        --     ]
+
+        , ["JsList", [elem1,,elems]] |=>
+            ppW <| concat
+            [ [ ppT "[", dispM [js, 1] elem1]
+            , concat <| forMap elems <| elem -> [ppT ",", dispM [js, 1] elem]
+            , [ ppT "]" ]
+            ]
+            -- ppLH ["[", ",", "]"]] <| concat
+            -- [ [ ppT "[", dispM [js, 1] elem1]
+            -- , concat <| forMap elems <| elem -> [ppT ",", dispM [js, 1] elem]
+            -- , [ ppT "]" ]
+            -- ]
+        ];
+    let result2 = jspParen2 ctx js result;
+    result2;
+
+
+
+let jsPrettyExpr : { JsExpr -> PrettyTree } =
+    expr ->
+    jsPrettyExpr0 jsDefaultCtx expr;
+
+    
+
+let jsPrettyStmt : { JsStmt -> PrettyTree } =
+    stmt ->
+    jsPrettyStmt0 jsPrettyExpr0 stmt;
+
+let jsPrettyStmts : { JsStmts -> PrettyTree } =
+    stmts ->
+    jsPrettyStmts0 jsPrettyStmt stmts;
+
+
+let ppShow : { Str -> Pretty -> Str } =
+    rec <| (pp0 : { Str -> Pretty -> Str }) ->
+    indent -> pretty ->
+    let pp = pp0 indent;
+    match pretty
+    [ ["PpText", txt] |=>
+        txt
+    , ["PpLines", lines] |=>
+        strJoin "\n" <| map pp lines
+    , ["PpTree", branches] |=>
+        strJoin "\n" <| map pp branches
+    , ["PpConcat", "V", parts] |=>
+        let indent2 = strCat [indent, "    "];
+        let nlIndent = strCat ["\n", indent];
+        strJoin nlIndent <| map (pp0 indent2) parts
+    , ["PpConcat", "H", parts] |=>
+        -- TODO check if any of the parts are multi-line
+        -- TODO check if all the parts will fit on one line
+        strJoin " " <| map pp parts
+    , ["PpConcat", "W", parts] |=>
+        -- TODO check if any of the parts are multi-line
+        -- TODO check if all the parts will fit on one line
+        strJoin " " <| map pp parts
+    , ["PpList", [opn,sep,cls], elems] |=>
+        strCat [opn, strCat <| intersperse sep <| map pp elems, cls]
+    , ["PpList2", "H", [opn,sep,cls], elems] |=>
+        strCat [opn, strCat <| intersperse sep <| map pp elems, cls]
+    , ["PpList2", "V", [opn,sep,cls], elems] |=>
+        let indent2 = strCat [indent, "    "];
+        let nlIndent = strCat ["\n", indent];
+        let nlIndent2 = strCat ["\n", indent2];
+        let elemsPp = strJoin nlIndent2 <| map (pp0 indent2) elems;
+        strCat [nlIndent, opn, nlIndent2, elemsPp, nlIndent, cls]
+    , ["PpBracket2", "H", before, [opn, cls], between] |=>
+        strCat [pp before, opn, strCat <| map pp between, cls]
+    , ["PpLabels", entries] |=>
+        strJoin "\n" <| 
+        forMap entries <| 
+        [label, content] ->
+        strCat [label, " ", pp content]
+    ,  ["PpIndent", part] |=>
+        let indent2 = strCat [indent, "    "];
+        pp0 indent2 part
+    ,  ["PpNewline", []] |=>
+        strCat ["\n", indent]
+    , _ |=>
+        error ["ppShow", "missing case", hd pretty]
+    ];
+
+
+let prettyShow : { Pretty -> Str } =
+    pretty -> 
+    debug2 ["prettyShow", "TODO"] <| ->
+    strJoin "\n"
+    [ "// prettyShow TODO"
+    -- , strCat ["// ", showAny pretty]
+    , ppShow "" pretty
+    , ""
+    ];
+
+
+
+let ppIndentIncrement = 4;
+
+-- let PrettyLine = { [ Int, (List Str) ] };
+-- let PrettyLines = { [ (List Str), (List PrettyLine), (List Str) ] };
+
+let PrettyLine = { [Int, Str] };
+let PrettyLines = { Str | (List PrettyLine) };
+
+
+let ppShowVertical : { Int -> (List PrettyLines) -> (List PrettyLine) } =
+    indent -> partsPp ->
+    let lines = 
+        concat <|
+        forMap partsPp <|
+        partPp ->
+        ifStr partPp
+        [ st -> 
+            [ [indent, st] ]
+            -- [ [indent, strCat ["/* ", showInt indent, " */", st]] ]
+        , lines -> 
+            lines
+        ];
+    lines;
+
+let ppShowVertical3 : { Int -> (List PrettyLines) -> (List (List PrettyLine)) } =
+    indent -> partsPp ->
+    let lines = 
+        forMap partsPp <|
+        partPp ->
+        ifStr partPp
+        [ st -> 
+            [ [indent, st] ]
+            -- [ [indent, strCat ["/* ", showInt indent, " */", st]] ]
+        , lines -> 
+            lines
+        ];
+    lines;
+
+let ppShowVertical2 : { Int -> (List PrettyLines) -> (List PrettyLine) } =
+    indent -> partsPp ->
+    match partsPp
+    [ [] |=> []
+    , [pt1 ,, pts] |->
+        guardStr pt1 <| pt1Str =>
+        let indent2 = indent + ppIndentIncrement;
+        [  [indent, pt1Str]
+        -- [  [indent, strCat ["/* ", showInt indent, " */", pt1Str]]
+        ,, ppShowVertical indent2 pts
+        ]
+    , _ |=>
+        ppShowVertical indent partsPp
+    ];
+
+let pp2Vert = ppShowVertical;
+
+let ppToLines : { Int -> PrettyLines -> (List PrettyLine) } =
+    indent -> a ->
+    ifStr a
+    [ aStr    -> [[indent, aStr]]
+    , aLines  -> aLines
+    ];
+
+let ppHorizTwo : { Int -> PrettyLines -> PrettyLines -> PrettyLines } =
+    indent -> a -> b ->
+    match []
+    [ ->
+        guardStr a <| aStr ->
+        guardStr b <| bStr =>
+        strCat [aStr, bStr]
+    , _ =>
+        let a2 = ppToLines indent a;
+        let b2 = ppToLines indent b;
+        match [reverse a2, b2]
+        [ [[a1,,as],[b1,,bs]] |=>
+            let [a1Indent, a1Str] = a1;
+            let [b1Indent, b1Str] = b1;
+            let c = [[a1Indent, strAdd a1Str b1Str]];
+            concat [reverse as, c, bs]
+        , [_, _] |=>
+            concat [a2, b2]
+        ]
+    ];
+
+let pp2Horiz : { Int -> (List PrettyLines) -> PrettyLines } =
+    indent -> partsPp ->
+    match partsPp
+    [ _ -> 
+        guardList2 guardStr partsPp <| partsStrs =>
+        strJoin " " partsStrs        
+    , [] |=>
+        ""
+    , [pt1 ,, pts1] |=>
+        let result0 : PrettyLines = 
+            ifStr pt1 
+            [ pt1Str -> [[indent, pt1Str]] : PrettyLines
+            , pt1Lines -> pt1Lines : PrettyLines
+            ];
+        forFoldLeft result0 pts1 <|
+        result1 -> pt2 ->
+        ppHorizTwo indent result1 pt2
+    ];
+
+-- let pp2Horiz : { Int -> (List PrettyLines) -> PrettyLines } =
+
+
+let PpShowLines = { Int -> Pretty -> PrettyLines };
+
+let ppMapIndent : { PpShowLines -> Int -> (List Pretty) -> (List PrettyLines) } =
+    pp -> indent -> parts ->
+    match parts 
+    [ [] |=> [] 
+    , [pt1 ,, pts] |=>
+        let indent2 = indent + ppIndentIncrement;
+        [  pp indent pt1
+        ,, map (pp indent2) pts
+        ]
+    ];
+
+let ppIntersperseLines : { Int -> Str -> (List (List PrettyLine)) -> (List PrettyLine) } =
+    indent -> sep -> lines ->
+    if (sep == "")
+    [ -> concat lines
+    , -> concat <| intersperse [[indent, sep]] lines
+    ];
+
+let ppMaxLen = 40;
+-- let ppMaxLen = 194;
+-- let ppMaxLen = 193;
+-- let ppMaxLen = 80;
+
+let ppLineTooLong : { Int -> Bool } =
+    len ->
+    len > ppMaxLen;
+    -- false;
+
+let ppFitsLine : { PrettyLines -> PrettyLines -> Bool } =
+    a -> b ->
+    error ["TODO", "ppFitsLine"];
+
+let ppJoinHoriz : { PrettyLines -> PrettyLines -> PrettyLines } =
+    a -> b ->
+    error ["TODO", "ppJoinHoriz"];
+
+let ppShowLines : { Int -> Pretty -> PrettyLines } =
+    rec <| (pp0 : { Int -> Pretty -> PrettyLines }) ->
+    indent -> pretty ->
+    let pp = pp0 indent;
+    let indent2 = indent + ppIndentIncrement;
+    let ppIndent = pp0 indent2;
+    -- debug2 ["ppShowLines", indent, hd pretty, hd (tl (pretty))] <| ->
+    match pretty
+    [ ["PpText", txt] |=>
+        txt
+    , ["PpConcat", "V", parts] |=>
+        -- TODO ? indent subsequent lines further than the first line ?
+        -- TODO ?   or should that be considered a different orientation, ? outdented-paragraph ?
+        let indent2 = indent + ppIndentIncrement;
+        -- let partsPp = map (pp0 indent2) parts;
+        let partsPp = map pp parts;
+        ppShowVertical indent partsPp
+    , ["PpConcat", "H", parts] |=>
+        let indent2 = indent + ppIndentIncrement;
+        -- let partsPp = map (pp0 indent2) parts;
+        let partsPp = ppMapIndent pp0 indent parts;
+        match []
+        [ ->
+            guardList2 guardStr partsPp <| partStrs =>
+            let totalLength = forFoldLeft (0 : Int) partStrs <| accum -> ps -> accum + strLen ps;
+            -- if (totalLength < ppMaxLen)
+            if (not (ppLineTooLong totalLength))
+            -- if true
+            [ -> 
+                strJoin " " partStrs
+            , ->
+                -- debug2 ["ppH", "overflow", indent, partsPp] <| ->
+                ppShowVertical2 indent partsPp
+            ]
+        , _ =>
+            ppShowVertical2 indent partsPp
+        ]
+    -- , ["PpConcat", "H", parts] |=>
+    --     let parts0 = parts : List Pretty;
+    --     let result0 = "" : PrettyLines;
+    --     let result = 
+    --         loop2 [parts0, result0] <|
+    --         [parts1, result1] ->
+    --         match parts1
+    --         [ [] |=> 
+    --             break result1
+    --         , [["PpNewline", []], pt2 ,, parts2] |=>
+    --             let ptPp = pp pt2;
+    --             let result3 : PrettyLines = 
+    --                 if (ppFitsLine result1 ptPp)
+    --                 [ ->
+    --                     ppJoinHoriz result1 ptPp
+    --                 , ->
+    --                     ppShowVertical indent [result1, ptPp]
+    --                 ];
+    --             let parts3 = parts2 : List Pretty;
+    --             continue [parts2, result3]
+    --         , [pt2 ,, parts2] |=>
+    --             let ptPp = pp pt2;
+    --             let result3 = ppJoinHoriz result1 ptPp;
+    --             continue [parts2, result3]
+    --         ];
+    --     result
+    , ["PpConcat", "W", parts] |=>
+        pp ["PpConcat", "H", parts]
+        
+    , ["PpList2", "V", [opn,sep,cls], elems] |=>
+        let indent2 = indent + ppIndentIncrement;
+        let partsPp = map (pp0 indent2) elems;
+        let lines = ppShowVertical3 indent2 partsPp;
+        -- let lines2 = intersperse [indent, sep] lines;
+        let lines2 = ppIntersperseLines indent sep lines;
+        let opnLn = [indent, opn];
+        let clsLn = [indent, cls];
+        concat [ [opnLn], lines2, [clsLn] ]
+
+    , ["PpList2", "H", [opn,sep,cls], elems] |=>
+        let indent2 = indent + ppIndentIncrement;
+        let partsPp = map (pp0 indent2) elems;
+        -- let partsPp = ppMapIndent pp0 indent elems;
+        let opnLn = [indent, opn];
+        let sepLn = [indent, sep];
+        let clsLn = [indent, cls];
+        match []
+        [ 
+          ->
+            -- TODO check if all the parts will fit on one line
+            guardList2 guardStr partsPp <| partStrs =>
+            let totalLength = forFoldLeft (0 : Int) partStrs <| accum -> ps -> accum + strLen ps;
+            -- if (totalLength < ppMaxLen)
+            if (not (ppLineTooLong totalLength))
+            -- if true
+            [ -> 
+                -- debug2 ["PpList2/str", opn, sep, cls, partStrs] <| ->
+                strCat [opn, strJoin sep partStrs, cls]
+            , ->
+                -- debug2 ["PpList2/lines", opn, sep, cls, length partsPp] <| ->
+                -- let lines = intersperse sepLn <| ppShowVertical indent2 partsPp;
+                let lines = ppShowVertical3 indent2 partsPp;
+                -- let lines2 = intersperse sepLn lines;
+                let lines2 = ppIntersperseLines indent sep lines;
+                concat [ [opnLn], lines2, [clsLn] ]
+            ]
+        , 
+          _ =>
+            let lines = ppShowVertical3 indent2 partsPp;
+            -- let lines2 = intersperse sepLn lines;
+            let lines2 = ppIntersperseLines indent sep lines;
+            concat [ [opnLn], lines2, [clsLn] ]
+        ]
+
+    , ["PpList2", "W", [opn,sep,cls], elems] |=>
+        -- TODO try to place elems on one line, or else wrap
+        pp ["PpList2", "H", [opn,sep,cls], elems]
+
+    , ["PpBracket2", "H", before, [opn,cls], between] |=>
+        let beforePp = pp before;
+        let betweenPp = map ppIndent between;
+        match []
+        [ 
+          ->
+            guardStr beforePp <| beforeStr ->
+            guardList2 guardStr betweenPp <| betweenStrs =>
+            let betweenLen = forFoldLeft (0 : Int) betweenStrs <| accum -> ps -> accum + strLen ps;
+            let totalLen = forFoldLeft (0 : Int) (concat [ [beforeStr, opn], betweenStrs, [cls] ]) <| len -> s -> len + strLen s;
+            if (not (ppLineTooLong totalLen))
+            -- if true
+            [ -> 
+                -- debug2 ["PpBracket2/str", opn, cls, betweenStrs] <| ->
+                strCat [beforeStr, opn, strJoin " " betweenStrs, cls]
+            , ->
+                -- debug2 ["PpBracket2/lines", opn, cls, length betweenPp] <| ->
+                pp2Vert indent
+                [ pp2Horiz indent [beforePp, opn]
+                , pp2Vert indent2 betweenPp
+                , cls
+                ]
+            ]
+        , 
+          _ =>
+            pp2Vert indent
+            [ pp2Horiz indent [beforePp, opn]
+            , pp2Vert indent betweenPp
+            , cls
+            ]
+        ]
+
+
+    ,  ["PpNewline"] |=>
+        error ["PpNewline should only occur (singly) within a PpConcat Horiz block"]
+
+    ,  ["PpIndent", part] |=>
+        pp0 (indent + ppIndentIncrement) part
+    ];
+
+
+let prettyShowLines : { Pretty -> Str } =
+    pretty ->
+    let lines = ppShowLines 2 pretty;
+    -- debug2 ["prettyShowLines/1", lines] <| ->
+    ifStr lines
+    [ lnStr -> lnStr 
+    , lns ->
+        strJoin "\n" <|
+        forMap lns <| [indent, content] -> 
+        -- debug2 ["prettyShowLines", indent, content] <| ->
+        strCat [strRepeat indent " ", content]
+    ];
+
+
+-- let isShort : { Str -> Int -> Bool } =
+--     s -> maxLen ->
+--     false;
+--     -- if (strLen s < maxLen)
+--     -- [ ->
+--     --     strContains s "\n"
+--     -- , ->
+--     --     false
+--     -- ];
+
+
+-- let ppShowStr : { Int -> Pretty -> Str } =
+--     rec <| (pp0 : { Int -> Pretty -> Str }) ->
+--     indent -> pretty ->
+--     let pp = pp0 indent;
+--     -- debug2 ["ppShowStr", indent, hd pretty, hd (tl (pretty))] <| ->
+--     match pretty
+--     [ ["PpText", txt] |=>
+--         -- debug2 ["PpText", txt] <| ->
+--         txt
+--     , ["PpConcat", "V", parts] |=>
+--         let indent2 = indent + 1;
+--         let partsPp = map (pp0 indent2) parts;
+--         let lines : Str = 
+--             strCat <|
+--             forMap partsPp <|
+--             partS ->
+--             if (isShort partS ppMaxLen)
+--             -- [ -> strCat ["\n", strRepeat indent " ", partS]
+--             [ -> strCat ["\n", "    ", partS]
+--             , -> partS
+--             ];
+--         lines
+--     , ["PpConcat", "H", parts] |=>
+--         -- TODO check if any of the parts are multi-line
+--         -- TODO check if all the parts will fit on one line
+--         let indent2 = indent + 1;
+--         -- let partsS = map (pp0 indent2) parts;
+--         pp ["PpConcat", "V", parts]
+--         -- match []
+--         -- [ ->
+--         --     guardList2 guardStr partsPp <| partStrs =>
+--         --     strJoin " " partStrs
+--         -- , _ =>
+--         --     pp ["PpConcat", "V", parts]
+--         -- ]
+--     , ["PpConcat", "W", parts] |=>
+--         pp ["PpConcat", "H", parts]
+--         
+--     , ["PpList2", "V", [opn,sep,cls], elems] |=>
+-- 
+--         let indent2 = indent + 1;
+--         let partsPp = map (pp0 indent2) elems;
+--         let lines : List Str = 
+--             forMap partsPp <|
+--             partS ->
+--             if (isShort partS ppMaxLen)
+--             -- [ -> strCat ["\n", strRepeat indent " ", partS]
+--             [ -> strCat ["\n", "    ", partS]
+--             , -> partS
+--             ];
+--         let lines2 = strCat <| intersperse sep lines;
+--         strCat [ opn, lines2, cls ]
+-- 
+--     , ["PpList2", "H", [opn,sep,cls], elems] |=>
+--         -- TODO try to place elems on one line, or else all vertical
+--         pp ["PpList2", "V", [opn,sep,cls], elems]
+-- 
+--     , ["PpList2", "W", [opn,sep,cls], elems] |=>
+--         -- TODO try to place elems on one line, or else wrap
+--         pp ["PpList2", "V", [opn,sep,cls], elems]
+-- 
+--     ];
+
+
+-- let prettyShowStr : { Pretty -> Str } =
+--     pretty -> 
+--     -- debug2 ["prettyShowStr"] <| ->
+--     strJoin "\n"
+--     [ "// prettyShow TODO"
+--     -- , strCat ["// ", showAny pretty]
+--     , ppShowStr 2 pretty
+--     , ""
+--     ];
+

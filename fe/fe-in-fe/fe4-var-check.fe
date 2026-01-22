@@ -1,0 +1,271 @@
+language ferrum/0.1
+
+
+let VarCheckError =
+    { ["VarUnknown", Loc, Str]
+    | ["VarShadow", Loc, Str]
+    };
+
+let VcEnv = List Str;
+
+let VarCheck = { TmTyCtx -> ExprLoc -> VcEnv -> (List VarCheckError) };
+
+
+let vcInitEnv : VcEnv =
+    forMap initEnv <| [name, val] -> name;
+
+let patCheckLoc : { VarCheck -> TmTyCtx -> ExprLoc -> VcEnv -> [(List VarCheckError), VcEnv] } =
+    vc ->
+    rec <| (pc : { TmTyCtx -> ExprLoc -> VcEnv -> [(List VarCheckError), VcEnv] }) ->
+    ctx -> patLoc @ [pat, loc] -> env ->
+    -- debug2 ["patCheck", ctx, pat] <| ->
+    match ctx
+    [ "Term" |=> 
+        match pat
+        [ ["EVar", "_"] |=>
+            [[], env]
+        , ["EVar", a] |=>
+            if (isElem a env)
+            [ -> [[["VarShadow", loc, a]], env]
+            , -> [[], [a ,, env]]
+            ]
+        , ["ELit", a] |=> 
+            [[], env]
+        , ["EAs", a, pat2] |=> 
+            let [e1, env2] = pc ctx [["EVar", a], loc] env;
+            let [e2, env3] = pc ctx pat2 env2;
+            [append e1 e2, env3]
+        -- , ["EList", [], []] |=> 
+        --     [[], env]
+        -- , ["EList", [], [listTail]] |=> 
+        --     pc ctx listTail env
+        -- , ["EList", [elem,,elems], listTail] |=> 
+        --     let [e1, env2] = pc ctx elem env;
+        --     let [e2, env3] = pc ctx [["EList", elems, listTail], loc] env2;
+        --     [append e1 e2, env3]
+        , ["EList", elems, tailMb] |=> 
+            let errs0 = [] : List VarCheckError;
+            let elems0 = append elems tailMb;
+            let [_, errs2, env2] = 
+                while [elems0, errs0, env] <|
+                [[elem ,, elems2], errs2, env2] |=>
+                let [errs3, env3] = pc ctx elem env2;
+                let errs4 = append errs3 errs2;
+                [elems2, errs4, env3];
+            [errs2, env2]
+        , ["EType", term, [["EAs", name, ty], _]] |=>
+            -- debug2 ["patCheck/EType/EAs", name] <| ->
+            let env2 = [name ,, env];
+            let [patErrs, patEnv] = pc ctx term env;
+            let typErrs = vc ctx ty env2;
+            let errs = append patErrs typErrs;
+            let patEnv2 = [name ,, patEnv];
+            [errs, patEnv2]
+        , ["EType", term, ty] |=>
+            let [patErrs, patEnv] = pc ctx term env;
+            let typErrs = vc ctx ty env;
+            let errs = append patErrs typErrs;
+            [errs, patEnv]
+        , ["ETermBrackets", expr] |=>
+            pc "Term" expr env
+        , ["ETypeBrackets", expr] |=>
+            pc "Type" expr env
+            -- debug2 ["TODO patCheck", pat] <| ->
+            -- [[], env]
+        , _ |=> 
+            error ["TODO patCheck", pat]
+        ]
+    , "Type" |=>
+        match pat
+        [ ["EAs", name, typ] |=>
+            let env2 = [name ,, env];
+            let errs = vc ctx typ env2;
+            [errs, env2]
+        , ["EType", [["EVar", name], _], typ] |=>
+            let env2 = [name ,, env];
+            let errs = vc ctx typ env2;
+            [errs, env2]
+        , ["ETypeBrackets", typ] |=>
+            pc ctx typ env
+        , _ |=>
+            let errs = vc ctx patLoc env;
+            [errs, env]
+        ]
+    ];
+
+
+let varCheckDeclsLoc0 : { VarCheck -> TmTyCtx -> DeclLocs -> VcEnv -> [(List VarCheckError), VcEnv] } =
+    vc -> ctx -> decls -> env ->
+    let result0 = [] : List VarCheckError;
+    let [_, env4, result] = 
+        while [decls, env, result0] <|
+        [ [[pat, defn] ,, decls2], env2, result2] |=>
+        let [patErrs, env3] = patCheckLoc vc ctx pat env2;
+        let defnErrs = vc ctx defn env3;
+        let result3 = concat [patErrs, defnErrs, result2];
+        [decls2, env3, result3];
+    [result, env4];
+
+-- TODO ? this version embraces variable shadowing, rather than avoiding it
+-- TODO ? it has the advantage of preventing accidental access to the shadowed variables
+-- TODO ?   for example, when iterating down a list, this prevents unintended non-termination 
+-- TODO ?     caused by accidentally using the original list, where the tail of the list is intended
+-- TODO ? but is this better overall, more/less likely to cause confusion
+-- TODO ? it'll work with the new uniquifying fe-in-fe codegen, but not the fe-in-ts codegen, due to name clashes
+-- TODO ? it certainly avoids needing so many env/env2/env3/... like variables
+-- let varCheckDeclsLoc0 : { VarCheck -> DeclLocs -> VcEnv -> [(List VarCheckError), VcEnv] } =
+--     vc -> decls -> env ->
+--     let result = [] : List VarCheckError;
+--     let [_, env, result] = 
+--         while [decls, env, result] <|
+--         [ [[pat, defn] ,, decls], env, result] |=>
+--         let [patErrs, env] = patCheckLoc pat env;
+--         let defnErrs = vc defn env;
+--         let result = concat [patErrs, defnErrs, result];
+--         [decls, env, result];
+--     [result, env];
+
+let varCheckLoc : { TmTyCtx ->  ExprLoc -> VcEnv -> (List VarCheckError) } =
+    rec <| (vc : { TmTyCtx -> ExprLoc -> VcEnv -> (List VarCheckError) }) ->
+    ctx -> [expr, loc] -> env ->
+    -- debug2 ["varCheck", ctx, expr] <| ->
+    match expr
+    [ ["ELit", val] |=> 
+        []
+    , ["EApply", func, arg] |=> 
+        let e1 = vc ctx func env;
+        let e2 = vc ctx arg env;
+        append e1 e2
+    , ["EPair",h,t] |=> 
+        let e1 = vc ctx h env;
+        let e2 = vc ctx t env;
+        append e1 e2
+    , ["EList", elems, tlMb] |=> 
+        let e1 = forMap elems <| elem -> vc ctx elem env;
+        let e2 = forMap tlMb <| elem -> vc ctx elem env;
+        (concat <| append e1 e2)
+    , ["EVar", name] |=> 
+        if (isElem name env)
+        [ ->
+            []
+        , ->
+            [ ["VarUnknown", loc, name] ]
+        ]
+    , ["ELambda", argPat, body] |=> 
+        let [e1, env2] = patCheckLoc vc ctx argPat env;
+        let e2 = vc ctx body env2;
+        append e1 e2
+    , ["ELambdaMaybe", argPat, body] |=> 
+        let [e1, env2] = patCheckLoc vc ctx argPat env;
+        let e2 = vc ctx body env2;
+        append e1 e2
+    , ["ELambdaYes", argPat, body] |=> 
+        let [e1, env2] = patCheckLoc vc ctx argPat env;
+        let e2 = vc ctx body env2;
+        append e1 e2
+    , ["ELambdaNo", argPat, body] |=> 
+        let [e1, env2] = patCheckLoc vc ctx argPat env;
+        let e2 = vc ctx body env2;
+        append e1 e2
+    , ["ELets", decls, body] |=> 
+        let [declErrs, env2] = varCheckDeclsLoc0 vc ctx decls env;
+        let bodyErrs = vc ctx body env2;
+        append declErrs bodyErrs
+    , ["EOper", opName, args] |=> 
+        concat <| forMap args <| arg -> vc ctx arg env
+    , ["ETypeBrackets", ty] |=>
+        vc "Type" ty env
+    , ["ETermBrackets", term] |=>
+        vc "Term" term env
+    , ["EType", term, ty] |=>
+        vc ctx term env
+    , [tag ,, _] |=> 
+        error ["varCheck: missing case", tag, expr]
+    -- , _ |=> 
+    --     error ["varCheck: missing case", expr]
+    ];
+
+
+let varCheckDeclsLoc : { DeclLocs -> VcEnv -> [(List VarCheckError), VcEnv] } =
+    decls -> env ->
+    -- debug2 ["varCheckDecls", env] <| ->
+    varCheckDeclsLoc0 varCheckLoc "Term" decls env;
+
+
+let VarLoc = { [Str, Loc] };
+let VarLocs = List VarLoc;
+
+let vcDeclVars : { DeclLoc -> { [VarLocs, (List Str)] } } =
+    [pat, defn] ->
+    let [_, patLoc] = pat;
+    let [patErrs, patEnv] = patCheckLoc varCheckLoc "Term" pat [];
+    let bindingVars = forMap patEnv <| patVar -> [patVar, patLoc];
+    let defnErrs = varCheckLoc "Term" defn [];
+    let errs = concat [patErrs, defnErrs];
+    let freeVars = 
+        forFlatMap errs <| err ->
+        match err
+        [ ["VarUnknown", loc, name] |=>
+            [name]
+        , _ |=> 
+            []
+        ];
+    [bindingVars, freeVars];
+
+
+let varRemove1 : { VarLocs -> (List Str) -> VarLocs } =
+    varLocs -> vars ->
+    forFlatMap varLocs <| varLoc @ [var, _] ->
+    if (isElem var vars)
+    [ -> []
+    , -> [varLoc]
+    ];
+
+let varRemove2 : { (List Str) -> VarLocs -> (List Str) } =
+    vars -> varLocs ->
+    forFlatMap vars <| var ->
+    ifNil (lookup var varLocs)
+    [ -> [var]
+    , _ -> []
+    ];
+
+let varIntersect : { VarLocs -> (List Str) -> VarLocs } =
+    varLocs -> vars ->
+    forFlatMap varLocs <| varLoc @ [var, _] ->
+    if (isElem var vars)
+    [ -> [varLoc]
+    , -> []
+    ];
+
+let vcDeadCodeCheck : { DeclLocs -> (List Str) -> VarLocs } =
+    decls0 -> rootVars ->
+    let decls = reverse decls0;
+    let fringeVars = rootVars;
+    let deadVars = [] : VarLocs;
+    let [_, _, deadVarsResult] =
+        while [decls, fringeVars, deadVars] <|
+        [ [decl ,, decls2], fringeVars2, deadVars2 ] |=>
+        let bf @ [bindingVars, freeVars] = vcDeclVars decl;
+        let vi = varIntersect bindingVars fringeVars2;
+        let [fv, dv] =
+            ifNil vi
+            [ -> 
+                [ fringeVars2
+                , append bindingVars deadVars2
+                ]
+            , _ -> 
+                [ append freeVars (varRemove2 fringeVars2 bindingVars)
+                , deadVars2
+                ]
+            ];
+        -- debug2 ["FRINGE", fringeVars2] <| ->
+        -- debug2 ["VARS", bf, length fringeVars2, length deadVars2] <| ->
+        -- debug2 ["DEAD", dv] <| ->
+        [ decls2, fv, dv ];
+    deadVarsResult;
+
+
+
+
+
+

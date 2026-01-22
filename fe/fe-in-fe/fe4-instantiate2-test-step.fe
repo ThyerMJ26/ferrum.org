@@ -1,0 +1,163 @@
+language ferrum/0.1
+
+-- let tcDebug = debug;
+let tcDebug = _ -> [];
+
+-- ----
+-- Test Code for Instantiation
+-- ----
+
+let instantiateStrToNodes : { Str -> (List Node) } =
+    input ->
+    let instTmp1 : { Expr -> HeapStep } = 
+        expr ->
+        instantiate "Term" 0 [] expr <| addr ->
+        let _ = debug [addr];
+        -- let _ = debug [heap];
+        heapDone addr;
+    
+    -- let t2 = inst_tmp1 ["ELit", 77];
+    let instTmp2 = instTmp1 ["EApply", ["EApply", ["ELit", "+"], ["ELit", 33]], ["ELit", 44]];
+    let instNodes : { Expr -> (List Node) } =
+        expr ->
+        -- let [h1, addr] : {[Heap, Any]} = heapStepper heapEmpty (instTmp1 expr);
+        let [h1, addr] : {[Heap, Any]} = heapStepper (heapMk []) (instTmp1 expr);
+        let [_, h] = h1;
+        -- let t1 = map ([_,_,_,node:Node]->node) h;
+        let [h2, len] = h ["length"]; 
+        let t1 = loop ([h: Array Indirect, addr: Addr, nodes: List Node] ->
+          let _ = debug ["instNodes", addr, nodes];
+          if (addr==len)
+          [ -> break (reverse nodes)
+          , ->
+            let [h2, ind] = h ["get", addr];
+            let [_, _, _, node] = ind;
+            continue [h2, addr+1, [node,,nodes]]
+          ]
+        ) [h2,0,[]];
+        t1; 
+    -- -- let instTmp3 = instTmp1 (testParse3 "EXP" (scan "1 + 2"));
+    -- let instTmp3 = heapStepper heapEmpty <| instTmp1 (parseExpr (scan "1 + 2"));
+    instNodes (parseExpr (scan input));
+ 
+
+-- --------
+--  Test Code for Graph Reduction
+-- --------
+
+
+let graphReduceExprLoc : { InstantiateBuiltins -> ExprLoc -> Expr } =
+    instBuiltins -> expr ->
+
+    let heapOperations = (expr : ExprLoc) ->
+        -- instantiateBuiltins2 <| henv ->
+        instBuiltins <| henv ->
+        instantiateLoc "Term" 0 henv expr <| addr1 ->
+        reduceAll addr1 <| _ ->
+        readbackAddr [] "Term" addr1 <| expr -> 
+        let _ = debug ["Readback", expr];
+        heapDone expr;
+    
+    let heapEmpty = heapMk [];
+    let [heap2, expr1] = heapStepper heapEmpty (heapOperations expr);
+    let expr2 = cast Any Expr expr1;
+    expr2;
+
+let graphReduceExpr : { InstantiateBuiltins -> Expr -> Expr } =
+    instBuiltins -> expr ->
+    let expr2 = exprAddNilLoc expr;
+    graphReduceExprLoc instBuiltins expr2;
+
+let graphReduceDeclsLoc : { Bool -> [Heap, HEnv, (List DeclLoc)] -> [Heap, HEnv, (List DeclLoc)] } =
+    doGr -> [heap, henv, decls] ->
+
+    let heapOperations = (decls : List DeclLoc) ->
+        instantiateDecls instantiateTermLoc 0 henv [] decls <| [env, declsEnv] ->
+        heapMap ( [name: Str, addr: Addr] -> (k : HeapK DeclLoc) -> 
+            let _ = tcDebug ["graphReduceDeclsLoc/map", name, addr];
+            if doGr
+            [ -> reduceAll addr
+            , -> (k : { Nil -> HeapStep }) -> k []
+            ] <| _ ->
+            -- TODO pass a growing environment into readback, so that newer read-back decls can reference older ones
+            let rbEnv = filter ([name: Str, addr2: Addr] -> not (addr == addr2)) env;
+            readbackAddr rbEnv "Term" addr <| expr -> 
+            let decl = [["EVar", name], expr];
+            let declLoc = declAddNilLoc decl;
+            k declLoc
+        ) declsEnv <| decls2 ->
+        heapDone [env, decls2];
+    
+    let [heap2, envDecls] = heapStepper heap (heapOperations decls);
+    let [env, decls2] = cast Any {[HEnv, (List DeclLoc)]} envDecls;
+    [heap2, env, decls2];
+
+let graphReduceDecls : { Bool -> [Heap, HEnv, (List Decl)] -> [Heap, HEnv, (List Decl)] } =
+    doGr -> [heap, henv, decls] ->
+    let decls1 = declsAddNilLoc decls;
+    let [heap2, henv2, decls2] = graphReduceDeclsLoc doGr [heap, henv, decls1];
+    let decls3 = declsStripLoc decls2;
+    [heap2, henv2, decls3];
+
+let graphReduceInit : { InstantiateBuiltins -> [Heap, HEnv] } =
+    instBuiltins -> 
+
+    let heap1 = heapMk [];
+
+    let heapOperations = 
+        instBuiltins <| henv ->
+        heapDone henv;
+    
+    let [heap2, env] = heapStepper heap1 (heapOperations);
+    let env2 = cast Any HEnv env;
+    [heap2, env2];
+
+
+
+let graphReduceStr : { Str -> Str }
+    = input ->
+    let heapEmpty = heapMk [];
+    let [heap2, result1] = heapStepper heapEmpty <|
+        let expr = parseExpr (scan input);
+        instantiate "Term" 0 [] expr <| addr ->
+        traceHeap addr <| _ ->
+        reduceAll addr <| _ ->
+        traceHeap addr <| _ ->
+        readbackAddr [] "Term" addr <| expr -> 
+        heapDone (showExpr expr);
+    let result2 = cast Any Str result1;
+    result2;  
+
+let graphReduceStrToExpr : { Str -> Expr } =
+    input ->
+    let expr = parseExprStr input;
+    let heapOperations = (expr : Expr) ->
+        instantiate "Term" 0 [] expr <| addr1 ->
+        reduceAll addr1 <| _ ->
+        readbackAddr [] "Term" addr1 <| expr -> 
+        heapDone expr;
+         
+    let heapEmpty = heapMk [];
+    let [heap2, expr1] = heapStepper heapEmpty (heapOperations (parseExpr (scan input)));
+    let expr2 = cast Any Expr expr1;
+    expr2;
+
+
+-- --------
+--  Test Code for Readback
+-- --------
+
+
+let instantiateReadBack : { Str -> Expr } =
+    input ->
+    let instReadBack : { Expr -> HeapStep } = 
+        expr ->
+        instantiate "Term" 0 [] expr <| addr ->
+        let _ = debug [addr];
+        readbackAddr [] "Term" addr <| expr2 ->
+        heapDone expr2;
+    
+    let heapEmpty = heapMk [];
+    let [heap2, expr1] = heapStepper heapEmpty (instReadBack (parseExpr (scan input)));
+    let expr2 = cast Any Expr expr1;
+    expr2;

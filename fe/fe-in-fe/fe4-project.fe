@@ -1,0 +1,79 @@
+language ferrum/0.1
+
+let ProjectLine = { [Str,,(List Str)] };
+let Project = List ProjectLine;
+
+
+-- let ProjectParsed = List (List Decl);
+let ProjectParsed = List (List DeclLoc);
+
+-- ProjectCache = List { [Str, ProjectParsed, CodeGenState CGEnv] };
+
+
+let loadProject : { Str -> (IoA Project) } =
+    filename -> returnK ->
+    readFile filename <| projFileContents ->
+    let pTokens = scanFile filename projFileContents;
+    let pExpr = parseExpr pTokens;
+    -- print projFileContents <| _ ->
+    -- print pExpr <| _ ->
+
+    let convertItem : { Expr -> Str } = 
+        itemExpr ->
+        match itemExpr
+        [ ["ELit", item] |=>
+            ifStr item
+            [ item2 -> 
+                item2
+            , _ -> 
+                error ["expected a string"]
+            ]
+        , _ |=> 
+            error ["expected a string"]
+        ];
+
+    let convertLine : { Expr -> (ListNonEmpty Str) } =
+        lineExpr ->
+        match lineExpr
+        [ ["EList", exprs, []] |=>
+            let lines = map convertItem exprs;
+            let lines = lines |> justTrustMeCast (List Str) (ListNonEmpty Str); -- TODO fix this fudge
+            lines
+        , _ |=> error "expected a list"
+        ];
+
+    let proj = 
+        match pExpr
+        [ ["EList", [ ["ELit", "project"], ["EList", lineExprs, []]], []] |=>
+            map convertLine lineExprs
+        , _ |=> error ["expected a project, but got", pExpr]
+        ];
+
+    returnK proj;
+
+
+let loadProjContents : { Str -> Project -> (IoA ProjectParsed) } =
+    projDir -> project -> returnK ->
+    ioMap ( (line: ProjectLine) -> (returnK2: { (List DeclLoc) -> Io } ) ->
+        match line
+        [ ["primitives", filename] |=>
+            -- Just ignore the "primitives" file for now, 
+            --   as support for the "primitive" primitive has not yet been added.
+            returnK2 []
+        , ["source", filename] |=>
+            let filename2 = pathJoin [projDir, filename];
+            readFile filename2 <| fileContents ->
+            -- io2Print (strCat ["Scanning File ", filename]) <| _ ->
+            let tokens = scanFile filename fileContents;
+            -- io2Print (strCat ["Parsing File ", filename]) <| _ ->
+            let decls = parseDeclsLoc tokens;
+            returnK2 decls
+        , ["text", name, filename] |=>
+            let filename2 = pathJoin [projDir, filename];
+            readFile filename2 <| fileContents ->
+            let textDecl : List Decl = [ [ ["EVar", name], ["ELit", fileContents] ] ];
+            let textDeclLoc : List DeclLoc = declsAddNilLoc textDecl;
+            returnK2 textDeclLoc
+        ]
+    ) project <| parsedProj ->
+    returnK parsedProj;

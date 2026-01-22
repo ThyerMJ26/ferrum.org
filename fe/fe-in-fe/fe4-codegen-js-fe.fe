@@ -1,0 +1,383 @@
+language ferrum/0.1
+
+
+let jsVar2 : { Str -> JsExpr } =
+    name ->
+    let prefix = if (isPrim name) [ -> "_.", -> "v_"];
+    jsVar <| strCat [prefix, name];
+
+let jsLet2 : { (Maybe JsExpr) -> JsExpr -> JsStmt } =
+    pat -> defn ->
+    match pat
+    [ [] |=>
+        jsExpr defn
+    , [pat2] |=>
+        jsLet pat2 defn
+    ];
+
+-- let jsLetUndefined2 : { (Maybe JsExpr) -> JsStmts } =
+--     patMb ->
+--     match patMb
+--     [ [] |=>
+--         []
+--     , [pat] |=>
+--         [ jsLetUndefined pat ]
+--     ];
+
+-- let jsAssign2 : { (Maybe JsExpr) -> JsExpr -> JsStmt } =
+--     lhsMb -> rhs ->
+--     match lhsMb
+--     [ [] |=>
+--         jsExpr rhs
+--     , [lhs] |=>
+--         jsAssign lhs rhs
+--     ];
+
+
+
+-- let patBindTop : { Expr -> Expr } =
+--     rec <| ( cg : { Expr -> Expr } ) -> 
+--     expr ->
+--     match expr
+--     [ ["EVar", "_"] |=> expr
+--     , ["EVar", var] |=> expr
+--     , ["ELit", val] |=> expr
+--     , ["EList", elems, listTail] |=>
+--         let elems2 = map cg elems;
+--         let tail2 = maybeMap cg listTail;
+--         ["EList", elems2, tail2 ]
+--     , ["EType", exp, ty] |=> cg exp
+--     , ["EAs", name, exp] |=> ["EVar", name]
+--     , ["ETermBrackets", exp] |=> cg exp    
+--     , _ |=> error ["missing case patBindTop", expr]
+--     ];
+
+let patBindAs : { Expr -> (List {[Str, Expr]}) } =
+    rec <| (pba : { Expr -> (List {[Str, Expr]}) }) ->
+    expr0 ->
+    -- let _ = debug ["PBA", show2 expr];
+    match expr0
+    [ ["EAs", name, asExpr] |=> 
+        let asPats1 = pba asExpr;
+        let asPats2 = [ [name, asExpr],, asPats1];
+        asPats2
+    , ["EList", listElems, listTail] |=>
+        let elems = append listElems listTail;
+        let asPats = concat (map pba elems);
+        asPats
+    , ["ETermBrackets", expr] |=>
+        pba expr
+    , ["EType", expr, typ] |=>
+        pba expr
+    , ["EVar", _] |=> []
+    , ["ELit", _] |=> []
+    -- , _ |=> []
+    , _ |=> error ["missing case patBindAs", expr0]
+    ];
+
+-- TODO ? implement patBindValJs and patBindVarJs together and return a 2-tuple of aruments ?
+-- TODO   the two functions mirror each other and are typically used together
+
+let patBindValJs1 : { Expr -> (Maybe JsExpr) } = 
+    rec <| ( pbv : { Expr -> (Maybe JsExpr) } ) ->
+    pat ->
+    match pat
+    [ ["EVar", var] |=> []
+    , ["ELit", val] |=> [ jsDatum val ]
+    , ["EList", elems, listTail] |=>
+        let tlJs : Maybe JsExpr = 
+            match listTail
+            [ [] |=> [ jsNil ]
+            , [t] |=> pbv t
+            ];
+        let [_, result] = 
+            while [reverse elems: List Expr, tlJs: Maybe JsExpr] <|
+            [[x,,xs], listJs] |=> [xs, [ jsList [pbv x, listJs] ] ];
+        result
+    , ["EType", exp, ty] |=> pbv exp
+    , ["EAs", pat2, exp] |=> pbv exp
+    , ["ETermBrackets", exp] |=> pbv exp
+    , _ |=> error ["missing case patBindValJs1", pat]
+    ];
+
+let patBindValJs2 : { Expr -> JsExpr } = 
+    pat ->
+    match (patBindValJs1 pat)
+    [ [] |=> jsVar "undefined"
+    , [patJs] |=> patJs
+    ];
+
+let patBindVarJs1 : { Expr -> (Maybe JsExpr) } = 
+    rec <| ( pbv : { Expr -> (Maybe JsExpr) } ) ->
+    pat ->
+    match pat
+    [ ["EVar", "_"] |=> []
+    , ["EVar", var] |=> [ jsVar2 var ]
+    , ["ELit", val] |=> []
+    , ["EList", elems, listTail] |=>
+        let tlJs : Maybe JsExpr = 
+            match listTail
+            [ [] |=> []
+            , [t] |=> pbv t
+            ];
+        let [_, result] = 
+            while [reverse elems: List Expr, tlJs: Maybe JsExpr] <|
+            [[x,,xs], listJs] |=> [xs, [ jsList [pbv x, listJs] ] ];
+        result
+    , ["EType", exp, ty] |=> pbv exp
+    , ["EAs", name, exp] |=> [ jsVar2 name ]
+    , ["ETermBrackets", exp] |=> pbv exp
+    , _ |=> error ["missing case patBindVarJs1", pat]
+    ];
+
+let patBindVarJs2 : { Expr -> JsExpr } = 
+    pat ->
+    match (patBindVarJs1 pat)
+    -- [ [] |=> jsVar "undefined"
+    [ [] |=> jsVar ""
+    , [patJs] |=> patJs
+    ];
+
+
+let CgExprJs  = { Expr -> JsExpr };
+-- let CgBody    = { CgExprJs -> CgExprJs };
+let CgMixin   = { CgExprJs -> CgExprJs };
+
+let CgDeclJs = { CgExprJs -> [Expr,Expr] -> (List JsStmt) };
+-- let cgDeclJs : CgDeclJs =
+--     cg -> [pat,exp] ->
+--     jsLet (cg pat) (cg exp);
+
+let cgDeclJs : CgDeclJs =
+    cg -> [pat,exp] ->
+    -- let _ = debug ["cgDeclJs", "pat", pat];
+    -- let _ = debug ["cgDeclJs", "exp", exp];
+    let letStmt = 
+        jsLet2 (patBindVarJs1 pat) (cg exp);
+    let asStmts = 
+        for (patBindAs pat) <| [asName, asExpr] ->
+        jsLet (patBindVarJs2 asExpr) (jsVar2 asName); 
+    [ letStmt,, asStmts ];
+
+
+let CgDeclsJs = { CgExprJs -> (List {[Expr,Expr]}) -> (List JsStmt) };
+let cgDeclsJs : CgDeclsJs =
+    cgExp -> decls ->
+    concat <|
+    for decls <| decl -> 
+    cgDeclJs cgExp decl;
+
+
+let cgExprJs0 : { CgExprJs -> CgExprJs } = 
+    (cg: { Expr -> JsExpr }) -> 
+    (expr: Expr) -> 
+    match expr
+    [ ["EVar", "if"] |=> 
+        jsVar "_.if2"
+    , ["EVar", var] |=> 
+        -- dtLeaf (cgPat expr)
+        jsVar2 var
+    , ["ELambda", arg, body] |=> 
+        let bodyJs = cg body;
+        let [_, bodyJs2] = 
+            while [reverse (patBindAs arg): List {[Str, Expr]}, bodyJs: JsExpr] <| 
+            [ [ [name, asPat],,pbas], bodyJs3 ] |=>
+            [ pbas, jsCall (jsVar "rt.as") [jsVar2 name, jsLambdaExpr (patBindVarJs1 asPat) bodyJs3] ];
+        let patJs = patBindVarJs1 arg;
+        jsLambdaExpr patJs bodyJs2
+    , ["ELambdaYes", arg, body] |=> 
+        let bodyJs = cg body;
+        let [_, bodyJs2] = 
+            while [reverse (patBindAs arg): List {[Str, Expr]}, bodyJs: JsExpr] <| 
+            [ [ [name, asPat],,pbas], bodyJs3 ] |=>
+            [ pbas, jsCall (jsVar "rt.as") [jsVar2 name, jsLambdaExpr (patBindVarJs1 asPat) bodyJs3] ];
+        let patJs = patBindVarJs1 arg;
+        let bodyJs3 = jsList [[bodyJs2], [jsNil]];
+        jsLambdaExpr patJs bodyJs3
+    , ["ELambdaMaybe", arg, body] |=> 
+        let bodyJs = cg body;
+        let [_, bodyJs2] = 
+            while [reverse (patBindAs arg): List {[Str, Expr]}, bodyJs: JsExpr] <| 
+            [ [[name, asPat],,pbas], bodyJs3] |=>
+            [pbas, jsCall (jsVar "rt.as") [jsVar2 name, jsLambdaExpr (patBindVarJs1 asPat) bodyJs3] ];
+        let patJs = patBindVarJs1 arg;
+        let patValJs = patBindValJs2 arg;
+        jsCall (jsVar "rt.lambdaMaybe") [patValJs, jsLambdaExpr patJs bodyJs2]
+    , ["ELambdaNo", arg, body] |=> 
+        let bodyJs = cg body;
+        let [_, bodyJs2] = 
+            while [reverse (patBindAs arg): List {[Str, Expr]}, bodyJs: JsExpr] <| 
+            [ [[name, asPat],,pbas], bodyJs3] |=>
+            [pbas, jsCall (jsVar "rt.as") [jsVar2 name, jsLambdaExpr (patBindVarJs1 asPat) bodyJs3] ];
+        let patJs = patBindVarJs1 arg;
+        let patValJs = patBindValJs2 arg;
+        jsCall (jsVar "rt.lambdaNothing") [patValJs, jsLambdaExpr patJs bodyJs2]
+    -- TODO
+    -- , ["ELambdNothing", arg, body] |=> 
+    -- , ["ELambdaYes", arg, body] |=> 
+    , ["EApply", func, arg] |=> 
+        jsCall (cg func) [cg arg]
+    , ["ELit", val] |=> 
+        jsDatum val
+    , ["ELets", letDecls, letExpr] |=> 
+        let declsJs = cgDeclsJs cg letDecls;
+        let exprJs = cg letExpr;
+        let stmtsJs = append declsJs [jsReturn exprJs];
+        jsCall (jsLambdaStmt [] stmtsJs) []
+    -- , ["ELets", letDecls, letExpr] |=> 
+    --       let declsJs = 
+    --           concat <|  
+    --           for letDecls <| 
+    --           [pat:Expr, exp:Expr] -> 
+    --           let letStmt = 
+    --                 -- TODO check if pat has no bindings, and use a expr-stmt if so
+    --               jsLet2 (patBindVarJs1 pat) (cg exp);
+    --           let asStmts = 
+    --               for (patBindAs pat) <| [asName, asExpr] ->
+    --               jsLet (patBindVarJs2 asExpr) (jsVar2 asName); 
+    --           [ letStmt,, asStmts ];
+    --        let exprJs = cg letExpr;
+    --        let stmtsJs = append declsJs [jsReturn exprJs];
+    --        jsCall (jsLambdaStmt [] stmtsJs) []
+
+    , ["EType", exp, ty] |=> 
+        cg exp
+    , ["ETermBrackets", exp] |=>
+        cg exp
+
+    , ["ETypeBrackets", ty] |=>
+        -- let typeJsStr = jsDatum (strCat ["{", showExpr3 "Type" ty, "}"]);
+        let typeJsStr = jsDatum (showExpr3 "Type" ty);
+        -- let _ = debug ["CodeGen TypeA", ty];
+        -- let _ = debug ["CodeGen TypeB", typeJsStr];
+        jsCall (jsVar "_.MkType") [typeJsStr]
+
+
+    , ["EOper", "pgEq", [a, b, c]] |=>
+        jsCall (jsVar "rt.pgEq") [cg a, cg b, cg c]
+    , ["EOper", "pgPair", [a, b]] |=>
+        jsCall (jsVar "rt.pgPair") [cg a, cg b]
+    , ["EOper", "|=", [a, b]] |=>
+        jsOp "?:" [cg a, jsList [[cg b], [jsNil]], jsNil ]
+    , ["EOper", "|-", [a, b]] |=>
+        jsOp "?:" [cg a, cg b, jsNil ]
+    -- , ["EOper", "^", [a, b]] |=>
+    --     jsOp "+" [cg a, cg b]
+    , ["EOper", "::", [a, b]] |=>
+        jsList [[cg a], [cg b]]
+    , ["EOper", opName, []] |=>
+        (jsVar2 opName)
+
+    -- these three operators should only be reached in a type-context
+    -- TODO plumb through which context we're currently in
+    , ["EOper", "|", [a, b]] |=>
+        jsCall (jsVar "_.unionT") [cg a, cg b]
+    , ["EOper", "&", [a, b]] |=>
+        jsCall (jsVar "_.intersectT") [cg a, cg b]
+    , ["EOper", "\\", [a, b]] |=>
+        jsCall (jsVar "_.relcompT") [cg a, cg b]
+
+
+    , ["EOper", opName, args] |=>
+        if (isAlpha opName)
+        [ -> jsCall (jsVar2 opName) (map cg args)
+        , -> jsOp opName (map cg args)
+        ]
+    , ["EList", elems, maybeTail] |=>
+        let tlJs = 
+            match maybeTail
+            [ [] |=> jsNil
+            , [t] |=>
+                cg t
+            ];
+        let [_, result] = 
+            while [reverse elems: List Expr, tlJs: JsExpr] <|
+            [[x,,xs], tj] |=> 
+            let tj2 = jsList [[cg x], [tj]];
+            [xs, tj2];
+        result
+            
+    , _ |=> error ["missing case", "cgExprJs", show expr]
+    ];
+
+-- let cgExprJsMix : { CgMixin -> CgExprJs } = 
+--     mixin ->
+--     rec <| (cg : CgExprJs) -> mixin (cgExprJs0 cg);
+
+
+let isLoopifiable : { Expr -> Bool } =
+    rec <| (ilf : { Expr -> Bool }) ->
+    expr ->
+    match expr
+    [ ["EApply", ["EVar", "break"], val] |=>
+        true
+    , ["EApply", ["EVar", "continue"], val] |=>
+        true
+    , ["EApply", ["EApply", ["EVar", "ifNil"], arg], ["EList", [["ELambda", thenVar, kT], ["ELambda", elseVar, kF]], []]] |=>
+        ilf kT && ilf kF
+    , _ |=> false
+    ];
+
+let loopify : { CgExprJs -> JsExpr -> JsExpr -> Expr -> JsStmts } =
+    cg -> breakVar -> continueVar -> 
+    rec <| (lf : { Expr -> JsStmts }) ->
+    expr ->
+    match expr
+    [ ["EApply", ["EVar", "break"], val] |=>
+        [ jsAssign breakVar (cg val)
+        , jsBreak 
+        ]
+    , ["EApply", ["EVar", "continue"], val] |=>
+        [ jsAssign continueVar (cg val)
+        , jsContinue 
+        ]
+    , ["EApply", ["EApply", ["EVar", "ifNil"], arg], ["EList", [["ELambda", thenVar, kT], ["ELambda", elseVar, kF]], []]] |=>
+        let condVar = jsVar "v_condVar";
+        let condStmt = jsLet condVar (cg arg);
+        let thenStmts = lf kT;
+        let elseVarAssign = cgDeclJs cg [elseVar, ["EVar", "condVar"]];
+        let elseStmts = append elseVarAssign (lf kF);
+        [ condStmt
+        , jsIfElse (jsOp "==" [condVar, jsDatum []]) thenStmts elseStmts
+        ]
+    , _ |=>
+        error ["", "unhandled case", show expr]
+    ];
+
+let loopMixin : CgMixin = 
+    (cg : CgExprJs) ->
+    (expr : Expr) -> 
+    match expr
+    [ ["EApply", ["EApply", ["EVar", "loop2"], initVal], ["ELambda", loopVar, loopBody]] |=> 
+        -- jsCommentExpr "LOOP" <| cg expr
+        if (isLoopifiable loopBody)
+        [ ->
+            let breakVar = jsVar "v_breakVar";
+            let continueVar = jsVar "v_continueVar";
+            let bodyStmts = loopify cg breakVar continueVar loopBody;
+            let loopVarAssign = cgDeclJs cg [loopVar, ["EVar", "continueVar"]];
+            let bodyStmts2 = append loopVarAssign bodyStmts;
+            let stmts = 
+                [ jsLet breakVar (jsDatum [])
+                , jsLet continueVar (cg initVal)
+                , jsWhile (jsVar "true") bodyStmts2
+                , jsReturn breakVar
+                ];         
+            jsCall (jsLambdaStmt [] stmts) []
+        , ->
+            jsCommentExpr "LOOP" <| cg expr
+        ]
+    , other |=>
+        cg other
+    ];
+
+let cgExprJs1 : CgExprJs = 
+    rec cgExprJs0;
+
+-- let cgExprJs2 : CgExprJs = 
+--     -- cgExprJsMix loopMixin;
+--     rec <| (cg : CgExprJs) -> loopMixin (cgExprJs0 cg);
+
+
+let cgExprJs : CgExprJs = cgExprJs1;
+-- let cgExprJs : CgExprJs = cgExprJs2;

@@ -1,0 +1,116 @@
+language ferrum/proj/0.1
+
+[ "project", 
+  [ ["primitives", "fe4-primitives.fe"]
+  , ["source", "fe4-prelude.fe"]
+  , ["source", "fe4-token.fe"]
+  , ["source", "fe4-display-tree.fe"]
+  , ["source", "fe4-scanner.fe"]
+  , ["source", "fe4-expr.fe"]
+
+  , ["source", "fe4-step.fe"]
+  -- , ["source", "fe4-cps.fe"]
+  , ["source", "fe4-cps2.fe"]
+  , ["source", "fe4-hps.fe"]
+
+  , ["source", "fe4-init-env.fe"]
+  , ["source", "fe4-var-check.fe"]
+
+  , ["source", "fe4-parser-common-before.fe"]
+  -- , ["source", "fe4-parser-impl-step.fe"]
+  , ["source", "fe4-parser-impl-hps.fe"]
+  , ["source", "fe4-parser-common-after.fe"]
+
+  , ["source", "fe4-eval.fe"]
+
+  
+  , ["source", "fe4-codegen.fe"]            -- this includes some utility code and a simple codegen, only the utility code is really needed, the codegen is superseded
+  -- , ["source", "fe4-codegen-stmt-step.fe"]  -- only needed for passing some tests in fe4b.test.fe
+  -- , ["source", "fe4-codegen-tree.fe"]       -- ditto
+  , ["source", "fe4-codegen-js.fe"]            -- code for constructing JS ASTs
+  , ["source", "fe4-codegen-js-pretty2.fe"]    -- code for pretty printing JS ASTs
+  -- , ["source", "fe4-codegen-js-fe.fe"]  
+
+  , ["source", "fe4-pretty-fe.fe"]    -- code for pretty printing Fe ASTs
+
+
+  , ["source", "fe4-codegen-hps.fe"]          -- handler-passing-style interface and implementation for codegen
+  , ["source", "fe4-codegen-stmt.fe"]         -- a statement+hps style codegen, with mixins to handle common code styles
+
+
+  , ["source", "fe4-array.fe"]
+  , ["source", "fe4-assoc.fe"]
+  
+
+  , ["source", "fe4-heap-common-before.fe"]
+  -- , ["source", "fe4-heap-impl-step.fe"]
+  -- , ["source", "fe4-heap-impl-cps.fe"]
+  , ["source", "fe4-heap-impl-hps.fe"]
+  , ["source", "fe4-heap-common-after.fe"]
+
+  , ["source", "fe4-graph-reduction2.fe"]
+  , ["source", "fe4-type.fe"]
+  
+  , ["source", "fe4-instantiate2.fe"]
+  , ["source", "fe4-instantiate3.fe"]
+  , ["source", "fe4-readback2.fe"]
+
+  -- TODO ? rather than implementing the code in "fe4-heap-common-after.fe" and then having to move utilities from "fe4-readback2.fe"
+  -- , ["source", "fe4-heap-diagnostics.fe"]
+
+
+  , ["source", "fe4-builtins.fe"]
+
+  -- , ["source", "fe4-type-check.fe"]
+
+
+  , ["source", "fe4-decl-reduction.fe"] 
+ 
+ 
+  , ["source", "fe4-io.fe"]
+  , ["source", "fe4-project.fe"]
+
+  -- , ["text", "js_runtime_text", "../langs/js/runtime/runtime2.js"]
+  -- , ["text", "js_runtime_text", "../bootstrap/ts/gen/runtime.js"]
+  , ["text", "js_runtime_text", "../../ts/gen/runtime/runtime-core.js"]
+
+  , ["source", "fe4-cmdline.fe"]
+  , ["source", "fe4-runtest.fe"]
+  , ["source", "fe4-ferrum.fe"]
+  
+
+  -- The remaining code works/worked with the tree-based type-checker, 
+  --   but not yet with the graph-based type-checker.
+  -- The remaining code is not currently needed, and might be abandoned.
+
+  -- , ["source", "fe4-tuple-kv.fe"]
+
+  -- , ["source", "fe4-html-common.fe"]
+  -- , ["source", "fe4-html-client.fe"]
+  -- , ["source", "fe4-html-server.fe"]
+  -- , ["source", "fe4-http.fe"]
+  -- , ["source", "fe4-webapp.fe"]
+-- 
+  -- , ["text", "fe4_prelude_text", "fe4-prelude.fe"]
+  -- , ["text", "fe4_step_text",    "fe4-step.fe"]
+  -- , ["text", "fe4_token_text",   "fe4-token.fe"]
+  -- , ["text", "fe4_scanner_text", "fe4-scanner.fe"]
+  -- , ["text", "fe4_expr_text",    "fe4-expr.fe"]
+  -- , ["text", "fe4_parser_text",  "fe4-parser.fe"]
+-- 
+  -- , ["text", "fe4_html_common_text",   "fe4-html-common.fe"]
+  -- , ["text", "fe4_html_client_text",   "fe4-html-client.fe"]
+  -- , ["text", "fe4_webide_common_text", "fe4-webide-common.fe"]
+  -- , ["text", "fe4_webide_client_text", "fe4-webide-client.fe"]
+  -- , ["text", "fe4_parser3_text",       "fe4-parser3.fe"]
+-- 
+  -- , ["source", "fe4-webide-common.fe"]
+  -- , ["source", "fe4-webide-client.fe"]
+  -- , ["source", "fe4-webide-server.fe"]
+
+  
+  ]
+]
+
+
+

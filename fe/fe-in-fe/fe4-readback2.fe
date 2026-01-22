@@ -1,0 +1,942 @@
+language ferrum/0.1
+
+let rbDebug = msg -> [];
+-- let rbDebug = msg -> debug msg;
+
+let rbTraceHeap = addr -> heapSkip;
+-- let rbTraceHeap = traceHeap;
+
+-- let readbackVarName : { Int -> (Maybe Expr) -> Str } =
+--     depth -> srcAnnot ->
+--     match srcAnnot
+--     [ [] |=> strCat ["v", show depth]
+--     , [srcAnnot2] |=> 
+--         match srcAnnot2
+--         [ ["EVar", name] |=> strCat ["v", show depth, "_", name]
+--         , ["EAs", name, _] |=> strCat ["v", show depth, "_", name]
+--         , _ |=> strCat ["v", show depth]
+--         ]
+--     ];
+
+-- let bracket : { PtsSort -> PtsSort -> Expr -> Expr } =
+--     ctx -> sort -> expr ->
+--     match [ctx, sort]
+--     [ ["Term", "Term"] |=> expr
+--     , ["Type", "Type"] |=> expr
+--     , ["Term", "Type"] |=> ["ETypeBrackets", expr]
+--     , ["Type", "Term"] |=> ["ETermBrackets", expr]
+--     ];
+
+
+
+
+
+
+-- TODO collect and let-bind the "obligations" in the indirection nodes. i.e. terms that we are obligated to evaluate despite their values not being needed/referenced/reachable.
+
+-- same as a HEnv but with the tuple elements reversed
+let RbEnv = List { [Addr, Str] };
+let RbAssoc = Assoc1 Addr Str;
+let RefCounts = Assoc1 Addr Int;
+
+let rbRefCount : { Addr -> (HeapA RefCounts) } = 
+    heapFunc1 <|
+    (addr0 : Addr) -> (k : K @ HeapK RefCounts) ->
+    let todo : List Addr = [addr0];
+    let assoc0 : RefCounts = assoc1MkEphemeral ([] : List { [Addr, Int] });
+    heapWhile [ todo : List Addr, assoc0 : RefCounts ] (
+        [ [addr ,, todo2], assoc : RefCounts ] |=>
+        (k2 : K @ HeapK { [(List Addr), RefCounts] }) ->
+        heapRef addr <| addr2 ->
+        let [assoc, countMb] = assoc "get" [addr2];
+        match countMb
+        [ [count] |=>
+            let [assoc, _] = assoc "set" [addr2, [count+1]];
+            k2 [todo2 : List Addr, assoc]
+        , [] |=>
+            heapDeref addr <| [_, node] ->
+            let children = nodeChildren node;
+            let [assoc,_] = assoc "set" [addr2, [1]];
+            let todo3 = append children todo2;
+            k2 [todo3, assoc]
+        ] 
+    ) <| [_, refCounts] ->
+    k refCounts;
+
+let rbRefCountD : { Depth -> RbAssoc -> (List Addr) -> (HeapA RefCounts) } = 
+    heapFunc3 <|
+    (cutoffDepth : Depth) -> (rbAssoc : RbAssoc) -> (addrs : List Addr) -> (k : K @ HeapK RefCounts) ->
+    let todo : List Addr = addrs;
+    let assoc0 : RefCounts = assoc1MkEphemeral ([] : List { [Addr, Int] });
+    heapWhile [ todo : List Addr, assoc0 : RefCounts ] (
+        [ [addr ,, todo2], assoc : RefCounts ] |=>
+        (k2 : K @ HeapK { [(List Addr), RefCounts] }) ->
+        let [_, known] = rbAssoc "get" [addr];
+        -- ifYes [] -- known
+        -- [ _ ->
+        --     k2 [todo2, assoc]
+        -- , ->
+            heapRef addr <| addr ->
+            heapDeref addr <| [nc, node] ->
+            let [nodeDepth ,, _] = nc;
+            if (nodeDepth < cutoffDepth)
+            [ ->
+                k2 [todo2, assoc]
+            , ->
+                let [assoc, countMb] = assoc "get" [addr];
+                match countMb
+                [ [count] |=>
+                    let [assoc, _] = assoc "set" [addr, [count+1]];
+                    k2 [todo2 : List Addr, assoc]
+                , [] |=>
+                    let children = nodeChildren node;
+                    let [assoc,_] = assoc "set" [addr, [1]];
+                    let todo3 = append children todo2;
+                    k2 [todo3, assoc]
+                ] 
+            ]
+        -- ]
+    ) <| [_, refCounts] ->
+    k refCounts;
+
+let LetBindCtx = { [ Int, Nil | Addr ] }; -- depth (+1) and address of enclosing lambdas, 0 and nil for global context
+
+let ScopedRefCounts = Assoc1 { Addr | Nil } RefCounts;
+
+
+let rbScopedRefCount1 : { Depth -> RbAssoc -> Addr -> (HeapA ScopedRefCounts) } = 
+    heapFunc3 <|
+    (rootDepth : Depth) -> (rbAssoc : RbAssoc) -> (addr0 : Addr) -> (k : K @ HeapK ScopedRefCounts) ->
+    let addr = addr0;
+
+    -- debug2 ["rbScopedRefCount1/heapDump"] <| ->
+    -- traceHeap addr <| ->
+
+    -- let rootDepth = 0;
+    -- probably need to extend the initial context to include depths shallower than the rootDepth
+    -- or at least handle reaching shallower contexts somehow
+    let [_, initCtx] = 
+        while [0 : Depth, [] : List LetBindCtx] <|
+        [depth, ctx] |->
+        if (depth > rootDepth) 
+        [ -> no
+        , -> yes [depth + 1, [[depth, []] ,, ctx]]
+        ];
+    -- let todo : List { [ (List LetBindCtx), Addr] } = [ [ [ [rootDepth, []] ], addr] ];
+    let todo : List { [ (List LetBindCtx), Addr] } = [ [ initCtx, addr] ];
+    let globalRcs : RefCounts = assoc1MkEphemeral ([] : List { [Addr, Int] });
+    let scopedRcs : ScopedRefCounts = assoc1MkEphemeral ([[[],globalRcs]] : List { [Addr | Nil, RefCounts] });
+
+    heapWhile [ todo, scopedRcs ] (
+        [ [ [ctx, addr] ,, todo], scopedRcs ] |=>
+        (k : K @ HeapK { [(List { [ (List LetBindCtx), Addr] }), ScopedRefCounts] }) ->
+        heapRef addr <| addr ->
+        heapDeref addr <| [nc, node] ->
+        let depth = ncDepth nc;
+
+        let [rbAssoc, rb] = rbAssoc "get" [addr];
+        match rb
+        [ [_] |=> 
+            -- the address was already bound before we even started
+            k [todo, scopedRcs]
+        , [] |=>
+            -- traceHeap "rbScopedRefCount1" addr0 <| ->
+            let [_, ctx] = 
+                while [ctx : List LetBindCtx, [] : List LetBindCtx] <|
+                [ ctx @ [ [ctxDepth, ctxAddr] ,, parentCtx ], [] ] |=>
+                if (depth == ctxDepth)
+                [ ->
+                    -- depth is as expected, we are already at, or just have arrived at, the correct context
+                    [[], ctx] : { [(List LetBindCtx), (List LetBindCtx)] }
+                , ->
+                    if (depth < ctxDepth)
+                    [ ->
+                        -- depth is shallower than expected, pop the deepest context and go round the loop again
+                        [parentCtx, []]  : { [(List LetBindCtx), (List LetBindCtx)] }
+                    , ->
+                        -- depth is deeper than expected
+                        --   we should have descended into a lambda(s) previously, before encountering a node a this depth
+                        error ["rbScopedRefCount1", "impossible depth", addr, depth, ctxDepth] 
+                        -- debug2 ["rbScopedRefCount1", "impossible depth", addr, depth, ctxDepth] <| ->
+                        -- [ [], ctx ]                        
+                    ]
+                ];
+
+            let ctxAddr = 
+                match ctx
+                [ [] |=> error ["rbScopedRefCount1", "impossible", "context empty"]
+                , [ [ctxDepth, ctxAddr] ,, _ ] |=> ctxAddr
+                ];
+
+            let [scopedRcs, rcsMb] = scopedRcs "get" [ctxAddr];
+            let rcs = fromYesOrPanic rcsMb;
+            let [rcs, rcMb] = rcs "get" [addr];
+            let rc = ifYes rcMb [ rc -> rc, -> 0];
+            let [rcs, _] = rcs "set" [addr, [rc + 1]];
+            let [scopedRcs, _] = scopedRcs "set" [ctxAddr, [rcs]];
+
+            let newCtxMb = 
+                if (rc == 0)
+                [ ->
+                    match node
+                    [ ["HLambda", body]    |=> [ [depth + 1, addr] ]
+                    , ["TyFun", pat, body] |=> [ [depth + 1, addr] ]
+                    , _                    |=> []
+                    ]
+                , -> []
+                ];
+
+            let todo = 
+                if (rc == 0)
+                [ ->
+                    let childCtx : List LetBindCtx = 
+                        ifYes newCtxMb 
+                        [ newCtx -> [newCtx ,, ctx]
+                        , -> ctx
+                        ];
+                    let children = nodeChildren node;
+                    let more = forMap children <| child -> [childCtx, child];
+                    let todo = append more todo;
+                    todo
+                , ->
+                    todo
+                ];
+
+            let scopedRcs =
+                ifYes newCtxMb 
+                [ newCtx @ [depth, addr] ->
+                    let refCounts = assoc1MkEphemeral ([] : List { [Addr, Int] });
+                    let [scopedRcs, _] = scopedRcs "set" [addr, [refCounts]];
+                    scopedRcs
+                , -> 
+                    scopedRcs
+                ];
+
+            k [todo, scopedRcs]
+        ]
+    ) <| [todo, scopedRefCounts] ->
+    let _ = 
+        match todo
+        [ [] |=> []
+        , [stuck ,, _] |=> 
+            -- this could only happens if one of the contexts becomes empty,
+            --   the contexts should always contains at least the global context [0, []]
+            -- but just in case:
+            error ["rbScopedRefCount", "impossible", "item(s) stuck on the todo list", stuck]
+        ];
+    k scopedRefCounts;
+
+
+
+-- let rbScopedRefCount2 : { Addr -> (HeapA ScopedRefCounts) } = 
+--     heapFunc1 <|
+--     (addr : Addr) -> (k : K @ HeapK ScopedRefCounts) ->
+-- 
+--     let todo : List { [ (List LetBindCtx), Addr] } = [ [ [ [0, []] ], addr] ];
+--     let globalRcs : RefCounts = assoc1MkEphemeral ([] : List { [Addr, Int] });
+--     let scopedRcs : ScopedRefCounts = assoc1MkEphemeral ([[[],globalRcs]] : List { [Addr | Nil, RefCounts] });
+--     let ctxAddrList : List { Addr | Nil } = [[]];
+-- 
+--     heapWhile [ todo, scopedRcs, ctxAddrList ] (
+--         [ [ [ctx, addr] ,, todo], scopedRcs, ctxAddrList ] |=>
+--         (k : K @ HeapK { [(List { [ (List LetBindCtx), Addr] }), ScopedRefCounts, (List { Addr | Nil})] }) ->
+--         heapRef addr <| addr ->
+--         heapDeref addr <| [[depth, _, _, _], node] ->
+-- 
+--         -- let [rbAssoc, rb] = rbAssoc "get" [addr2];
+--         -- match rb
+--         -- [ [_] |=> 
+--         --     -- the address was already bound before we even started
+--         --     k2 [todo2, rcsB, alb]
+--         -- , [] |=>
+-- 
+--             let [_, ctx] = 
+--                 while [ctx : List LetBindCtx, [] : List LetBindCtx] <|
+--                 [ ctx @ [ [ctxDepth, ctxAddr] ,, parentCtx ], [] ] |=>
+--                 if (depth == ctxDepth)
+--                 [ ->
+--                     -- depth is as expected, we are already at, or just have arrived at, the correct context
+--                     [[], ctx] : { [(List LetBindCtx), (List LetBindCtx)] }
+--                 , ->
+--                     if (depth < ctxDepth)
+--                     [ ->
+--                         -- depth is shallower than expected, pop the deepest context and go round the loop again
+--                         [parentCtx, []]  : { [(List LetBindCtx), (List LetBindCtx)] }
+--                     , ->
+--                         -- depth is deeper than expected
+--                         --   we should have descended into a lambda(s) previously, before encountering a node a this depth
+--                         error ["rbCalcAddrsToLetBind", "impossible depth", addr, depth, ctxDepth] 
+--                     ]
+--                 ];
+-- 
+--             let ctxAddr = 
+--                 match ctx
+--                 [ [] |=> error ["impossible"]
+--                 , [ [ctxDepth, ctxAddr] ,, _ ] |=> ctxAddr
+--                 ];
+-- 
+--             let [scopedRcs, rcsMb] = scopedRcs "get" [ctxAddr];
+--             let rcs = ifYes rcsMb [rcs -> rcs, -> assoc1MkEphemeral ([] : List { [Addr, Int] }) ];
+--             -- let rcs = fromYesOrPanic rcsMb;
+--             let [rcs, rcMb] = rcs "get" [addr];
+--             let rc = ifYes rcMb [ rc -> rc, -> 0];
+--             let [rcs, _] = rcs "set" [addr, [rc + 1]];
+--             let [scopedRcs, _] = scopedRcs "set" [ctxAddr, [rcs]];
+-- 
+--             let todo = 
+--                 if (rc == 0)
+--                 [ ->
+--                     let childCtx : List LetBindCtx = 
+--                         match node
+--                         [ ["HLambda", body] |=> 
+--                             [ [depth + 1, addr] ,, ctx ]
+--                         , ["TyFun", pat, body] |=>
+--                             -- TODO need to make sure TyFuns are instantiate properly first
+--                             [ [depth + 1, addr] ,, ctx ]
+--                         , _ |=> ctx
+--                         ];
+--                     let children = nodeChildren node;
+--                     let more = forMap children <| child -> [childCtx, child];
+--                     let todo = append more todo;
+--                     todo
+--                 , ->
+--                     todo
+--                 ];
+-- 
+--             let newCtxMb = 
+--                 if (rc == 0)
+--                 [ ->
+--                     match node
+--                     [ ["HLambda", body]    |=> [ [depth, addr] ]
+--                     , ["TyFun", pat, body] |=> [ [depth, addr] ]
+--                     , _                    |=> []
+--                     ]
+--                 , -> []
+--                 ];
+-- 
+--             let scopedRcs =
+--                 ifYes newCtxMb 
+--                 [ newCtx @ [depth, addr] ->
+--                     let refCounts = assoc1MkEphemeral ([] : List { [Addr, Int] });
+--                     let [scopedRcs, _] = scopedRcs "set" [addr, [refCounts]];
+--                     scopedRcs
+--                 , -> 
+--                     scopedRcs
+--                 ];
+-- 
+--             let ctxAddrList =
+--                 if (rc == 0)
+--                 [ ->
+--                     match node
+--                     [ ["HLambda", body]    |=> [addr ,, ctxAddrList]
+--                     , ["TyFun", pat, body] |=> [addr ,, ctxAddrList]
+--                     , _                    |=> ctxAddrList
+--                     ]
+--                 , -> ctxAddrList
+--                 ];
+-- 
+--             k [todo, scopedRcs, ctxAddrList]
+--             
+--         -- ]
+--     ) <| [todo, scopedRefCounts, ctxAddrList] ->
+--     let _ = 
+--         match todo
+--         [ [] |=> []
+--         , [stuck ,, _] |=> 
+--             -- this could only happens if one of the contexts becomes empty,
+--             --   the contexts should always contains at least the global context [0, []]
+--             -- but just in case:
+--             error ["rbScopedRefCount", "impossible", "item(s) stuck on the todo list", stuck]
+--         ];
+--     -- TODO making the assoc persistent would save having to plumb it through places,
+--     -- TODO   but need to make every assoc within the assoc persistent too.
+--     -- This works, but due to the copying curently required in transitioning from ephemeral to persistent
+--     --   the costs significantly outweigh the benefits
+--     let [_, scopedRefCounts] = 
+--         while [ctxAddrList, scopedRefCounts] <|
+--         [ [ctxAddr ,, ctxAddrList], scopedRefCounts ] |=>
+--         let [scopedRefCounts, refCountsMb] = scopedRefCounts "get" [ctxAddr];
+--         let refCounts = fromYesOrPanic refCountsMb;
+--         let [_, refCounts] = refCounts "persistent" [];
+--         let [scopedRefCounts, _] = scopedRefCounts "set" [ctxAddr, [refCounts]];
+--         [ctxAddrList, scopedRefCounts];
+--     let [_, scopedRefCounts] = scopedRefCounts "persistent" [];
+--     k scopedRefCounts;
+
+
+let rbScopedRefCount : { Depth -> RbAssoc -> Addr -> (HeapA ScopedRefCounts) } = 
+    rbScopedRefCount1;
+    -- rbScopedRefCount2;
+
+-- let topsortNodes : { RefCounts -> Addr -> (HeapA (List Addr)) } =
+--     heapFunc2 <|
+--     (rcsA : RefCounts) -> (addr0 : Addr) -> (k : K @ HeapK (List Addr)) -> 
+-- 
+--     let todo = [addr0] : List Addr;
+--     let rcsB : RefCounts = assocMkCopyOnSnapshot ([] : List { [Addr, Int] });
+--     let output0 = [] : List Addr;
+-- 
+--     heapWhile [todo, rcsB, output0] (
+--         [ [addr ,, addrs], rcs2, output] |=>
+--         (k2 : K @ HeapK { [(List Addr), RefCounts, (List Addr)] }) ->
+--         heapRef addr <| addr2 ->
+--         heapDeref addr2 <| [[depth, _, _, _], node] ->
+--         let rcAMb = rcsA "get" addr;
+--         let rcBMb = rcsB "get" addr;
+--         let more = nodeChildren node;
+--         let todo3 = append more addrs;
+--         match [rcAMb, rcBMb]
+--         [ [[], _] |=>
+--             error ["topsortNodes", "missing address"]
+--         , [[rcA], []] |=>
+--             heapDeref addr <| [_, node2] ->
+--             let rcsB2 = rcsB "set" addr2 [1];
+--             if (rcA == 1)
+--             [ -> 
+--                 k2 [todo3, rcsB2, [addr2,,output]]
+--             , ->
+--                 k2 [todo3, rcsB2, output]
+--             ]
+--         , [[rcA], [rcB]] |=>
+--             let rcsB2 = rcsB "set" addr2 [rcB + 1];
+--             if (rcA == (rcB + 1))
+--             [ ->
+--                 k2 [todo3, rcsB2, [addr2,,output]]
+--             , ->
+--                 k2 [todo3, rcsB2, output]
+--             ]
+--         ] 
+--     ) <| [_, _, output] ->
+--     k output;
+
+let isWorthSharing : { Node -> Bool } =
+    node ->
+    match node
+    [ [ "HHole" ]                     |=>  false
+    , [ "HVar" ]                      |=>  false
+    , [ "HLambda", _ ]                |=>  true
+    , [ "HApply", _, _ ]              |=>  true
+    , [ "HValue", _ ]                 |=>  false
+    , [ "HPair", _, _ ]               |=>  true
+    , [ "HOper", opName, [] ]         |=>  false
+    , [ "HOper", opName, _ ]          |=>  true
+    , [ "HTypeAnnot", _, _ ]          |=>  true
+    , [ "HAs", _, _ ]                 |=>  true
+    , [ "TyFun", _, _ ]               |=>  true
+    , [ "TyVar" ]                     |=>  false
+    , [ "TyPair", _, _ ]              |=>  true
+    , [ "TyApp", _, _ ]               |=>  true
+    , [ "TyDatum", _ ]                |=>  false
+    , [ "TyOper", opName, [] ]        |=>  false
+    , [ "TyOper", opName, _ ]         |=>  true
+    , [ "TySingle", _ ]               |=>  false
+    , [ "TyTermAnnot", _, _ ]         |=>  true
+    ];
+
+
+let AddrsToLetBind = Assoc1 { Nil | Addr } (List Addr);
+
+
+
+-- TODO still need to handle unreachable obligations, they need to be collected in the indirection nodes
+
+-- TODO this won't preserve the order of let-bindings when code is instantiateed and readback
+-- TODO   this doesn't change the semantics, given it's a pure language,
+-- TODO   but might seem a bit odd to the user.
+-- TODO ? perhaps add some record of original binding order somewhere?
+
+
+-- let rbCalcAddrsToLetBind1 : { RbAssoc -> Addr -> (HeapA AddrsToLetBind) } = 
+--     heapFunc2 <|
+--     (rbAssoc : RbAssoc) -> (addr : Addr) -> (k : K @ HeapK AddrsToLetBind) ->
+-- 
+--     let _ = rbDebug ["rbCalcAddrsToLetBind", addr];
+--     rbTraceHeap addr <| _ ->
+-- 
+--     rbRefCount addr <| rcsA ->
+--     let [_, rcsA] = rcsA "persistent" [];
+-- 
+--     let todo : List { [ (List LetBindCtx), Addr] } = [ [ [ [0, []] ], addr] ];
+--     let rcsB : RefCounts = assoc1MkEphemeral ([] : List { [Addr, Int] });
+--     let alb : AddrsToLetBind = assoc1MkEphemeral ([] : List { [ Addr | Nil, (List Addr) ] });
+-- 
+--     heapWhile [ todo, rcsB, alb ] (
+--         [ [ [ctx @ [ [ctxDepth, ctxAddr] ,, _], addr1] ,, todo2], rcsB, alb ] |=>
+--         (k2 : K @ HeapK { [(List { [ (List LetBindCtx), Addr] }), RefCounts, AddrsToLetBind] }) ->
+--         heapRef addr1 <| addr2 ->
+--         let _ = rbDebug ["rb/heapRef", addr1, addr2];
+--         heapDeref addr2 <| [[depth, _, _, _], node] ->
+-- 
+-- 
+--         -- let _ = rbDebug ["rbCalcAddrsToLetBind/while", ctxDepth, depth, addr1, rcsA "get" addr2, rcsB "get" addr2, rbAssoc "get" addr2];
+--         let [rcsA, rcA] = rcsA "get" [addr2];
+--         let [rcsB, rcB] = rcsB "get" [addr2];
+--         let [rbAssoc, rb] = rbAssoc "get" [addr2];
+--         let _ = rbDebug ["rbCalcAddrsToLetBind/while", ctxDepth, depth, addr1, rcA, rcB, rb];
+-- 
+--         match rb
+--         [ [_] |=> 
+--             -- the address was already bound before we even started
+--             k2 [todo2, rcsB, alb]
+--         , [] |=>
+-- 
+--             let [_, ctx2] = 
+--                 while [ctx : List LetBindCtx, [] : List LetBindCtx] <|
+--                 [ ctx1 @ [ [ctxDepth1, ctxAddr1] ,, ctxs ], [] ] |=>
+--                 if (depth == ctxDepth1)
+--                 [ ->
+--                     -- depth is as expected, we are already at, or just have arrived at, the correct context
+--                     [[], ctx1] : { [(List LetBindCtx), (List LetBindCtx)] }
+--                 , ->
+--                     if (depth < ctxDepth1)
+--                     [ ->
+--                         -- depth is shallower than expected, pop the deepest context and go round the loop again
+--                         [ctxs, []]  : { [(List LetBindCtx), (List LetBindCtx)] }
+--                     , ->
+--                         -- depth is deeper than expected
+--                         --   we should have descended into a lambda(s) previously, before encountering a node a this depth
+--                         error ["rbCalcAddrsToLetBind", "impossible depth", addr2, depth, ctxDepth1] 
+--                     ]
+--                 ];
+-- 
+--             let ctxAddr2 = 
+--                 match ctx2
+--                 [ [] |=> error ["impossible"]
+--                 , [ [ctxDepth2, ctxAddr2] ,, _ ] |=> ctxAddr2
+--                 ];
+-- 
+--             let ctx3 : List LetBindCtx = 
+--                 match node
+--                 [ ["HLambda", body] |=> 
+--                     [ [depth+1, addr2] ,, ctx2 ]
+--                 , ["TyFun", pat, body] |=>
+--                     -- TODO need to make sure TyFuns are instantiate properly first
+--                     -- ctx2
+--                     [ [depth+1, addr2] ,, ctx2 ]
+--                 , _ |=> ctx2
+--                 ];
+--     
+--             let iws = isWorthSharing node;
+-- 
+--             let [rcsA, rcA] = rcsA "get" [addr2];
+--             let rcA = match rcA [ [count] |=> count, [] |=> error ["rbCalcAddrsToLetBind", "impossible"]];
+--             let [rcsB, rcB] = rcsB "get" [addr2];
+--             let rcB = match rcB [ [count] |=> count, [] |=> 0];
+--             let [rcsB, _] = rcsB "set" [addr2, [rcB + 1]];
+-- 
+--             let todoNext = 
+--                 if (rcA == (rcB + 1))
+--                 [ ->
+--                     let children = nodeChildren node;
+--                     let more = forMap children <| child -> [ctx3, child];
+--                     append more todo2
+--                 , ->
+--                     todo2
+--                 ];
+-- 
+--             if (iws && (rcA == (rcB + 1)) && ((rcA > 1) || (depth < ctxDepth)))
+--             [ ->
+--                 let [alb, prevLb] = alb "get" [ctxAddr2];
+--                 let prevLb = match prevLb [ [] |=> [], [a] |=> a];
+--                 let [alb, _] = alb "set" [ctxAddr2, [ [addr2 ,, prevLb] ]];
+--                 let _ = rbDebug ["alb/set/2", ctxAddr2, addr2];
+--                 k2 [todoNext, rcsB, alb]
+--             , ->
+--                 k2 [todoNext, rcsB, alb]
+--             ]
+--         ]
+--     ) <| [todo2, refCounts, alb] ->
+--     let _ = 
+--         match todo2
+--         [ [] |=> []
+--         , [stuck ,, _] |=> 
+--             -- this could only happens if one of the contexts becomes empty,
+--             --   the contexts should always contains at least the global context [0, []]
+--             -- but just in case:
+--             error ["rbCalcAddrsToLetBind", "impossible", "item(s) stuck on the todo list", stuck]
+--         ];
+--     k alb;
+
+
+let rbCalcAddrsToLetBind2 : { Depth -> RbAssoc -> Addr -> (HeapA AddrsToLetBind) } = 
+    heapFunc3 <|
+    (rootDepth : Depth) -> (rbAssoc : RbAssoc) -> (addr : Addr) -> (k : K @ HeapK AddrsToLetBind) ->
+
+    let _ = rbDebug ["rbCalcAddrsToLetBind", rootDepth, addr];
+    rbTraceHeap addr <| _ ->
+
+    rbScopedRefCount rootDepth rbAssoc addr <| rcsAs ->
+
+    let rcsB : RefCounts = assoc1MkEphemeral ([] : List { [Addr, Int] });
+    let rcsBs : ScopedRefCounts = 
+        assoc1MkEphemeral ([[[], rcsB]] : List { [Addr | Nil, RefCounts] });
+
+    let [_, initCtx] = 
+        while [0 : Depth, [] : List LetBindCtx] <|
+        [depth, ctx] |->
+        if (depth > rootDepth) 
+        [ -> no
+        , -> yes [depth + 1, [[depth, []] ,, ctx]]
+        ];
+
+    let todo : List { [ (List LetBindCtx), Addr] } = [ [ initCtx, addr] ];
+    let alb : AddrsToLetBind = assoc1MkEphemeral ([] : List { [ Addr | Nil, (List Addr) ] });
+
+    heapWhile [ todo, rcsAs, rcsBs, alb ] (
+        [ [ [ctx @ [ [ctxDepth, ctxAddr] ,, _], addr1] ,, todo2], rcsAs, rcsBs, alb ] |=>
+        (k2 : K @ HeapK { [(List { [ (List LetBindCtx), Addr] }), ScopedRefCounts, ScopedRefCounts, AddrsToLetBind] }) ->
+        heapRef addr1 <| addr2 ->
+        let _ = rbDebug ["rb/heapRef", addr1, addr2];
+        heapDeref addr2 <| [nc, node] ->
+        let depth = ncDepth nc;
+
+        match node
+        [ ["HLambda", body] |=> 
+            (k : K @ HeapK ScopedRefCounts) ->
+            let rcsB : RefCounts = assoc1MkEphemeral ([] : List { [Addr, Int] });
+            let [rcsBs, []] = rcsBs "set" [addr2, [rcsB]];
+            k rcsBs
+        , ["TyFun", pat, body] |=>
+            -- TODO need to make sure TyFuns are instantiated properly first
+            (k : K @ HeapK ScopedRefCounts) ->
+            let rcsB : RefCounts = assoc1MkEphemeral ([] : List { [Addr, Int] });
+            let [rcsBs, []] = rcsBs "set" [addr2, [rcsB]];
+            k rcsBs
+        , _ |=>
+            (k : K @ HeapK ScopedRefCounts) ->
+            k rcsBs
+        ] <| rcsBs ->
+
+        let [rbAssoc, rb] = rbAssoc "get" [addr2];
+
+        match rb
+        [ [_] |=> 
+            -- the address was already bound before we even started
+            k2 [todo2, rcsAs, rcsBs, alb]
+        , [] |=>
+
+            let [_, ctx2] = 
+                while [ctx : List LetBindCtx, [] : List LetBindCtx] <|
+                [ ctx1 @ [ [ctxDepth1, ctxAddr1] ,, ctxs ], [] ] |=>
+                if (depth == ctxDepth1)
+                [ ->
+                    -- depth is as expected, we are already at, or just have arrived at, the correct context
+                    [[], ctx1] : { [(List LetBindCtx), (List LetBindCtx)] }
+                , ->
+                    if (depth < ctxDepth1)
+                    [ ->
+                        -- depth is shallower than expected, pop the deepest context and go round the loop again
+                        [ctxs, []]  : { [(List LetBindCtx), (List LetBindCtx)] }
+                    , ->
+                        -- depth is deeper than expected
+                        --   we should have descended into a lambda(s) previously, before encountering a node a this depth
+                        error ["rbCalcAddrsToLetBind", "impossible depth", addr2, depth, ctxDepth1] 
+                        -- debug2 ["rbScopedRefCount1", "impossible depth", addr, depth, ctxDepth] <| ->
+                        -- [ [], ctx ]                        
+                    ]
+                ];
+
+            let ctxAddr = 
+                match ctx2
+                [ [] |=> error ["rbCalcAddrsToLetBind2", "impossible", "context empty"]
+                , [ [ctxDepth2, ctxAddr] ,, _ ] |=> ctxAddr
+                ];
+
+            let ctx3 : List LetBindCtx = 
+                match node
+                [ ["HLambda", body] |=> 
+                    [ [depth + 1, addr2] ,, ctx2 ]
+                , ["TyFun", pat, body] |=>
+                    -- TODO need to make sure TyFuns are instantiate properly first
+                    -- ctx2
+                    [ [depth + 1, addr2] ,, ctx2 ]
+                , _ |=> ctx2
+                ];
+    
+            let iws = isWorthSharing node;
+
+            let [rcsAs, rcsAmb] = rcsAs "get" [ctxAddr];
+            let [rcsBs, rcsBmb] = rcsBs "get" [ctxAddr];
+            let rcsA = fromYesOrPanic rcsAmb;
+            let rcsB = fromYesOrPanic rcsBmb;
+
+            let [rcsA, rcA] = rcsA "get" [addr2];
+            let rcA = match rcA [ [count] |=> count, [] |=> error ["rbCalcAddrsToLetBind", "impossible", "expected a ref count"]];
+            let [rcsB, rcB] = rcsB "get" [addr2];
+            let rcB = match rcB [ [count] |=> count, [] |=> 0];
+            let [rcsB, _] = rcsB "set" [addr2, [rcB + 1]];
+
+            let [rcsAs, _] = rcsAs "set" [ctxAddr, [rcsA]];
+            let [rcsBs, _] = rcsBs "set" [ctxAddr, [rcsB]];
+
+
+            let todoNext = 
+                if (rcA == (rcB + 1))
+                [ ->
+                    let children = nodeChildren node;
+                    let more = forMap children <| child -> [ctx3, child];
+                    append more todo2
+                , ->
+                    todo2
+                ];
+
+            if (iws && (rcA == (rcB + 1)) && ((rcA > 1) || (depth < ctxDepth)))
+            [ ->
+                let [alb, prevLb] = alb "get" [ctxAddr];
+                let prevLb = match prevLb [ [] |=> [], [a] |=> a];
+                let [alb, _] = alb "set" [ctxAddr, [ [addr2 ,, prevLb] ]];
+                let _ = rbDebug ["alb/set/2", ctxAddr, addr2];
+                k2 [todoNext, rcsAs, rcsBs, alb]
+            , ->
+                k2 [todoNext, rcsAs, rcsBs, alb]
+            ]
+        ]
+    ) <| [todo2, rcsAs, rcsBs, alb] ->
+    let _ = 
+        match todo2
+        [ [] |=> []
+        , [stuck ,, _] |=> 
+            -- this could only happens if one of the contexts becomes empty,
+            --   the contexts should always contains at least the root context [rootDepth, []] -- global context [0, []]
+            -- but just in case:
+            error ["rbCalcAddrsToLetBind", "impossible", "item(s) stuck on the todo list", stuck]
+        ];
+    k alb;
+
+
+let rbCalcAddrsToLetBind : { Depth -> RbAssoc -> Addr -> (HeapA AddrsToLetBind) } = 
+    -- rbCalcAddrsToLetBind1;
+    rbCalcAddrsToLetBind2;
+
+let readbackAddr0 : { Depth -> HEnvTy -> PtsSort -> Addr -> (HeapA Expr) } =
+    heapFunc4 <|
+    (rootDepth : Depth) -> (env : HEnvTy) -> (ctx0 : PtsSort) -> (addr0 : Addr) -> (k0 : K @ HeapK Expr) ->
+
+    -- heapMap ( [name: Str, addr: Addr] -> (k : K @ HeapK {[Addr, Str]}) ->
+    --     heapRef addr <| addr2 ->
+    --     k [addr2, name]
+    -- ) env <| rbEnv0 ->
+
+    heapWhile [env : HEnvTy, [] : RbEnv] (
+        [ [ [name, [addr, _]] ,, env2], rbEnv ] |=>
+        (k2 : K @ HeapK { [HEnvTy, RbEnv] }) -> 
+        heapRef addr <| addr2 ->
+        let rbEnv2 = [ [addr2, name] ,, rbEnv ];
+        k2 [env2, rbEnv2]
+    ) <| [_, rbEnv0] ->
+
+    let rbAssoc0 : RbAssoc = assoc1MkPersistent rbEnv0;
+    rbCalcAddrsToLetBind rootDepth rbAssoc0 addr0 <| alb ->
+
+    -- make alb persistent, so as not to need to thread alb through the recusive rbAddrToExpr function
+    let [_, alb] = alb "persistent" [];
+
+    let rbAddrToExpr : { RbEnv -> RbAssoc -> PtsSort -> Addr -> (HeapA Expr) } = 
+        heapFunc4 <|
+        rec <| (rbAddrToExpr : { RbEnv -> RbAssoc -> PtsSort -> Addr -> (HeapA Expr) }) ->
+        rbEnv -> rbAssoc -> ctx -> addr -> (k : K @ HeapK Expr) ->
+
+        let rbAddrToExprOrName : { RbEnv -> RbAssoc -> PtsSort -> Addr -> (HeapA Expr) } = 
+            heapFunc4 <|
+            rec <| (rbAddrToExprOrName : { RbEnv -> RbAssoc -> PtsSort -> Addr -> (HeapA Expr) } ) -> 
+            rbEnv2 -> rbAssoc2 -> ctx2 -> addr3 -> (k2 : K @ HeapK Expr) ->
+            heapRef addr3 <| addr2 ->
+            let [rbAssoc2, rb] = rbAssoc2 "get" [addr2];
+            match rb
+            [ [name] |=>
+                let _ = rbDebug ["rbAddrToExprOrName-name", addr2, name];
+                k2 ["EVar", name]
+            , [] |=> 
+                rbAddrToExpr rbEnv2 rbAssoc2 ctx2 addr3 <| expr ->
+                let _ = rbDebug ["rbAddrToExprOrName-expr", addr2, expr];
+                k2 expr
+            ];
+
+        let rbAddr = rbAddrToExprOrName;
+
+        heapRef addr <| addrRef ->
+        heapDeref addrRef <| [nc, node] ->
+        let depth = ncDepth nc;
+        -- let _ = rbDebug ["srcAnnot", srcAnnot2];
+
+        match node
+        [ [ "HValue", val] |=>
+            k (bracket ctx "Term" ["ELit", val])
+        -- , [ "HOper", "Apply", [func,arg] ] |=>
+        --     rbAddr rbEnv rbAssoc "Type" func <| funcTyExpr ->
+        --     rbAddr rbEnv rbAssoc "Type" arg  <| argTyExpr  ->
+        --     k ["ETypeBrackets", ["EApply", funcTyExpr, argTyExpr]]
+        , [ "HOper", opName, args ] |=>
+            heapMap (rbAddr rbEnv rbAssoc "Term") args <| argExprs ->
+            k (bracket ctx "Term" ["EOper", opName, argExprs])
+        , [ "HVar" ] |=>
+            -- let varName = readbackVarName depth srcAnnot2;
+            let varName = readbackVarName depth [];
+            k ["EVar", varName]
+        , [ "HLambda", body ] |=>
+            let [alb, letBindingsMb] = alb "get" [addrRef];
+            let varDepth = depth + 1;
+            let _ = rbDebug ["letBindingsMb", addrRef, letBindingsMb];
+            match letBindingsMb 
+            [ [] |=>
+                rbAddr rbEnv rbAssoc "Term" body <| bodyExp -> 
+                -- let varName = readbackVarName varDepth srcAnnot2;
+                let varName = readbackVarName varDepth [];
+                k (bracket ctx "Term" ["ELambda", ["EVar", varName], bodyExp])
+            , [lbAddrs] |=> 
+                let [_, _, lbEnv] = 
+                    while [ lbAddrs : List Addr, 1 : Int, [] : List { [Addr, Str] } ] <|
+                    [ [ addr1 ,, lbAddrs2 ], idx, henv ] |=>
+                    -- TODO let bind using the original source names where possible
+                    let letVarName = strCat ["v", show varDepth, "_", show idx];
+                    [ lbAddrs2, idx + 1, [ [addr1, letVarName] ,, henv] ];
+                let _ = rbDebug ["let-bound-vars", lbEnv];
+                let lbEnv2 = reverse lbEnv;    
+                let rbEnv2 = append lbEnv2 rbEnv;
+                let rbAssoc2 = assoc1MkPersistent rbEnv2;
+                heapMap (
+                    [addr1: Addr, name : Str] ->
+                    (k2 : K @ HeapK Decl) ->
+                    rbAddrToExpr rbEnv2 rbAssoc2 "Term" addr1 <| defn ->
+                    k2 [["EVar", name], defn]
+                ) lbEnv2 <| decls ->
+                rbAddr rbEnv2 rbAssoc2 "Term" body <| bodyExp -> 
+                let varName = readbackVarName varDepth [];
+                k (bracket ctx "Term" ["ELambda", ["EVar", varName], ["ELets", decls, bodyExp]])
+            ]
+        , [ "HApply", func, arg ] |=>
+            rbAddr rbEnv rbAssoc "Term" func <| funcExp -> 
+            rbAddr rbEnv rbAssoc "Term" arg <| argExp -> 
+            k (bracket ctx "Term" ["EApply", funcExp, argExp])
+        , [ "HPair", hdAddr, tlAddr ] |=>
+            rbAddr rbEnv rbAssoc "Term" hdAddr <| hdExp -> 
+            rbAddr rbEnv rbAssoc "Term" tlAddr <| tlExp -> 
+            -- k (bracket ctx "Term" ["EPair", hdExp, tlExp])
+            k (bracket ctx "Term" (ePair hdExp tlExp))
+        , ["HTypeAnnot", termA, typeA] |=>
+            rbAddr rbEnv rbAssoc "Term" termA <| termExp -> 
+            rbAddr rbEnv rbAssoc "Term" typeA <| typeExp -> 
+            k (bracket ctx "Term" ["EType", termExp, typeExp])
+    
+        -- types
+        , ["TyFun", patA, bodyA] |=>
+            rbAddr rbEnv rbAssoc "Type" patA <| patExp ->
+            rbAddr rbEnv rbAssoc "Type" bodyA <| bodyExp ->
+            k (bracket ctx "Type" ["ELambda", patExp, bodyExp])
+        , ["TyDatum", datum] |=>
+            k (bracket ctx "Type" ["ELit", datum])
+        , ["TyOper", name, args] |=>
+            heapMap (rbAddr rbEnv rbAssoc "Type") args <| argExprs ->
+            k (bracket ctx "Type" ["EOper", name, argExprs])
+    
+        , ["TyVar"] |=>
+            -- TODO handle type-vars correctly, 
+            --   the name of a type-var at a given depth will be different from the name of the term-var at that same depth
+            let varName = readbackVarName depth [];
+            k ["EVar", varName]
+    
+        , ["TyPair", hdA, tlA] |=>
+            rbAddr rbEnv rbAssoc "Type" hdA <| hdExp -> 
+            rbAddr rbEnv rbAssoc "Type" tlA <| tlExp -> 
+            -- k (bracket ctx "Type" ["EPair", hdExp, tlExp])
+            k (bracket ctx "Type" (ePair hdExp tlExp))
+    
+        , [ "TyApp", func, arg ] |=>
+            rbAddr rbEnv rbAssoc "Type" func <| funcExp -> 
+            rbAddr rbEnv rbAssoc "Type" arg <| argExp -> 
+            k (bracket ctx "Type" ["EApply", funcExp, argExp])
+    
+        , ["TySingle", valA] |=>
+            rbAddr rbEnv rbAssoc "Term" valA <| valExp -> 
+            k (bracket ctx "Type" valExp)
+    
+        , ["TyTermAnnot", termA, typeA] |=>
+            error ["TODO"]
+    
+        , other |=> error ["missing case", other]
+        ];
+
+    heapRef addr0 <| addrRef ->
+    -- let letBindingsMb = alb "get" [];
+    let [alb, letBindingsMb] = alb "get" [[]];
+    let _ = rbDebug ["letBindingsMb0", addrRef, letBindingsMb];
+
+    match letBindingsMb 
+    [ [] |=>
+        rbAddrToExpr rbEnv0 rbAssoc0 ctx0 addr0 <| rbExpr ->
+        let _ = rbDebug ["readbackAddr", addr0, rbExpr];
+        k0 rbExpr
+    , [lbAddrs] |=> 
+        let lbAddrs2 = listUniq lbAddrs;
+        let [_, _, lbEnv] = 
+            while [ lbAddrs2 : List Addr, 1 : Int, [] : List { [Addr, Str] } ] <|
+            [ [ addr ,, lbAddrs3 ], idx, henv ] |=>
+            -- this assumes that readbackAddr has been called at a global scope (depth 0), which should be fine in practice
+            -- let letVarName = strCat ["v0", "_", show idx];
+            -- if we are reading back from a non-zero address, 
+            -- then there may be nodes at multiple unscoped depths which need to be let-bound.
+            -- using the same v1 (or vN) here for all the unscoped depths, is prefereable to using v0,
+            -- but it may be further preferable to track and use the correct depths.
+            let letVarName = strCat ["v", show rootDepth, "_", show idx];
+            [ lbAddrs3, idx + 1, [ [addr, letVarName] ,, henv] ];
+        let lbEnv2 = reverse lbEnv;
+        -- let lbEnv2 = lbEnv;
+        let rbEnv2 = append lbEnv2 rbEnv0;
+        let rbAssoc2 = assoc1MkPersistent rbEnv2;
+        heapMap (
+            [addr: Addr, name : Str] ->
+            (k2 : K @ HeapK Decl) ->
+            rbAddrToExpr rbEnv2 rbAssoc2 "Term" addr <| defn ->
+            k2 [["EVar", name], defn]
+        ) lbEnv2 <| decls ->
+        rbAddrToExpr rbEnv2 rbAssoc2 ctx0 addr0 <| rbExpr ->
+        let _ = rbDebug ["readbackAddr", addr0, rbExpr];
+        k0 ["ELets", decls, rbExpr]
+    ];
+
+
+let isTypeNode : { Node -> Bool } =
+    [tag ,, _] ->
+    match tag
+    [ "HVar"         |=> false
+    , "HLambda"      |=> false
+    , "HApply"       |=> false
+    , "HValue"       |=> false
+    , "HPair"        |=> false
+    , "HOper"        |=> false
+    , "HTypeAnnot"   |=> false
+    , "TyFun"        |=> true
+    , "TyVar"        |=> true
+    , "TyPair"       |=> true
+    , "TyApp"        |=> true
+    , "TyDatum"      |=> true
+    , "TyOper"       |=> true
+    , "TySingle"     |=> true
+    , "TyTermAnnot"  |=> true
+    , _ |=>
+        error ["isTypeNode", "missing case", tag]
+    ];
+
+
+
+let readbackAddr1 : { Depth -> HEnvTy -> PtsSort -> Addr -> (HeapA Expr) } =
+    heapFunc4 <|
+    (rootDepth : Depth) -> (henv : HEnvTy) -> (ctx : PtsSort) -> (addr : Addr) -> (k : K @ HeapK Expr) ->
+    rbTraceHeap addr <| ->
+    heapDeref addr <| [_, node] ->    
+    -- If the root-node is a type node (TyOper, TyFun, etc), 
+    --   then forget previous bindings, 
+    --   read-back the whole type as a single self-contained expression.
+    -- TODO ? This approach won't work for types like (List Expr), as this is rooted with a HApply.
+    -- TODO ? Maybe introduce a new node ? TyCons for type-constructor functions ?
+    -- TODO ? The current need to read back self-contained types is driven by the tests, 
+    -- TODO ?   this wouldn't/won't be required with a different testing approach
+    let henv2 = if (isTypeNode node) [ -> [], -> henv];
+    readbackAddr0 rootDepth henv2 ctx addr <| expr -> 
+    let _ = rbDebug ["readbackAddr", addr, expr];
+    k expr;
+
+
+let readbackAddr : { HEnvTy -> PtsSort -> Addr -> (HeapA Expr) } =
+    readbackAddr1 0;
+

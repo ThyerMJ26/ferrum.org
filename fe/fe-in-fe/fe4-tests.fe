@@ -1,0 +1,43 @@
+language ferrum/0.1
+
+let test1 = scan "123";
+
+let s1 = scan "123";
+let p1 = testParse2 "EXP" s1;
+let s2 = scan "f 123 abc";
+let p2 = testParse2 "EXP" s2;
+let s3 = scan "f x + 123 * abc";
+let p3 = testParse2 "EXP" s3;
+let s4 = scan "f x * 123 + abc";
+let p4 = testParse2 "EXP" s4;
+
+let t1 = evalStr "4 + 5 * 6";
+let t2 = evalStr "4 * 5 + 6";
+let t3 = evalStr "9 - 5 - 2";
+let t4 = evalStr "let a=7; a";
+let t5 = evalStr "let a=3; let b=4; let c=5; a + b * c";
+let t6 = evalStr "( a -> a * a ) 3";
+let t7 = evalStr "( a -> b -> c -> a + b * c ) 3 4 5";
+
+let graphReduceStr : { Str -> Str }
+     = input ->
+     let expr = testParse3 "EXP" (scan input);
+     instantiate 0 [] expr ( addr ->
+     -- graphReduce addr ( _ ->
+     reduceAll addr ( _ ->
+     readbackAddr addr ( expr -> 
+     heap -> showExpr expr
+     ) ) ) heapEmpty;
+ let input1 = "1 + 2";
+ let input2 = "( a -> a*a ) ( 3 + 4 )";
+ let input3a = "( a -> a a )";
+ let input3b = "( b -> b )";
+ let input3 = "( a -> a a ) ( b -> b )";
+ let input4 = "( a -> b -> a a ) ( b -> b )";
+
+let gr1 = graphReduceStr input1;
+let gr2 = graphReduceStr input2;
+let gr4 = graphReduceStr input4;
+
+let z1@[z2,z3] = 
+    [7,9];

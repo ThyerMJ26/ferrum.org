@@ -1,0 +1,542 @@
+language ferrum/0.1
+
+-- let p3Trace : { [Str ,, Any] -> K @ { Nil -> Any} -> K Nil } =  msg -> k -> debug2 msg k;
+
+-- let p3Trace = debug2;
+let p3Trace = (msg : Any) -> (k : K @ { Nil -> Any }) -> k [];
+
+let Pretty3Item = Str;
+let Pretty3Indent = Int;
+let P3Indent = Pretty3Indent;
+-- let Pretty3Line = { [Pretty3Indent, (ListNonEmpty Pretty3Item)] };
+-- let Pretty3Doc = ListNonEmpty Pretty3Line;
+let Pretty3Line = { [Pretty3Indent, (List Pretty3Item)] };
+let Pretty3Doc = List Pretty3Line;
+let PD = Pretty3Doc;
+
+
+let p3IndentIncrement = 4;
+let p3MaxLineLen = 60;
+
+
+-- let p3Text : { Pretty3Indent -> Str -> PD } =
+--     indent -> text -> [ [indent, ["", text]] ];
+-- 
+-- let p3TextSticky : { Str -> PD } =
+--     text -> [ [0, [text]] ];
+
+let p3Text : { Pretty3Indent -> Str -> PD } =
+    indent -> text -> [ [indent, [text]] ];
+
+let p3LeadingText : { Pretty3Indent -> Str -> PD } =
+    indent -> text ->
+    -- let text2 = while text <| text3 -> if (strLen text3 < p3IndentIncrement) [ -> [strAdd text3 " "], -> []];
+    let text2 = 
+        while text <| text3 -> 
+        if (strLen text3 < p3IndentIncrement) 
+        [ -> [strAdd text3 " "]
+        , -> []
+        ];
+    [ [indent, [text2]] ];
+
+
+
+let p3Nil = [] : PD;
+
+-- let p3BlankLine : PD =
+--     [p3Nil, p3Nil];
+
+let p3IsMultiLine : { PD -> Bool } = 
+    a ->
+    -- TODO don't count the lines, just pattern match, this saves iterating past the first lines (there could be many lines)
+    -- length a > 1;
+    match a
+    [ [_, _ ,, _] |=> true
+    , _ |=> false
+    ];
+
+-- let p3IsSingleLine : { PD -> Bool } = 
+--     a ->
+--     length a == 1;
+
+
+
+let p3H0 : { PD -> PD -> PD } =
+    a -> b ->
+    ifNil b 
+    [ [] -> 
+        a
+    , [bFirst ,, bRest] ->
+        ifNil (reverse a)
+        [ [] -> b
+        , [aLast ,, aInitRev] ->
+            let [aLastIndent, aLastItems] = aLast;
+            let [bFirstIndent, bFirstItems] = bFirst;
+            let aEndOfLine = aLastIndent + sum (map strLen aLastItems);
+            -- TODO ? if padding is negative, increase the indentation of the rest of the lines in b ?
+            let paddingWidth = max 0 <| (bFirstIndent - aEndOfLine);
+            let paddingWidth2 = if (p3IsMultiLine b) [ -> paddingWidth, -> 0];
+            let padding = strRepeat paddingWidth2 " ";
+            -- let splicedLine = [aLastIndent, append aLastItems bFirstItems];
+            let splicedLine = [aLastIndent, concat [aLastItems, [padding], bFirstItems]];
+            reverseOnto aInitRev [splicedLine ,, bRest]
+        ]
+    ];
+
+let p3H : { (List PD) -> PD } =
+    a ->
+    forFoldRight p3Nil a <|
+    result -> a1 ->
+    p3H0 a1 result;
+
+let p3V0 : { PD -> PD -> PD } =
+    a -> b ->
+    append a b;
+
+let p3V : { (List PD) -> PD } =
+    a ->
+    forFoldRight p3Nil a <|
+    result -> a1 ->
+    p3V0 a1 result;
+
+-- append a string onto the last item of the last line
+let p3A : { PD -> Str -> PD } =
+    pd -> addendum ->
+    ifNil (reverse pd)
+    [ [] ->
+        p3Text 0 addendum
+    , [lastLine ,, initLinesRev] ->
+        let [lastIndent, lastItems] = lastLine;
+        let lastItems2 = 
+            ifNil (reverse lastItems)
+            [ [] -> [addendum]
+            , [lastItem ,, initItemsRev] ->
+                reverseOnto initItemsRev [strAdd lastItem addendum]
+            ];
+        let lastLine2 = [[lastIndent, lastItems2]];
+        reverseOnto initLinesRev lastLine2
+    ];
+
+
+-- let p3Indent : { PD -> Pretty3Indent } =
+--     [ [indent, _] ,, _] ->
+--     indent;
+
+-- let p3LineTooLong : { Int -> Bool } =
+--     len ->
+--     len > p3MaxLineLen;
+
+let p3FitsOnOneLine2 : { (List PD) -> Int -> Bool } =
+    a -> punctLen ->
+    if (listAllFalse a p3IsMultiLine)
+    [ ->
+        let items = concat <| forMap a <| lines -> concat <| forMap lines <| [indent, itms] -> itms;
+        let len = sum <| map strLen items;
+        (len + punctLen) <= p3MaxLineLen
+    , -> 
+        false
+    ];
+
+let p3FitsOnOneLine : { (List PD) -> Bool } =
+    a ->
+    p3FitsOnOneLine2 a 0;
+
+let p3HV : { (List PD) -> PD } =
+    a ->
+    if (p3FitsOnOneLine a) 
+    [ -> p3H a
+    , -> p3V a
+    ];
+
+
+let p3List : { Pretty3Indent -> [Str,Str,Str] -> (List PD) -> PD } =
+    indent -> [opn, sep, cls] -> a ->
+    let p3T = p3Text indent;
+    match a 
+    [ [] |=>
+        p3H [p3T opn, p3T cls]
+    , [a1 ,, as] |=>
+        p3HV <| concat 
+        [ [p3H [p3T opn, a1]]
+        ,   forMap as <| a2 -> 
+            p3H [p3T sep, a2]
+        , [p3T cls]
+        ]
+    ];
+
+-- let p3List2 : { Pretty3Indent -> [Str,Str,Str] -> (List PD) -> PD } =
+--     indent -> [opn, sep, cls] -> pds ->
+--     let p3T = p3Text indent;
+--     let p3L = p3LeadingText indent;
+--     let punctLen = strLen opn + ((strLen sep) * (length pds - 1)) + strLen cls;
+--     if (p3FitsOnOneLine2 pds punctLen)
+--     [ ->
+--         p3H <| concat [[p3T opn], forMap pds <| pd -> p3H [p3T sep, pd], [p3T cls]]
+--     , ->
+--         p3V <| concat [[p3L opn], forMap pds <| pd -> p3H [p3L sep, pd], [p3L cls]]
+--     ];
+
+let p3List2 : { Pretty3Indent -> [Str,Str,Str] -> (List PD) -> PD } =
+    indent -> [opn, sep, cls] -> pds ->
+    let p3T = p3Text indent;
+    match pds
+    [ [] |=>
+        p3H [p3T opn, p3T cls]
+    , [pd1 ,, pds2] |=>
+        let p3L = p3LeadingText indent;
+        let punctLen = strLen opn + ((strLen sep) * (length pds - 1)) + strLen cls;
+        if (p3FitsOnOneLine2 pds punctLen)
+        [ ->
+            p3H <| concat [ [p3H [p3T opn, pd1]], forMap pds2 <| pd -> p3H [p3T sep, pd], [p3T cls] ]
+        , ->
+            p3V <| concat [ [p3H [p3L opn, pd1]], forMap pds2 <| pd -> p3H [p3L sep, pd], [p3T cls] ]
+        ]
+    ];
+
+
+-- let jsp3Paren : { Pretty3Indent -> JsCtx -> JsExpr -> PD -> PD } =
+--     indent -> ctx -> expr -> p ->
+--     let p3T = p3Text indent;
+--     let p3L = p3LeadingText indent;
+--     if (needsParens ctx expr)
+--     [ ->
+--         if (not (p3IsMultiLine p))
+--         [ -> 
+--             p3H [p3T "(", p, p3T ")"]
+--         , -> 
+--             -- p3H [p3L "(", p, p3T ")"]
+--             p3V [p3T "(", p, p3T ")"]
+--         ]
+--     , ->
+--         p
+--     ];
+
+let p3Paren : { Pretty3Indent -> PD -> PD } =
+    indent -> p ->
+    let p3T = p3Text indent;
+    p3H [p3T "(", p, p3T ")"];
+
+-- let JsPretty3 = { Pretty3Indent -> JsCtx -> { JsExpr | JsStmt } -> PD };
+let JsPretty3Expr0 = { Pretty3Indent -> JsCtx -> JsExpr -> PD };
+let JsPretty3Expr = { Pretty3Indent -> JsExpr -> PD };
+-- let JsPretty3Stmt0 = { JsPretty3Expr -> Pretty3Indent -> JsStmt -> PD };
+let JsPretty3Stmt = { Pretty3Indent -> JsStmt -> PD };
+
+let jsPretty3Stmts0 : { JsPretty3Stmt -> Pretty3Indent -> JsStmts -> PD } = 
+    dispS -> indent -> stmts ->
+    p3Trace ["jsPretty3Stmts0"] <| ->
+    p3V (map (dispS indent) stmts);
+
+let jsPretty3StmtBlock0 : { JsPretty3Stmt -> Pretty3Indent -> JsStmts -> PD } = 
+    dispS -> indent -> stmts ->
+    p3Trace ["jsPretty3StmtBlock0"] <| ->
+    let indent2 = indent + p3IndentIncrement;
+    let p3T = p3Text indent;
+    let stmtsPP = map (dispS indent2) stmts;
+    p3V <| concat [ [p3T "{"], stmtsPP, [p3T "}"] ];
+
+-- TODO ? add context/parens ?
+let jsPretty3Maybe0 : { JsPretty3Expr0 -> Pretty3Indent -> JsCtx -> (Maybe JsExpr) -> PD } =
+    dispE -> indent -> ctx -> exprMaybe ->
+    p3Trace ["jsPretty3Maybe0"] <| ->
+    match exprMaybe
+    [ [] |=>
+        p3Nil
+    , [expr] |=>
+        dispE indent ctx expr
+    ];
+
+
+let jsPretty3Stmt0 : { JsPretty3Expr0 -> Pretty3Indent -> JsStmt -> PD } =
+    dispE0 ->
+    rec <| ( dispS : { Pretty3Indent -> JsStmt -> PD } ) -> 
+    indent ->
+    js ->
+    let indent2 = indent + p3IndentIncrement;
+    let dispE1 = dispE0 indent jsDefaultCtx;
+    let dispE = dispE0 indent2 jsDefaultCtx;
+    let dispSS = jsPretty3Stmts0 dispS indent;
+    let dispSB = jsPretty3StmtBlock0 dispS indent;
+    let p3T = p3Text indent;
+    p3Trace ["jsPretty3Stmt0", indent, hd js] <| ->
+    match js
+    [ ["JsCommentStmt", msg] |=>
+        -- TODO quote the msg in a way that ensures the comment doesn't terminate prematurely
+        let comment = p3T <| strCat ["/* ", msg, " */"];
+        comment
+    , ["JsReturn", expr] |=>
+        p3HV [p3T "return (", dispE expr, p3T ");"]
+    , ["JsAssign", lhs, rhs] |=>
+        p3HV [ p3H [dispE1 lhs, p3T " = "], p3H [dispE rhs, p3T "; "]]
+    , ["JsExpr", expr] |=>
+        p3H [dispE1 expr, p3T ";"]
+    , ["JsLet", pat, [defn]] |=>
+        -- p3HV [p3T "let ", dispE pat, p3T " = ", dispE defn, p3T "; "]
+        p3HV [ p3HV [p3T "let ", p3H [dispE pat, p3T " = "] ]
+            , p3H [dispE defn, p3T "; "] 
+            ]
+    , ["JsLet", pat, []] |=>
+        p3HV [p3T "let ", dispE pat, p3T "; "]
+    , ["JsLetUndefined", vars] |=>
+        p3HV [p3T "let ", p3T <| strJoin ", " vars, p3T "; "]
+    , ["JsIf", cond, then] |=>
+        -- p3HV [p3T "if (", dispE cond, p3T ")", dispSB then]
+        p3V [p3HV [p3T "if (", dispE cond, p3T ")"], dispSB then]
+
+    , ["JsIfElse", cond, then, else] |=>
+        let [elseFinal, condThens] = 
+            while [[js] : JsStmts, [] : List ({ [JsExpr, JsStmts] })] <|
+            [[["JsIfElse", cond2, then2, else2]], condThens] |=>
+            [else2, [[cond2, then2] ,, condThens]];
+        let [condThenFirst, condThenRest] =
+            match (reverse condThens)
+            [ [f ,, r] |=> [f , r]
+            , _ |=> error ["impossible"]
+            ];
+        let ifThenFirstDt : PD = 
+            let [cond3, then3] = condThenFirst;
+            p3V
+            [ p3H [ p3T "if (", dispE cond3, p3T ")"]
+            , dispSB then3
+            ];
+        let ifThenRestDt : List PD = 
+            forMap condThenRest <| 
+            [cond4, then4] ->
+            p3V
+            [ p3H [p3T "else if (", dispE cond4, p3T ")"]
+            , dispSB then4
+            ];
+        let elseFinalDt : PD = p3V [p3T "else", dispSB elseFinal];
+        p3V <| concat [[ifThenFirstDt], ifThenRestDt, [elseFinalDt]]
+
+    , ["JsIfElse", cond, then, else] |=>
+        -- p3HV [p3T "if (", dispE cond, p3T ")", dispSB then, p3T "else", dispSB else]
+        p3V [p3HV [p3T "if (", dispE cond, p3T ")"], dispSB then, p3T "else", dispSB else]
+    , ["JsWhile", cond, body] |=>
+        -- p3HV [p3T "while (", dispE cond, p3T ")", dispSB body]
+        p3V [p3HV [p3T "while (", dispE cond, p3T ")"], dispSB body]
+    , ["JsDoWhile", body, cond] |=>
+        p3V [ p3T "do", dispSB body, p3T "while (", dispE cond, p3T ");"]
+    , ["JsBreak"] |=>
+        p3T "break;"
+    , ["JsContinue"] |=>
+        p3T "continue;"
+    ];
+
+
+let jsPretty3Expr0 : { Pretty3Indent -> JsCtx -> JsExpr -> PD } =
+    rec <| ( dispE0 : { Pretty3Indent -> JsCtx -> JsExpr -> PD } ) -> 
+    indent0 ->
+    ctx -> 
+    js ->    
+    let parensNeeded =  needsParens ctx js;
+    let indent = if parensNeeded [ -> indent0 + p3IndentIncrement, -> indent0];
+    let indent2 = indent + p3IndentIncrement;
+    -- let indent3 = indent2 + p3IndentIncrement;
+    let dispE1 = dispE0 indent;
+    let dispE = dispE0 indent2;
+    let dispS0 = jsPretty3Stmt0 dispE0;
+    let dispS = jsPretty3Stmt0 dispE0 indent2;
+    let dispSS = jsPretty3Stmts0 dispS0 indent2;
+    let dispSB = jsPretty3StmtBlock0 dispS0 indent2;
+    let dispM = jsPretty3Maybe0 dispE0 indent2;
+    -- let dispM3 = jsPretty3Maybe0 dispE0 indent3;
+    let p3T = p3Text indent;
+    let p3L = p3LeadingText indent;
+    p3Trace ["jsPretty3Expr0"] <| ->
+    let result = 
+        match js
+        [ ["JsCommentExpr", msg, expr] |=>
+            -- TODO quote the msg in a way that ensures the comment doesn't terminate prematurely
+            let comment = p3T <| strCat ["/* ", msg, " */"];
+            p3HV [comment, dispE ctx expr]
+        , ["JsVar", "if"] |=>
+            p3T "_.if2"
+        , ["JsVar", var] |=>
+            p3T var
+        , ["JsDatum", datum] |=>
+            p3T <|
+            ifNil datum 
+            [ -> "null"
+            , _ -> show datum
+            ]
+    
+        , js2 @ ["JsLambdaExpr", [pat], body] |=>
+            let [args, body2] = jsCollectCurriedArgs js2;
+            let [argsD, bodyD] =
+                match body2
+                [ ["JsLambdaStmt", [pat2], body3] |=>
+                    let argsD : PD = p3HV <| forMap (concat [args,[pat2]]) <| arg -> p3H [p3T "(", dispE [js, 1] arg, p3T ") => "];
+                    -- let bodyD : PD = p3H [ p3L "{ ", dispSS body3, p3T " }" ];
+                    let bodyD : PD = dispSB body3;
+                    [argsD, bodyD]
+                , _ |=>
+                    let argsD : PD = p3HV <| forMap args <| arg -> p3H [p3T "(", dispE [js, 1] arg, p3T ") => " ];
+                    let bodyD : PD = dispE [js, 2] body2;
+                    [argsD, bodyD]
+                ];
+            let result = p3HV [argsD, bodyD];
+            result
+    
+        , ["JsLambdaExpr", pats, body] |=>
+            let paramsPP = p3List2 indent ["(", ",", ") => "] <| forMap pats <| pat -> dispE [js, 1] pat;
+            let bodyPP = dispE [js, 2] body;
+            p3HV [paramsPP, bodyPP]
+    
+        , ["JsLambdaStmt", pats, body] |=>
+            let paramsPP = p3List2 indent ["(", ",", ") => "] <| forMap pats <| pat -> dispE [js, 1] pat;
+            let bodyPP = dispSB body;
+            p3HV [paramsPP, bodyPP]
+    
+        , ["JsSeq", exprs @ [_ ,, _]] |=>
+            p3List indent ["(", ", ", ")"] <| map (dispE [js, 1]) exprs
+            
+        , ["JsOp", op, [arg1, arg2]] |=>
+            p3HV [dispE1 [js, 1] arg1, p3T op, dispE [js, 2] arg2]
+        , ["JsOp", "?:", [arg1, arg2, arg3]] |=>
+            p3HV [dispE [js, 1] arg1, p3T "?", dispE [js, 2] arg2, p3T ":", dispE [js, 3] arg3]
+        , ["JsOp", op, args] |=>
+            error ["TODO", "JsOp", op, length args]
+        , ["JsInstanceOf", expr, className] |=>
+            p3HV [dispE [js, 1] expr, p3T " instanceof ", p3T className]
+        , ["JsAssignExpr", arg1, arg2] |=>
+            p3HV [dispE [js, 1] arg1, p3T " = ", dispE [js, 2] arg2]
+        , ["JsIndex", arg1, arg2] |=>
+            p3HV [dispE [js, 1] arg1, p3T " [", dispE [js, 2] arg2, p3T "]"]
+        , ["JsCall", func, []] |=>
+            p3HV [dispE [js, 1] func, p3T "()"]
+        , ["JsCall", func, [arg]] |=>
+            -- p3HV [dispE [js, 1] func, p3T "(", dispE [js, 2] arg, p3T ")"]
+            -- p3HV [dispE [js, 1] func, p3HV [p3T "(", dispE [js, 2] arg, p3T ")"]]
+            -- p3HV [dispE [js, 1] func, ppBH ["(", ")"] [dispE [js, 2] arg]]
+            -- ppB2H (dispE [js, 1] func) ["(", ")"] [dispE [js, 2] arg]
+            -- p3HV 
+            -- [ p3H [ dispE [js, 1] func, p3TextSticky " ("]
+            -- , dispE [js, 2] arg
+            -- , p3T ")"
+            -- ]
+            p3HV 
+            [ p3A (dispE1 [js, 1] func) " ("
+            , p3H [dispE [js, 2] arg, p3T ")"]
+            ]
+        , ["JsCall", func, args @ [arg1 ,, argsRest]] |=>
+            let funcP = dispE1 [js, 1] func;
+            let argsP = forMap args <| dispE [js, 2];
+            let argsP = argsP |> justTrustMeCast (List PD) (ListNonEmpty PD);  -- TODO fix this fudge
+            let [arg1P ,, argsRestP] = argsP;
+            let opnP = p3T "(";
+            let sepP = p3T ", ";
+            let clsP = p3T ")";
+            let partsP = concat [[funcP, opnP], intersperse sepP argsP, [clsP]];
+            if (p3FitsOnOneLine partsP)
+            [ ->
+                p3H partsP
+            , ->
+                p3V <| concat
+                [ [ p3A funcP " (" ]
+                , [ arg1P ]
+                , forMap argsRestP <| argP -> p3H [p3L ",", argP]
+                , [ p3T ")" ]
+                ]
+            ]
+            -- p3HV <| concat
+            -- [ [ p3A (dispE1 [js, 1] func) " (" ]
+            -- , [ dispE [js, 2] arg1 ]
+            -- , forMap args <| arg -> p3H [p3L ",", dispE [js, 2] arg]
+            -- , [ p3T ")" ]
+            -- ]
+        , ["JsMethod", obj, method] |=>
+            p3HV [dispE [js, 1] obj, p3T ".", p3T method]
+
+        , ["JsList", []] |=>
+            p3T "[]"
+
+        -- , ["JsList", elems] |=>
+        --     let [elemFinalTl, elems2] = 
+        --         while [[js] : Maybe JsExpr, [] : List JsExpr] <|
+        --         [ [ ["JsList", [[elem], elems] ] ], elems3] |=>
+        --         [ elems, [elem ,, elems3] ];
+        --     let elems3 = reverse elems2;
+        --     match elemFinalTl
+        --     [ [ ["JsDatum", []] ] |=>
+        --         let elemsPd : List PD = 
+        --             forMap elems3 <| elem -> dispM [js, 1] [elem];
+        --         let closeBrackets = 
+        --             strCat <| forMap elems3 <| _ -> " ]";
+        --         let cls = strAdd ", null" closeBrackets;
+        --         p3List2 indent ["[", ", [", cls] <| elemsPd
+        --     , _ |=>
+        --         p3List2 indent ["[", ",", "]"] <| map (dispM [js,1]) elems
+        --     ]
+
+        , ["JsList", elems] |=>
+            let [elemFinalTl, elems2] = 
+                while [[js] : Maybe JsExpr, [] : List JsExpr] <|
+                [ [ ["JsList", [[elem], elems] ] ], elems3] |=>
+                [ elems, [elem ,, elems3] ];
+            let elems3 = reverse elems2;
+            match elemFinalTl
+            [ [ ["JsDatum", []] ] |=>
+                let elemsPd : List PD = 
+                    forMap elems3 <| elem -> p3H [p3T "[ ", dispM [js, 1] [elem], p3T ","];
+                let closeBrackets = 
+                    strCat <| forMap elems3 <| _ -> " ]";
+                let cls = strAdd "null" closeBrackets;
+                p3HV <| concat [elemsPd, [p3T cls]]
+            , _ |=>
+                p3List2 indent ["[", ",", "]"] <| map (dispM [js,1]) elems
+            ]
+
+        -- , ["JsList", elems @ [_ ,, _]] |=>
+        --     p3List2 indent ["[", ",", "]"] <| map (dispM [js,1]) elems
+
+        , ["JsObject", fields] |=>
+            let fieldsP = 
+                forMap fields <|
+                [name, expr] ->
+                p3H [p3T name, p3T ": ", dispE [js,1] expr];
+            p3List2 indent ["{", ",", "}"] <| fieldsP
+        ];
+    -- let result2 = jsp3Paren indent0 ctx js result;
+    let result2 = if parensNeeded [ -> p3Paren indent0 result, -> result];
+    result2;
+
+
+
+-- let jsPretty3Expr : { JsExpr -> PD } =
+--     expr ->
+--     p3Trace ["jsPretty3Expr"] <| ->
+--     jsPretty3Expr0 0 jsDefaultCtx expr;
+
+    
+
+let jsPretty3Stmt : { Pretty3Indent -> JsStmt -> PD } =
+    indent -> stmt ->
+    p3Trace ["jsPretty3Stmt"] <| ->
+    jsPretty3Stmt0 jsPretty3Expr0 indent stmt;
+
+let jsPretty3Stmts : { JsStmts -> PD } =
+    stmts ->
+    p3Trace ["jsPretty3Stmts"] <| ->
+    jsPretty3Stmts0 jsPretty3Stmt 0 stmts;
+
+
+let pretty3Show : { PD -> Str } =
+    pd -> 
+    p3Trace ["pretty3Show"] <| ->
+    strCat <|
+    forMap pd <|
+    [indent, items] ->
+    -- strCat [strRepeat indent " " ,, items];
+    -- strCat <| concat [ [strRepeat indent " "], items, ["\n"] ];
+    strAdd (strCat [strRepeat indent " " ,, items]) "\n";
+
+  -- error ["TODO", "pretty3Show"];
+
+--   """
+-- 
+--     error [ "TODO" , "pretty3Show" ];
+-- 
+--   """
+--  ;  
+

@@ -1,0 +1,683 @@
+language ferrum/test/0.1
+
+-- This file contains tests which work in the original tree-type implementation,
+--   but don't yet work in the graph-type implementation.
+
+
+ -- This keyValueTuple test currently passes when using fe4/tree-types, but not when using fe4/graph-types.
+ -- The { TupleKv : Type } param type used in tupleKvGet isn't clearly a list of tuples, 
+ --   this blocks the calculation of the context type for the function passed to guardHdDatumSingle.
+ -- The tree-types implementation intersects synTy and ctxTy types together a bit too freely, and so gets away with it.
+ -- It would be better for the 
+ --   { TupleKv : Type }
+ -- to be
+ --   { TupleKv : SubType (List { [Str, Any] }) }
+ -- but "SubType" isn't implemented.
+ -- The fe-in-fe code uses a different approach to key-value tuples, so commenting out for now.
+ 
+[  [ [ "name", "keyValueTuple" ]
+   , [ "language", "ferrum/0.1" ]
+   , [ "type_check", "bidir" ]
+   , [ "decls",
+       """
+         let Maybe = (A : Type) -> { [] | [A] };
+         let justTrustMeCast : { { From : Type } -> { To : Type } -> From -> To } =
+             (From : Type) -> (To : Type) -> (a : From) -> 
+             castT a : To;
+         let no = [];
+         let yes = (a : A @ Any) -> [a];
+         let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+             (initVal: A @ Any) -> iterate ->
+             loop2 initVal <| val ->
+             ifNil (iterate val)
+             [ [] -> break val
+             , [val2] -> continue val2
+             ];
+ 
+         let guardHdDatumSingle : { A @ Str -> B @ Any -> C @ { { [A ,, Any] & B } -> Any } -> [] | (Codomain C) } =
+             (datum : A @ Str) -> (value : B @ Any) -> (k : C @ { { [A ,, Any] & B } -> Any }) ->
+             ifPair value
+             [ value @ [h ,, t] ->
+                 -- ifDatum h
+                 ifStr h
+                 [ h ->
+                     if (h == datum)
+                     [ ->
+                         -- k value
+                         let result = value |> justTrustMeCast Any { [A ,, Any] & B };
+                         k result
+                     , ->
+                         no
+                     ]
+                 , _ -> 
+                     no
+                 ]
+             , _ ->
+                 no
+             ];
+ 
+         let tupleKvGet : { { TupleKv : Type } -> K @ (Hd (Elem TupleKv)) -> TupleKv -> (Hd (Tl { (Elem TupleKv) & [K, Any] })) } =
+             (TupleKv : Type) -> (key : K @ (Hd (Elem TupleKv))) -> (fields : TupleKv) ->
+             let fields = fields |> justTrustMeCast TupleKv (List (Elem TupleKv)); -- TODO implement SubType, so as not to need this cast
+             let key = key |> justTrustMeCast (Hd (Elem TupleKv)) Str;
+             let [_, valueMb] =
+                 while [fields : List (Elem TupleKv), no : Maybe (Hd (Tl { (Elem TupleKv) & [K, Any] }))] <|
+                 [ [ field ,, fields], [] ] |=>
+                 -- let _ = trace ["tupleKvGet/while", field, fields] 0;
+                 let resultMb = 
+                     guardHdDatumSingle key field <| [_, value] |=>
+                     let value = value |> justTrustMeCast Any (Hd (Tl { (Elem TupleKv) & [K, Any] }));
+                     [ [], yes value ] : { [(List (Elem TupleKv)), (Maybe (Hd (Tl { (Elem TupleKv) & [K, Any] })))] };
+                 ifNil resultMb
+                 [ ->
+                     [ fields, no ] : { [(List (Elem TupleKv)), (Maybe (Hd (Tl { (Elem TupleKv) & [K, Any] })))] }
+                 , [result] -> result  
+                 ];
+             ifNil valueMb
+             [ ->
+                 -- this should be impossible, the call won't type-check if there is any possibility of the key not being present
+                 error ["tupleKvGet", "key not found in key-value-tuple", key, fields]
+             , [value] -> value
+             ];
+ 
+           let Vals = { [ ["a", Int], ["b", Bool], ["c", Str] ] };
+           let vals : Vals = [ ["a", 3], ["b", true], ["c", "z"] ];
+           let t1 = -> tupleKvGet Vals "b" vals;
+           let t2 = -> guardHdDatumSingle "a" ["a", 7] <| val -> val;
+ 
+       """
+     ]
+   , [ "expect", "t1[]", "value", "true"]
+   , [ "expect", "t2[]", "value", "[\"a\",7]"]
+ 
+ 
+   ]
+
+
+ -- This keyValueTuple-get test currently passes when using fe4/tree-types, but not when using fe4/graph-types.
+ -- Using graph-types results in a stack-overflow due to heap-cycles 
+ --   when type-checking kvtGet and performing a structural equivalence check of the arguments of the "<:" operator.
+ --             if (tiIsFalse(tis.tiStructuralRelComp(a, b)) && tiIsFalse(tis.tiStructuralRelComp(b, a))) {
+ -- More of code needs to be aware of the possibility of cycles.
+ -- KvTuples are a relatively recent addition and not widely used in fe-in-fe.
+ -- It makes more sense to focus first on the widely used techniques first, and then come back to KvTuples, so commenting out for now.
+ , [ [ "name", "keyValueTuple-get" ]
+   , [ "language", "ferrum/0.1" ]
+   , [ "type_check", "bidir" ]
+   , [ "decls",
+       """
+         let Maybe = (A : Type) -> { [] | [A] };
+         let justTrustMeCast : { { From : Type } -> { To : Type } -> From -> To } =
+             (From : Type) -> (To : Type) -> (a : From) -> 
+             castT a : To;
+         let no = [];
+         let yes = (a : A @ Any) -> [a];
+         let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+             (initVal: A @ Any) -> iterate ->
+             loop2 initVal <| val ->
+             ifNil (iterate val)
+             [ [] -> break val
+             , [val2] -> continue val2
+             ];
+         let Rec = Fix;    
+         let rec = fix;
+         let panic = error;
+ 
+         -- let KvListSchema = { [Str, Type] };
+         -- let KvListSchemaToType : { KvListSchema -> Type } =
+         --   schema ->
+         --   -- TODO return a list where the expected entries are mandatory, not just permitted.
+         --   -- TODO ? create a union of every possible ordering of the list elements ?
+         --   -- TODO ?   this could get big and slow, unless, perhaps, the type-system plays along
+         --   error ["TODO", "KvListSchemaToType"];
+ 
+         -- let KvtSchema = { [Str, Type] };
+         -- let KvtSchemaToType : { KvtSchema -> Type } =
+         --   schema ->
+         --   -- TODO loop-round creating a tuple-type with the keys in a fixed order
+         --   error ["TODO", "KvtSchemaToType"];
+ 
+         let KvtWithout : { Str -> Type } =
+           key ->
+           List { [Str \ (Single key) , Any] };
+ 
+         let KvtWith : { Str -> Type -> Type } =
+           key -> V ->
+           Rec <| KW ->
+           { [ [ (Single key)        , V]    ,, (KvtWithout key)  ]
+           | [ [ Str \ (Single key)  , Any]  ,, KW                ]
+           };
+ 
+         -- ensure a key is absent
+         -- let KvtWithNone : { Str -> Type -> Type } =
+         -- ensure a single occurrence of key is present
+         -- let KvtWithOne  : { Str -> Type -> Type } =
+         -- ensure at least one occurrence of key is present
+         -- let KvtWithSone : { Str -> Type -> Type } =
+         -- permit none, one, or many occurrences of key (so long as the value types are consitent)
+         -- let KvtWithAny : { Str -> Type -> Type } =
+ 
+         let MatchBranch = (A:Type) -> { A -> [] | [Any] };
+ 
+         let match = 
+             (val: V @ Any) -> 
+             fix ((match2: {MBL @ (List (MatchBranch V)) -> (Hd {(Elem MBL) V})})->
+             (cases: MBL @ (List (MatchBranch V))) ->
+                 ifNil cases
+                     [ [] -> error "no cases matched"
+                     , ([c ,, cs] : List (Elem MBL)) -> 
+                         matchMaybe (c val)
+                             [ [] -> match2 cs
+                             , ([b : Hd { (Elem MBL) V }]) -> b
+                             ]
+                     ]
+             );
+ 
+         -- let guardHdDatumSingle : { A @ Str -> B @ Any -> C @ { { [A ,, Any] & B } -> Any } -> [] | (Codomain C) } =
+         --     (datum : A @ Str) -> (value : B @ Any) -> (k : C @ { { [A ,, Any] & B } -> Any }) ->
+         --     ifPair value
+         --     [ value @ [h ,, t] ->
+         --         -- ifDatum h
+         --         ifStr h
+         --         [ h ->
+         --             if (h == datum)
+         --             [ ->
+         --                 -- k value
+         --                 let result = value |> justTrustMeCast Any { [A ,, Any] & B };
+         --                 k result
+         --             , ->
+         --                 no
+         --             ]
+         --         , _ -> 
+         --             no
+         --         ]
+         --     , _ ->
+         --         no
+         --     ];
+ 
+ 
+ 
+         -- let kvtGet : { { key : Str } -> T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] })) }   =
+         --   (key : Str) -> (kvt : T @ KvtWith key Any) ->
+         --   error ["TODO", "kvtGet"];
+ 
+         let kvtGet : { { key : Str } -> T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] })) }   =
+             (key : Str) -> 
+             rec <| (get : { T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] }))}) ->
+             (kvt : T @ KvtWith key Any) ->
+             match kvt
+             [ [kv ,, kvts] |->
+                 -- guardHdDatumSingle key kv <| [k, v] =>
+                 let [k, v] = kv;
+                 if (k == key) 
+                 [ _ ->
+                     let v = v |> justTrustMeCast Any (Hd (Tl { (Elem T) & [(Single key), Any] }));
+                     yes v
+                 , _ -> 
+                     no
+                 ]    
+             , [kv ,, kvts] |=>
+                 -- let kvts = kvts |> justTrustMeCast (List { [Str, Any] }) (KvtWith key Any);
+                 let kvts = kvts |> justTrustMeCast Any (KvtWith key Any);
+                 let v = get kvts;
+                 let v = v |> justTrustMeCast Any (Hd (Tl { (Elem T) & [(Single key), Any] }));
+                 v
+             , [] |=>
+                 panic ["kvtGet", "impossible, key not found in tuple", key]
+             ];
+ 
+         let MyKvTuple = { [ ["aa", Int], ["bb", Str], ["cc", Bool] ] };
+         let tuple1 : MyKvTuple = [ ["aa", 7], ["bb", "Seven"], ["cc", true] ];
+ 
+         let t1 = -> kvtGet "aa" [ ["aa", 7] ];
+         let t2 = -> kvtGet "aa" tuple1;
+         let t3 = -> kvtGet "bb" tuple1;
+         let t4 = -> kvtGet "cc" tuple1;
+ 
+         -- this might work, so long as it only applied to bounded-length tuples, and not arbitrarily long lists
+         --   might work for arbitrarily long lists too, one day, with some suitable form of memoization
+         -- let Map : { Type -> Type -> Type } =
+         --   rec <| (Map : { Type -> Type -> Type }) ->
+         --   F -> L ->
+         --   {   { { [] -> [] }
+         --       & { A @ Any -> [F (Hd A), (Map F (Tl A))] }
+         --       -- & (List (Elem L)) -> (List { F (Elem L) }) -- this part is, in a sense, redundant, but might help with memoization/termination ?
+         --       } 
+         --       L
+         --   };
+ 
+         -- alternatively, use a term/precise function "f", not a type/approximate function "F"
+         -- let Map : { Type -> { Type -> Type } -> Type } =
+         --   rec <| (Map : { Type -> { Type -> Type } -> Type }) ->
+         --   f -> L ->
+         --   {   { [] -> []
+         --       & [H ,, T] -> [(f H), (Map f T)] 
+         --       -- & (List (Elem L)) -> (List (f (Elem L))) -- this part is, in a sense, redundant, but might help with memoization/termination ?
+         --       } 
+         --       L
+         --   };
+ 
+         -- let KvtSet : { Str -> Type -> Type -> Type } =
+         --   key -> V -> T ->
+         --   -- let F = 
+         --   --   { {             (Single key)   -> V                                 } 
+         --   --   & { K @ { Str \ (Single key) } -> (Hd (Tl { (Elem T) & [K, Any] })) }
+         --   --   };
+         --   let F = 
+         --     { {       [       (Single key), Any ] -> [ (Single key), V ]  } 
+         --     & {  KV @ [ Str \ (Single key), Any ] -> KV                   }
+         --     };
+         --   -- let f = ( [key2, val] : KV @ [Str, Any] ) ->
+         --   --     ifEq [key, key2]
+         --   --     [ [key, key2] ->
+         --   --         { [ (Single key), V ]  } 
+         --   --     , [key, key2] ->
+         --   --         KV
+         --   --     };
+         --   -- error ["TODO", "KvtSet"];  
+         --   -- -- not sure that Map can be implemented until the reduction-operators are available at the type-level (non-termination will occur)
+         --   -- --   could implement it as a built-in though ?
+         --   let T2 = Map F T;
+         --   T2;  
+ 
+         -- ? how do we union-in the (potentially) new (but probably not), value type V with the tuple type T ?
+         --   applying/mapping an intersected function type, switched on the key, might do it ?
+         -- let kvtSet : { { k : Str } -> V @ Any -> T @ (KvtWith k V) -> (KvtSet k V T) }   =
+         --   key -> val -> kvt ->
+         --   error ["TODO", "kvtGet"];
+         -- 
+         -- -- TODO SubType
+         -- -- let KvtMod : { Str -> Type -> (SubType { Type -> Type }) -> Type } =
+         -- let KvtMod : { Str -> Type -> Type -> Type } =
+         --   key -> F -> T ->
+         --   let F = 
+         --     { {  KV @ [       (Single key), Any ] -> [ (Single key), F (Hd (Tl KV)) ]  } 
+         --     & {  KV @ [ Str \ (Single key), Any ] -> KV                                }
+         --     };
+         --   -- error ["TODO", "KvtMod"];
+         --   let T2 = Map F T;
+         --   T2;  
+         -- 
+         -- let kvtMod : { { k : Str } -> F @ { Void -> Any } -> T @ (KvtWith k (Domain F)) -> (KvtMod k F T) } =
+         --   key -> f -> kvt ->
+         --   error ["TODO", "kvtMod"];
+ 
+ 
+ 
+       """
+     ]
+   -- these run and pass in both fe-in-ts and fe-in-fe  
+   , [ "expectValue",  "t1[]",          "7" ]
+   , [ "expectValue",  "t2[]",          "7" ]
+   , [ "expectValue",  "t3[]",          "\"Seven\"" ]
+   , [ "expectValue",  "t4[]",          "true" ]
+ 
+   -- these run in both fe-in-ts and fe-in-fe, but only pass in fe-in-ts, as more type operators need to be implemented
+   , [ "expectType",   "t1[]",         "Int"]
+   , [ "expectType",   "t2[]",         "Int"]
+   , [ "expectType",   "t3[]",         "Str"]
+   , [ "expectType",   "t4[]",         "Bool"]
+ 
+   -- obsolete old-style tests
+   -- -- , [ "expect",       "t1[]", "value", "7" ]
+   -- , [ "expect",       "t1[]", "type", "Int"]
+   -- -- , [ "expect",       "t2[]", "value", "7" ]
+   -- , [ "expect",       "t2[]", "type", "Int"]
+   -- -- , [ "expect",       "t3[]", "value", "\"Seven\"" ]
+   -- , [ "expect",       "t3[]", "type", "Str"]
+   -- -- , [ "expect",       "t4[]", "value", "true" ]
+   -- , [ "expect",       "t4[]", "type", "Bool"]
+ 
+   ]
+
+
+ -- This keyValueTuple-get-list test currently passes when using fe4/tree-types, but not when using fe4/graph-types.
+ -- This fails in eactly the same way (type-checking kvtGet) as the previous test.
+ -- See comments above for the keyValueTuple-get test.
+ , [ [ "name", "keyValueTuple-get-list" ]
+   , [ "language", "ferrum/0.1" ]
+   , [ "type_check", "bidir" ]
+   , [ "decls",
+       """
+         let panic = error;
+         let Rec = Fix;
+         let rec = fix;
+         let No = { [] };
+         let Yes : { Type -> Type } = A -> { [A] };
+         let Maybe : { Type -> Type } = A -> { No | (Yes A) };
+         let no = [];
+         let yes : { A @ Any -> [A] } = (a : A @ Any) -> [a];
+ 
+         let cast : { { From : Type } -> {To : Type} -> From -> To }
+             = (From : Type) -> (To : Type) -> (a : From) -> 
+             castT a : To;
+         
+         let justTrustMeCast = cast;
+ 
+         let ifYes : { A @ (Maybe Any) -> K @ [(Hd A) -> Any, -> Any] -> (Hd K) (Hd A) | (Hd (Tl K)) [] } =
+             (aMb : A @ Maybe Any) -> ([kYes, kNo] : K @ { [(Hd A) -> Any, -> Any] }) ->
+             ifNil aMb
+             [ -> kNo []
+             , [a] -> kYes a
+             ];
+ 
+         let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+             (initVal: A @ Any) -> iterate ->
+             loop2 initVal <| val ->
+             ifNil (iterate val)
+             [ [] -> break val
+             , [val2] -> continue val2
+             ];
+ 
+ 
+         let reverse : { X @ (List Any) -> (List (Elem X)) } = 
+             (x : X @ (List Any)) ->
+             let x0 : List (Elem X) = x;
+             let y0 : List (Elem X) = [];
+             loop2 [x0, y0] <| 
+             [x2, y] ->
+             ifNil x2
+             [ _ -> break y
+             , [x1,, xs] -> continue [ xs, [x1,, y] ]
+             ];
+ 
+ 
+         let forMap : { X @ (List Any) -> F @ { (Elem X) -> Any } -> (List {F (Elem X)}) } =
+             (xs : X @ (List Any)) -> (f : F @ { (Elem X) -> Any}) ->
+             let [_, ys] = 
+                 while [xs : List (Elem X), [] : List {F (Elem X)}] <|
+                     [ [x1 ,, xs2], ys ] |=> [ xs2, [f x1 ,, ys] ];
+             let result = reverse ys;
+             result;
+ 
+         let KvtWithout : { Str -> Type } =
+           key ->
+           List { [Str \ (Single key) , Any] };
+         
+         let KvtWith : { Str -> Type -> Type } =
+           key -> V ->
+           Rec <| KW ->
+           { [ [ (Single key)        , V]    ,, (KvtWithout key)  ]
+           | [ [ Str \ (Single key)  , Any]  ,, KW                ]
+           };
+ 
+         let kvtGet : { { key : Str } -> T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] })) }   =
+             (key : Str) -> 
+             (kvt : T @ KvtWith key Any) ->
+             -- debug2 ["kvtGet", key, kvt] <| ->
+             let kvt = kvt |> justTrustMeCast (KvtWith key Any) (List { [Str, Any] });
+             -- let kvt : List { [Str, Any] } = kvt |> castT;
+             let [_, resultMb] =
+                 while [kvt : List { [Str, Any] }, [] : Maybe Any] <|
+                     [ [[k,v],,kvs], [] ] |=>
+                     if (k == key)
+                     [ -> [ []  , yes v ]
+                     , -> [ kvs , no    ]
+                     ];
+             ifYes resultMb
+             [ result ->
+                 -- for some reason, this "justTrustMeCast" causes variable "T" to escape, so using castT instead
+                 --   probably need to update substTypeEnv to substitute into terms within types
+                 -- let result = result |> justTrustMeCast Any (Hd (Tl { (Elem T) & [(Single key), Any] }));
+                 let result : Hd (Tl { (Elem T) & [(Single key), Any] }) = 
+                     result |> castT;
+                 result
+             , ->
+                 panic ["kvtGet", "impossible: key not found (", key, ") expected one of ", show (forMap kvt <| [k,v] -> k)]
+             ];
+ 
+         let ABC = {
+             [ ["AA", Int]
+             , ["BB", Bool]
+             , ["CC", Str]
+             ] };
+ 
+         let abc1 = [ ["AA", 1], ["BB", true], ["CC", "one"] ];    
+         let abc2 = [ ["AA", 2], ["BB", true], ["CC", "two"] ];
+         let abcs : List ABC =  [abc1, abc2];
+ 
+         let check : { [(List Str), (List Str)] } =
+             let names : List Str =
+                 forMap abcs <|
+                 defn -> 
+                 let name = defn |> kvtGet "CC";
+                 name;
+             [names, names];    
+ 
+       """
+     ]
+   ]
+
+
+ -- This keyValueTuple-set test currently passes when using fe4/tree-types, but not when using fe4/graph-types.
+ -- This fails in much the same way (type-checking kvtSet) as the previous test.
+ -- See comments above for the keyValueTuple-get test.
+ , [ [ "name", "keyValueTuple-set" ]
+   , [ "language", "ferrum/0.1" ]
+   , [ "type_check", "bidir" ]
+   , [ "decls",
+       """
+         let Maybe = (A : Type) -> { [] | [A] };
+         let justTrustMeCast : { { From : Type } -> { To : Type } -> From -> To } =
+             (From : Type) -> (To : Type) -> (a : From) -> 
+             castT a : To;
+         let no = [];
+         let yes = (a : A @ Any) -> [a];
+         let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+             (initVal: A @ Any) -> iterate ->
+             loop2 initVal <| val ->
+             ifNil (iterate val)
+             [ [] -> break val
+             , [val2] -> continue val2
+             ];
+         let Rec = Fix;    
+         let rec = fix;
+         let panic = error;
+ 
+         let MatchBranch = (A:Type) -> { A -> [] | [Any] };
+ 
+         let match = 
+             (val: V @ Any) -> 
+             fix ((match2: {MBL @ (List (MatchBranch V)) -> (Hd {(Elem MBL) V})})->
+             (cases: MBL @ (List (MatchBranch V))) ->
+                 ifNil cases
+                     [ [] -> error "no cases matched"
+                     , ([c ,, cs] : List (Elem MBL)) -> 
+                         matchMaybe (c val)
+                             [ [] -> match2 cs
+                             , ([b : Hd { (Elem MBL) V }]) -> b
+                             ]
+                     ]
+             );
+ 
+         let KvtWithout : { Str -> Type } =
+           key ->
+           List { [Str \ (Single key) , Any] };
+ 
+         let KvtWith : { Str -> Type -> Type } =
+           key -> V ->
+           Rec <| KW ->
+           { [ [ (Single key)        , V]    ,, (KvtWithout key)  ]
+           | [ [ Str \ (Single key)  , Any]  ,, KW                ]
+           };
+ 
+         -- let TupleMap : { Type -> Type -> Type } =
+         --     F -> T -> 
+         --     -- TODO this probably needs to be a built-in for now
+         --     Any;
+ 
+         -- let KvtSet : { Str -> Type -> Type -> Type } =
+         --     key -> V -> T ->
+         --     let F = 
+         --       { {       [       (Single key), Any ] -> [ (Single key), V ]  } 
+         --       & {  KV @ [ Str \ (Single key), Any ] -> KV                   }
+         --       };
+         --     let T2 = TupleMap F T;
+         --     T2;  
+ 
+         let KvtSet : { { key : Str } -> Type -> Type -> Type } =
+             (key : Str) -> (V : Type) -> (T : Type) ->
+             let F = 
+               { {       [       (Single key), Any ] -> [ (Single key), V ]  } 
+               & {  KV @ [ Str \ (Single key), Any ] -> KV                   }
+               };
+             let T2 = TupleMap F T;
+             T2;  
+ 
+         let kvtSet : { { key : Str } -> V @ Any -> T @ (KvtWith key Any) -> (KvtSet key V T) }   =
+             (key : Str) -> (val : V @ Any) -> 
+             rec <| (set : { T @ (KvtWith key Any) -> (KvtSet key V T) }) ->
+             (kvt : T @ KvtWith key Any) ->
+             match kvt
+             [ [kv ,, kvts] |->
+                 -- guardHdDatumSingle key kv <| [k, v] =>
+                 let [k, v] = kv;
+                 let valMb : Maybe Any = 
+                     if (k == key) 
+                     [ _ ->
+                         let kvts = [ [key, val] ,, kvts ];
+                         -- let kvts = kvts |> justTrustMeCast Any (KvtWith key V);
+                         -- yes (castT kvts)
+                         -- The type (Yes Void) is equivalent Void
+                         -- Left to its own devices, the type-checker will
+                         --   deduce that this if-statment can only return "no".
+                         -- This is fine for JS-codegen (which ignores the types),
+                         --   but upsets the C-codegen, 
+                         --   which then tries to get a no-value out of the yes-value.
+                         -- Using the (Maybe Any) annotation above helps avoid this.
+                         -- The use of Void types and casting is only here because the
+                         --   type-checker isn't quite smart enough to cope without them yet.
+                         yes kvts
+                     , _ -> 
+                         no
+                     ];
+                 let valMb2 : Maybe (KvtSet key V T) = castT valMb;
+                 valMb2
+             , [kv ,, kvts] |=>
+                 -- let kvts = kvts |> justTrustMeCast Any Void; -- (KvtWith key V);
+                 let kvts = set (castT kvts);
+                 let kvts = [kv ,, kvts];
+                 castT kvts
+             , [] |=>
+                 panic ["kvtGet", "impossible, key not found in tuple", key]
+             ];
+         
+ 
+         let MyKvTuple = { [ ["aa", Int], ["bb", Str], ["cc", Bool] ] };
+         let tuple1 : MyKvTuple = [ ["aa", 7], ["bb", "Seven"], ["cc", true] ];
+ 
+         let t1 = -> kvtSet "aa" 11 [ ["aa", 7] ];
+         let t2 = -> kvtSet "aa" 9 tuple1;
+         let t3 = -> kvtSet "bb" "Banana" tuple1;
+         let t4 = -> kvtSet "cc" 99 tuple1;
+ 
+       """
+     ]
+ 
+   , [ "expectValue",  "t1[]",  "[[\"aa\",11]]" ]
+   , [ "expectValue",  "t2[]",  "[[\"aa\",9],[\"bb\",\"Seven\"],[\"cc\",true]]" ]
+   , [ "expectValue",  "t3[]",  "[[\"aa\",7],[\"bb\",\"Banana\"],[\"cc\",true]]" ]
+   , [ "expectValue",  "t4[]",  "[[\"aa\",7],[\"bb\",\"Seven\"],[\"cc\",99]]" ]
+ 
+   , [ "expectType",   "t1[]",  "{ [{ [{\"aa\"}, Int] }] }" ]
+   , [ "expectType",   "t2[]",  "{ [{ [{\"aa\"}, Int] }, { [{\"bb\"}, Str] }, { [{\"cc\"}, Bool] }] }" ]
+   , [ "expectType",   "t3[]",  "{ [{ [{\"aa\"}, Int] }, { [{\"bb\"}, {\"Banana\"}] }, { [{\"cc\"}, Bool] }] }" ]
+   , [ "expectType",   "t4[]",  "{ [{ [{\"aa\"}, Int] }, { [{\"bb\"}, Str] }, { [{\"cc\"}, Int] }] }" ]
+ 
+   ]
+
+
+ -- This test works with the fe4/tree-types implementation but not the fe4/graph-types implementation.
+ -- It's possible it will never work with both at the same time.
+ -- This test doesn't need to type-check in order for the fe-in-fe code to type-check.
+ -- It can be revisited when everything else is more mature and tree-types are ready to be jettisoned.
+ , [ ["name", "self-dependent-product"]
+   , ["language", "ferrum/0.1"]
+   , ["type_check", "bidir"]
+   , ["decls",
+     """
+         -- let Html = List Str;
+         -- let WiTabDefn = 
+         --     Self <| WTD -> {
+         --     [ Type
+         --     -- , ["Id", Str]
+         --     -- , ["Name", Str]
+         --     -- , ["Display", Str]
+         --     -- , [ "Render"
+         --           , { (Hd WTD) -> Html } 
+         --     --   ]
+         --     ] };
+         -- 
+         -- let wtTestFile : WiTabDefn = 
+         --     [ Str         
+         --     -- , ["Id"      , "text1"     ] 
+         --     -- , ["Name"    , "Test"      ] 
+         --     -- , ["Display" , "Test File" ]
+         --     -- , "Render"  
+         --           , (contents : Str) -> ["div", contents] 
+         --     --   ]
+         --     ];
+ 
+         -- let Sigma = Fix <| ( a : A @ Any ) -> { [Type, (Hd (Single a))] };
+ 
+ 
+         let Sigma = SelfT <| A -> { [Type, (Hd A)] };
+         let a : Sigma = [Int, 5];
+         let b : Sigma = [Str, "five"];
+         let c : Sigma = [Single "Six", "Six"];
+         let c2 : Sigma = [{ "Six" }, "Six"];
+         let d : Sigma = [Bool, true];
+         let list1 : Sigma = [List Int, [1,2,3]];
+ 
+         let pair1 : Sigma = [{ [Int ,, Bool] }, [1 ,, true]];
+ 
+ 
+         -- let Sigma = Self <| A -> { [ -> Any, (Codomain (Hd A))] };
+         -- let a : Sigma = [ -> 0, 5];
+ 
+ 
+     """
+     ]
+   ]
+
+
+-- This test works with the fe4/tree-types implementation but not the fe4/graph-types implementation.
+-- It's possible it will never work with both at the same time.
+-- This test doesn't need to type-check in order for the fe-in-fe code to type-check.
+-- It can be revisited when everything else is more mature and tree-types are ready to be jettisoned.
+, [ ["name", "codec-pair"]
+  , ["language", "ferrum/0.1"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+    """
+        let Codec = SelfT <| A -> { [Str -> Any, { (Hd A) Str } -> Str] };
+        -- let Codec = Self <| (a : A @ { [Type, Type] }) -> { [Str -> Any, { (hd a) Str } -> Str] };
+        -- let Codec = Self <| (a : A @ { [Str -> Any, Void -> Str] }) -> { [Str -> Any, { (Single (hd a)) Str } -> Str] };
+        -- let Codec = Self <| (a : A @ { [Str -> Any, Void -> Str] }) -> { [Str -> Any, { { _ : (hd a) } Str } -> Str] };
+        -- This version is possibly the best way to define the type.
+        --    It makes it possible to take the non-dependent tail of the tuple, 
+        --    this is useful when computing non-dependent context types.
+        --    Checking the tail against { Void -> Str } and then checking the whole self-dependent tuple makes sense.
+        --    Checking the tail against { Any -> Str } or { (Hd V1) Str -> Str } is harder to make work.
+        -- let Codec = Self <| (a : A @ { [Str -> Any, Void -> Str] }) -> { [Str -> Any, { (Hd A) Str } -> Str] };
+        let codec1 : Codec = [ (a : A @ Any)  -> a         , (a : Str) -> a         ];
+        let codec2 : Codec = [ (a : Str)      -> strOrd a  , (a : Int) -> strChr a  ];
+        let testCodec = 
+            ([encode, decode] : C @ Codec) -> 
+            (a : Str) ->
+            decode (encode a) == a;
+        let t1 = ->
+          [ testCodec codec1 "A"
+          , testCodec codec2 "A"
+          , testCodec codec1 "Apple"
+          , testCodec codec2 "Apple"
+          ];
+    """
+    ]
+  , ["expectValue", "t1[]", "[true,true,true,false]"]
+  , ["expectType", "t1[]", "{ [Bool, Bool, Bool, Bool] }"]
+  ]
+
+
+
+]
