@@ -66,13 +66,13 @@ export async function main2(cmdLineValues, testDirUlr, fileUrl, testName) {
     }
     codeRunnerName ??= "8";
     mkCodeRunner = codeRunnerMakers[codeRunnerName];
+    let ok = false;
     try {
-        await main3(testDirUlr, fileUrl, testName, mkOpts(opts), codeRunnerName);
+        ok = await main3(testDirUlr, fileUrl, testName, mkOpts(opts), codeRunnerName);
     }
     finally {
         memo.saveToFile();
-        console.log("\x07"); // go beep at the end
-        process.stdout.write("", () => { }); // make sure everything is written out
+        return ok;
     }
 }
 export async function main3(testDir, filename, testName, opts, codeRunnerName) {
@@ -142,15 +142,18 @@ export async function main3(testDir, filename, testName, opts, codeRunnerName) {
     console.log();
     console.log(`Summary: ${testPasses} / ${testCount}`);
     console.log();
-    if (testCount === 0) {
+    const someRan = testCount !== 0;
+    const allPassed = testPasses === testCount;
+    if (!someRan) {
         console.log("***  NO TESTS RAN");
     }
-    else if (testPasses === testCount) {
+    else if (allPassed) {
         console.log("     ALL TESTS PASSED");
     }
     else {
         console.log(`***  TEST FAILURES: ${testCount - testPasses}`);
     }
+    return someRan && allPassed;
 }
 //#endregion
 //# sourceMappingURL=runtest-cmd.js.map

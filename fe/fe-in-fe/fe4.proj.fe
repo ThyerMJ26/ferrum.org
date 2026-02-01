@@ -91,18 +91,21 @@ language ferrum/proj/0.1
   -- , ["source", "fe4-http.fe"]
   -- , ["source", "fe4-webapp.fe"]
 -- 
-  -- , ["text", "fe4_prelude_text", "fe4-prelude.fe"]
-  -- , ["text", "fe4_step_text",    "fe4-step.fe"]
-  -- , ["text", "fe4_token_text",   "fe4-token.fe"]
-  -- , ["text", "fe4_scanner_text", "fe4-scanner.fe"]
-  -- , ["text", "fe4_expr_text",    "fe4-expr.fe"]
-  -- , ["text", "fe4_parser_text",  "fe4-parser.fe"]
+
+  , ["text", "fe4_prelude_text", "fe4-prelude.fe"]
+  , ["text", "fe4_step_text",    "fe4-step.fe"]
+  , ["text", "fe4_token_text",   "fe4-token.fe"]
+  , ["text", "fe4_scanner_text", "fe4-scanner.fe"]
+  , ["text", "fe4_expr_text",    "fe4-expr.fe"]
+  , ["text", "fe4_parser_text",  "fe4-parser.fe"]
+  
 -- 
   -- , ["text", "fe4_html_common_text",   "fe4-html-common.fe"]
   -- , ["text", "fe4_html_client_text",   "fe4-html-client.fe"]
   -- , ["text", "fe4_webide_common_text", "fe4-webide-common.fe"]
   -- , ["text", "fe4_webide_client_text", "fe4-webide-client.fe"]
-  -- , ["text", "fe4_parser3_text",       "fe4-parser3.fe"]
+
+  , ["text", "fe4_parser3_text",       "fe4-parser3.fe"]
 -- 
   -- , ["source", "fe4-webide-common.fe"]
   -- , ["source", "fe4-webide-client.fe"]

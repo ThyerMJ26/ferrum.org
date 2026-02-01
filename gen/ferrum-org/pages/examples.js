@@ -8,10 +8,10 @@ export function page() {
         b.title("Examples");
         b.para("Ex");
         b.appPublish("EX-1");
-        b.para("fe4-.test.fe");
+        b.para("short.test.fe");
         b.appPublish("IDE-1");
-        b.para("fe4a.test.fe");
-        b.appPublish("IDE-2");
+        // b.para("fe4a.test.fe")
+        // b.appPublish("IDE-2")
     });
 }
 //# sourceMappingURL=examples.js.map

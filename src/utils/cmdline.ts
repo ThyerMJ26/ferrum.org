@@ -31,7 +31,7 @@ export function parseOpt(arg: string): CmdOption | null {
     const i = arg.indexOf("=", dashes.length)
     if (i === -1) {
         const name = arg.slice(dashes.length)
-        return { dashes, name: arg, value: null }
+        return { dashes, name, value: null }
     }
     else {
         const name = arg.slice(dashes.length, i)

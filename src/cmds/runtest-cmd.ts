@@ -69,7 +69,7 @@ export const runTestCmdLineSchema = mkCmdLineSchema((b: CmdLine_SchemaBuild) => 
 
 export type RunTestCmdLine = CmdLine_TypeFor_Schema<typeof runTestCmdLineSchema>
 
-export async function main2(cmdLineValues: RunTestCmdLine, testDirUlr: URL, fileUrl: URL, testName: string | null) {
+export async function main2(cmdLineValues: RunTestCmdLine, testDirUlr: URL, fileUrl: URL, testName: string | null): Promise<boolean> {
 
     let funcMemoFilename = "memo-data.tmp"
     memo.loadFromFile(funcMemoFilename)
@@ -126,18 +126,18 @@ export async function main2(cmdLineValues: RunTestCmdLine, testDirUlr: URL, file
     codeRunnerName ??= "8"
     mkCodeRunner = codeRunnerMakers[codeRunnerName]
 
+    let ok = false
     try {
-        await main3(testDirUlr, fileUrl, testName, mkOpts(opts), codeRunnerName)
+        ok = await main3(testDirUlr, fileUrl, testName, mkOpts(opts), codeRunnerName)
     }
     finally {
         memo.saveToFile()
-        console.log("\x07") // go beep at the end
-        process.stdout.write("", () => { }) // make sure everything is written out
+        return ok
     }
 }
 
 
-export async function main3(testDir: URL, filename: URL, testName: string | null, opts: Opts, codeRunnerName: CodeRunnerName) {
+export async function main3(testDir: URL, filename: URL, testName: string | null, opts: Opts, codeRunnerName: CodeRunnerName): Promise<boolean> {
 
     const initCt = mkCodeTable({})
 
@@ -221,15 +221,21 @@ export async function main3(testDir: URL, filename: URL, testName: string | null
     console.log()
     console.log(`Summary: ${testPasses} / ${testCount}`)
     console.log()
-    if (testCount === 0) {
+
+    const someRan = testCount !== 0
+    const allPassed = testPasses === testCount
+
+    if (!someRan) {
         console.log("***  NO TESTS RAN")
     }
-    else if (testPasses === testCount) {
+    else if (allPassed) {
         console.log("     ALL TESTS PASSED")
     }
     else {
         console.log(`***  TEST FAILURES: ${testCount - testPasses}`)
     }
+
+    return someRan && allPassed
 }
 
 

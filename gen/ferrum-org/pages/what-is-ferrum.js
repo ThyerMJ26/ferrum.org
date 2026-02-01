@@ -52,8 +52,12 @@ function page() {
             "Start decidable, and become more expressive (but never fully expressive), or",
             "start expressive, and become more decidable (but never fully decidable)."
         ]));
-        p("Which is best?", "It depends.", "There's value in being able to switch between the two approaches without switching language.", "If you know you are programming within the capabilities of the type-checker, then a decidable approach is best.", "If you are exploring possible ways of expressing a program, an expressive approach might make sense.", "Sometimes it can be useful to approach a problem from both ends of a spectrum.");
-        p("What is the worst?", "Using a type-system to model problem-domain specific characteristics,", "only to spend much more time learning about and working-around the limits of a particular type-system,", "than understanding the actual problem-domain.", "(It's even worse, when the compiler has bugs in its lesser used parts. This can make people very wary about trying anything new.)");
+        p("Which is best?", "It depends.", "There's value in being able to switch between the two approaches without switching language.", "If you know you are programming within the capabilities of the type-checker, then a decidable approach is best.", "If you are exploring possible ways of expressing a program, an expressive approach might make sense.", "Sometimes it can be useful to approach a problem from both ends of a spectrum.", 
+        // 
+        b.defns([
+            ["Clarke’s Second Law:", "The only way of discovering the limits of the possible is to venture a little way past them into the impossible"]
+        ]), "The impossible here is a fully decidable and fully expressive type-system.", "A fully expressive and partially decidable type-system is not impossible, it is an alternative, and underexplored, reality.");
+        p("What is the worst?", "Using a type-system to model problem-domain specific characteristics,", "only to spend much more time learning about and working-around the limits of a particular type-system,", "than understanding the actual problem-domain.", "(It's even worse, when the compiler has bugs in its lesser used parts).");
         p("Extending an expressive type-system to be be decidable is less intrusive than extending a decidable type-system to be more expressive.", "A type-checker for an expressive type-system ends up looking more like a model-checker than a conventional decidable type-checker.", "A type-system which is able to admit it doesn't know can be more helpful than a type-system that fails to distinguish between user-error and type-system limitation.");
     });
 }

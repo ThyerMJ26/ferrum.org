@@ -47,7 +47,10 @@ export async function main() {
         process.exit(1)
     }
 
-    await main2(cmdLineValues.values, testDirUlr, fileUrl, testName)
+    process.exitCode = 1
+    const ok = await main2(cmdLineValues.values, testDirUlr, fileUrl, testName)
+    process.stdout.write("", () => { }) // make sure everything is written out
+    process.exitCode = ok ? 0 : 1
 }
 
 

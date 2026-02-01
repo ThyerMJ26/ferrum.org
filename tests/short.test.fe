@@ -1,0 +1,4741 @@
+language ferrum/test/0.1
+
+-- language ferrum_test_0
+
+-- these are fe4 tests, copied and ported from the fe3 tests in types.test.fe
+
+[ 
+
+  [ ["name", "let-pat"]
+  , ["language", "ferrum/0.1"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+      let [a,b] = [1,2];
+      let c = a + b;
+  """
+  ]
+  , ["expectValue", "c", "3"]
+  , ["expectType",  "c", "Int"]
+  ]
+
+, [ ["name", "lambda-pat"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+      let Pos = { [Int, Int] };
+      let Input = List Str;
+      let  f = [pos : Pos, input : Input] ->
+          let [row, col] = pos;
+          [row, col + 1];
+      let pos1 = [1, 2];
+      let pos2 = f [pos1, ["7","8","9"]];
+  """
+  ]
+  , ["expectTerm", "pos2", "[1,3]"]
+  , ["expectValue", "pos2", "[1,3]"]
+  , ["expectType",  "pos2", "{ [Int, Int] }"]
+  ]
+
+
+, [ ["name", "flip-cons"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+      
+        -- flip = \(f: F@(\(_:Void) -> \(_:Void) -> Any)) 
+        --     -> \(x: X@(Domain (Codomain F)))
+        --     -> \(y: Y@(Domain F))
+        --      -- : (applyT (applyT F Y) X)
+        --     -> f y x;
+        
+      let flip2 = (f : F @ { Void -> Void -> Any }) 
+            -> (x : X @ (Domain (Codomain F)))
+            -> (y : Y @ (Domain F))
+             -- : (applyT (applyT F Y) X)
+            -> f y x;
+        
+        -- cons : \(_:A@Any) -> \(_:B@Any) -> Pair A B 
+        --      = \(a:A@Any)-> \(b:B@Any) -> (a,b);
+
+      let cons2 : { A @ Any -> B @ Any -> [A ,, B] } 
+             = (a : A @ Any) -> (b : B @ Any) -> [a ,, b];
+      
+      let flipCons = flip2 cons2;
+  """
+  ]
+  , ["expectType", "flip2", "{ F @ { Void -> Void -> Any } -> X @ (Domain (Codomain F)) -> Y @ (Domain F) -> { F Y X } }"]
+  , ["expectType", "cons2", "{ A @ Any -> B @ Any -> { [A ,, B] } }"]
+  , ["expectType", "flipCons", "{ X @ Any -> Y @ Any -> { [Y ,, X] } }"]
+  , ["expectType", "flip2 cons2", "{ X @ Any -> Y @ Any -> { [Y ,, X] } }"]
+  ]
+
+
+, [ ["name", "twice-inc"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+      let twice = (f : F @ { (Domain F) -> (Domain F) }) -> (z : Domain F) -> f (f z);
+      let inc = (x : Int) -> x + 1;
+      let five = twice inc 3;
+      -- twice2 is a universally polymorphic version
+      -- it can only take a polymorphic id function ( { A @ Any -> A }, but not { Int -> Int } ), so cannot increment
+      let twice2 : { F @ { A @ Any -> A } -> Z @ (Domain F) -> F { F Z }} = 
+        (f : F @ { A @ Any -> A }) -> (z : Z @ (Domain F)) -> f (f z);
+      let id : { X @ Any -> X } = (x : X @ Any) -> x;
+      let three = twice2 id 3;
+  """
+  ]
+  , ["expectValue", "five", "5"]
+  , ["expectType", "five", "Int"]
+  , ["expectValue", "three", "3"]
+  , ["expectType", "three", "Int"]
+  , ["typeCheckFail", "twice2 inc"] -- TODO this isn't curently being checked by runtest.ts
+  ]
+
+
+
+, [ ["name", "foldl"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+          let foldl : { F @ { Void -> Void -> (Domain F) } -> (Domain F) -> (List (Domain (Codomain F))) -> (Domain F) } =
+              (f : F @ { Void -> Void -> (Domain F) }) ->
+              (z : (Domain F)) ->
+              (x : List (Domain (Codomain F))) ->
+              [z, x] |> 
+              loop1 <| [z : Domain F, x : List (Domain (Codomain F))] ->
+              ifNil x
+              [ -> break z
+              , [hx ,, tx] -> continue [f z hx, tx]
+              ];
+          let six = foldl ((a : Int) -> (b : Int) -> a + b) 0 [1,2,3];
+  """
+  ]
+  , ["expectValue", "six", "6"]
+  , ["expectType", "six", "Int"]
+  ]
+
+, [ ["name", "foldl1"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+        let foldl1 : { F1 @ { Void -> (Domain F1) -> (Domain F1) } -> X1 @ { [(Domain F1) ,, (List (Domain F1))] } -> (Domain F1) } =
+                (f : F1 @ { Void -> (Domain F1) -> (Domain F1) }) ->
+                ( [x1 ,, xs] : { [(Domain F1) ,, (List (Domain F1))] }) ->
+                [x1, xs] |>
+                loop1 <| [z : Domain F1, x : List (Domain F1)] ->
+                ifNil x
+                [ -> break z
+                , [x1 ,, xs] -> continue [f z x1, xs]
+                ];
+        let six = foldl1 ((a : Int) -> (b : Int) -> a + b) [1,2,3];
+  """
+  ]
+  , ["expectValue", "six", "6"]
+  , ["expectType", "six", "Int"]
+  ]
+
+
+
+
+
+-- TODO implement foldl1 using foldl, type-system currently too dumb to spot (Dom F) and (Dom (Rng F)) are the same
+, [ ["name", "foldl1d"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+        let foldl : { F @ { Void -> Void -> (Domain F) } -> (Domain F) -> (List (Domain (Codomain F))) -> (Domain F) } =
+            (f : F @ { Void -> Void -> (Domain F) }) ->
+            (z : (Domain F)) ->
+            (x : List (Domain (Codomain F))) ->
+            [z, x] |> 
+            loop1 <| [z : Domain F, x : List (Domain (Codomain F))] ->
+            ifNil x
+            [ -> break z
+            , [hx ,, tx] -> continue [f z hx, tx]
+            ];
+
+        -- Using (Domain F1) in-place of the Void, creates an odd type-error involving intersection types,
+        -- but using (Domain F1) here might be the key to being able to call the commented out foldl function.
+        -- Possibly the same improvements to typeHd/typeTl regarding self-types, need to be applied to typeDom/typeCod
+        let foldl1 : { F1 @ { Void -> (Domain F1) -> (Domain F1) } -> { [(Domain F1) ,, (List (Domain F1))] } -> (Domain F1) } =
+                (f : F1 @ { Void -> (Domain F1) -> (Domain F1) }) ->
+                ( [x1 ,, xs] : { [(Domain F1) ,, (List (Domain F1))] }) ->
+                -- foldl f x1 xs;
+                [x1, xs] |>
+                loop1 <| [z : Domain F1, x : List (Domain F1)] ->
+                ifNil x
+                [ -> break z
+                , [x1 ,, xs] -> continue [f z x1, xs]
+                ];
+        let six = foldl1 ((a : Int) -> (b : Int) -> a + b) [1,2,3];
+  """
+  ]
+  , ["expectValue", "six", "6"]
+  , ["expectType", "six", "Int"]
+  ]
+
+
+
+
+
+
+
+
+-- , [ ["name", "implode-reverse"]
+--   , ["expr", 
+--   """
+--      let {
+--        -- foldl : \F@(\void=> \void=> Domain F)=> \Z@(Domain F)=> \X@(List (Domain (applyT F Z)))=> Domain F
+--        foldl : \F@(\void=> \void=> Domain F)=> \Z@(Domain F)=> \X@(List (Domain (Codomain F)))=> Domain F
+--              = \(f:F@(\void=> \void=> Domain F))
+--             -> \(z:Z@(Domain F))
+--             -- -> \(x:X@(List (Domain (applyT F Z))))
+--             -> \(x:X@(List (Domain (Codomain F))))
+--             : Domain F
+--             ->
+--            loop1 (\(z: Domain F, x: List (Elem X))->
+--                case x of {
+--                    ()      -> break z;
+--                    (x1,xs) -> continue (f z x1, xs);
+--                })
+--            (z, x);
+-- 
+--           flip = \(f: F@(\Void=> \Void=> Any)) 
+--               -> \(x: X@(Domain (Codomain F)))
+--               -> \(y: Y@(Domain F))
+--                -- : (Codomain (Codomain F))
+--               -> f y x;
+--           
+--           cons : \A@Any=> \B@Any=> Pair A B 
+--                = \(a:A@Any)-> \(b:B@Any) -> (a,b);
+--           
+-- 
+-- 
+--         reverse : \L@(List Any)=> List (Elem L) 
+--                 = \(l:L@(List Any)) ->
+--                   foldl 
+--                   (flip cons: \(List (Elem L))=> \(Elem L)=> List (Elem L))
+--                   ((): List (Elem L))
+--                   (l: List (Elem L));
+-- 
+-- 
+--        implode = \(strList: List Str)-> foldl (\(a:Str)-> \(b:Str)-> a^b) ("": Str) strList;
+--  
+--      } in
+--      implode (reverse (["3","2","1"]: List Str))
+--   """
+--   ]
+--   , ["expected_value", "\"123\""]
+--   , ["expected_type", "Str"]
+--   ]
+
+
+
+-- , [ ["name", "append"]
+--   , ["expr", 
+--   """
+--         let {
+--           -- foldl : \(F@(\Void=> \Void=> Domain F))=> \Z@(Domain F)=> \X@(List (Domain (applyT F Z)))=> Domain F
+--           foldl : \(F@(\Void=> \Void=> Domain F))=> \Z@(Domain F)=> \X@(List (Domain (Codomain F)))=> Domain F
+--                 = \(f:F@(\Void=> \Void=> Domain F))
+--                -> \(z:Z@(Domain F))
+--                -- -> \(x:X@(List (Domain (applyT F Z))))
+--                -> \(x:X@(List (Domain (Codomain F))))
+--                : Domain F
+--                ->
+--               loop1 (\(z: (Domain F), x: List (Domain (Codomain F))) -> 
+--                     case x of {
+--                       [] -> break z;
+--                       (x1, xs) -> continue (f z x1, xs);
+--                     }
+--               )
+--               (z, x);
+-- 
+--           flip = \(f: F@(\Void=> \Void=> Any)) 
+--               -> \(x: X@(Domain (Codomain F)))
+--               -> \(y: Y@(Domain F))
+--                -- : (Codomain (Codomain F))
+--               -> f y x;
+--           
+--           cons : \A@Any=> \B@Any=> Pair A B 
+--                = \(a:A@Any)-> \(b:B@Any) -> (a,b);
+--           
+--           reverse : \L@(List Any)=> List (Elem L) 
+--                   = \(l:L@(List Any)) 
+--                   : List (Elem L) 
+--                   ->
+--                     foldl 
+--                     (flip (cons: \(Elem L)=> \(List (Elem L))=> List (Elem L)))
+--                     -- (flip cons)
+--                     -- ((): List (Elem L))
+--                     ()
+--                     l;
+-- 
+--           append  : \X@(List (Elem X))=> \(List (Elem X))=> List (Elem X)
+--                   = \(xs:X@(List (Any))) 
+--                  -> \(ys:Y@(List (Elem X)))
+--                   : List (Elem X)
+--                  ->
+--                   -- foldl (flip (cons: \(Elem X)=> \(List (Elem X))=> List (Elem X))) ys (reverse xs);
+--                   foldl (flip cons: \(List (Elem X))=> \(Elem X)=> List (Elem X)) ys (reverse xs);
+--                   -- foldl (flip cons) ys (reverse xs);
+--         } in
+--         append ([1,2,3] : List Int) ([7,8,9] : List Int)
+-- 
+--   """
+--   ]
+--   , ["expected_value", "[1,2,3,7,8,9]"]
+--   , ["expected_type", "List Int"]
+--   ]
+
+
+-- , [ ["name", "map"]
+--   , ["expr", 
+--   """
+--       let {
+--       foldl : \F@(\Void=> \Void=> Domain F)=> \Z@(Domain F)=> \X@(List (Domain (Codomain F)))=> Domain F
+--             = \(f: F@(\Void=> \Void=> Domain F))
+--            -> \(z:Z@(Domain F))
+--            -> \(x:X@(List (Domain (Codomain F))))
+--            : Domain F
+--            ->
+--           loop1 (\(z: Domain F, x: List (Domain (Codomain F))) ->
+--                 case x of { 
+--                   [] -> break z;
+--                   (x1, xs) -> continue (f z x1, xs);
+--                 })
+--           (z, x);
+--       
+--       
+--       flip = \(f: F@(\Void=> \Void=> Any)) 
+--           -> \(x: X@(Domain (Codomain F)))
+--           -> \(y: Y@(Domain F))
+--           -> f y x;
+--       
+--       cons : \A@Any=> \B@Any=> Pair A B 
+--            = \(a:A@Any)-> \(b:B@Any) -> (a,b);
+--       
+--       
+--       reverse : \L@(List Any)=> List (Elem L) 
+--               = \(l: L@(List Any)) 
+--                   : List (Elem L) 
+--               ->
+--                 foldl 
+--                 (flip cons: \(List (Elem L))=> \(Elem L)=>List (Elem L))
+--                 ()
+--                 (l: List (Elem L));
+--       
+--       implode = \(strList: List Str) -> foldl (\(a:Str)-> \(b:Str)-> a^b) ("") strList;
+--       
+--       append  -- : \X@(List (Elem X))=> \(List (Elem X))=> List (Elem X)
+--               = \(xs:X@(List (Any))) 
+--              -> \(ys:Y@(List (Elem X)) )
+--               : List (Elem X)
+--              ->
+--               -- foldl (flip cons) ys (reverse xs);
+--               foldl (flip cons: \(List (Elem X))=> \(Elem X)=>List (Elem X)) ys (reverse xs);
+--       
+--       map1 = \(f:F@(\Void=>Any))-> \(xs:X@(List (Domain F)))->
+--         loop1 (\((xs,ys):Pair (List (Elem X)) (List (Codomain F)))-> 
+--                       case xs of {
+--                         [] -> break ys;
+--                         (xs1, xss) -> continue (xss, (f xs1, ys));
+--                       }
+--         ) (reverse (xs:List (Elem X)), ());
+-- 
+--       map = \(f: F@(\void=>Any))-> \(x: X@(List (Domain F))) ->
+--         loop1 (\(x: List (Elem X), y: List (applyT F (Elem X)))->
+--           case x of {
+--               ()      -> break y;
+--               (x1,xs) -> continue (xs, (f x1, y));
+--           }
+--         ) (reverse x, ());
+-- 
+-- 
+--       } in map (\(x:Int)->x*x) [1,2,3,4,5]
+--       
+--   """
+--   ]
+--   , ["expected_value", "[1,4,9,16,25]"]
+--   , ["expected_type", "List Int"]
+--   ]
+
+
+
+, [ ["name", "concat"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+      let reverse = (l : L1 @ (List (Elem L1))) ->
+          [[], l] |>
+          loop1 <| [result : List (Elem L1), l : List (Elem L1)] ->
+          ifNil l
+          [ -> break result
+          , [l1 ,, ls] -> continue [[l1 ,, result], ls]
+          ];
+
+      let append = (x : X @ (List (Elem X))) -> (y : (List (Elem X))) -> 
+          [y, reverse x] |>
+          loop1 <| [result : List (Elem X), l : List (Elem X)] ->
+          ifNil l
+          [ -> break result
+          , [l1 ,, ls] -> continue [[l1 ,, result], ls]
+          ];
+
+      let concat : { L2 @ (List (List (Elem (Elem L2)))) -> (List (Elem (Elem L2))) } =
+          (l : L2 @ (List (List (Elem (Elem L2))))) ->
+          [[], reverse l] |>
+          loop1 <| [result : List (Elem (Elem L2)), l : List (Elem L2)] ->
+          ifNil l
+          [ -> break result
+          , [l1 ,, ls] -> continue [append l1 result, ls]
+          ];
+      let nums = concat ([[1,2,3],[4,5,6],[7,8,9]] : List (List Int));
+      
+  """
+  ]
+  , ["expectValue", "nums", "[1,2,3,4,5,6,7,8,9]"]
+  , ["expectType", "nums", "{(List Int)}"]
+  ]
+
+
+, [ ["name", "loop"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+      let lookup2 : { Any -> KVS @ (List { [Any, Any] }) -> (Hd (Tl (Elem KVS))) } =
+          key -> (kvs : KVS @ List { [Any, Any] }) ->
+          kvs |>
+          -- (kvs : List (Elem KVS)) |>
+          loop1 <| (kvs : List (Elem KVS)) ->
+          ifNil kvs
+          [ -> error ["lookup failed", key]
+          -- , [ [k, v] ,, kvs2 ] -> -- TODO work out why this form has stopped working 
+          , [ kv ,, kvs2 ] ->
+                let [k, v] = kv; -- TODO why do we need the "[k,v]" pattern here ? it would be better placed in the lambda-pattern above ? 
+                if (key == k)
+                [ -> break v
+                , -> continue kvs2
+                ]
+          ];
+      let two = -> lookup2 "banana" ([["apple",1],["banana",2],["carrot",3]] : List { [Str, Int] }) : Int;
+      
+  """
+  ]
+  , ["expectValue", "two []", "2"]
+  , ["expectType", "two []", "Int"]
+  ]
+
+
+, [ ["name", "foldr"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+        let reverse = (l : L1 @ (List Any)) ->
+          loop1 ( [result : List (Elem L1), l : List (Elem L1)] ->
+            ifNil l
+            [ -> break result
+            , [l1 ,, ls] -> continue [[l1 ,, result], ls]
+            ]
+          ) [[], l];
+
+        let foldr : { F @ { Void -> Void -> (Domain (Codomain F)) } -> Z @ (Domain (Codomain F)) -> X @ (List (Domain F)) -> (Domain (Codomain F)) } =
+              (f : F @ { Void -> Void -> (Domain (Codomain F)) }) ->
+              (z : Z @ (Domain (Codomain F))) ->
+              (x : X @ (List (Domain F))) ->
+              loop1 ( [z : Domain (Codomain F), x : List (Elem X)] ->
+                  ifNil x
+                  [ -> break z
+                  , [x1 ,, xs] -> continue [f x1 z, xs]
+                  ]
+              ) [z, reverse x];
+        let t1 = -> foldr ( (a : Int) -> (b : List Int) -> [a ,, b]: List Int) ([]: List Int) [1,2,3];
+
+  """
+  ]
+  , ["expectValue", "t1[]", "[1,2,3]"]
+  , ["expectType", "t1[]", "{(List Int)}"]
+  ]
+
+
+-- , [ ["name", "iok"]
+--   , ["language", "ferrum/0.1"]
+--   , ["type_check", "bidir"]
+--   , ["decls", 
+-- 
+--       -- TODO check this is running in the right order (don't we need a reverse?)
+--       -- mapK = \(f: F@(\(Domain F)=> \(IOK (Domain (Domain (Codomain F))))=>applyT (Domain (Codomain F)) (Domain F) ))
+--       -- mapK = \(f: F@(\(void)=> \(IOK (Domain (Domain (Codomain F))))=>applyT (Domain (Codomain F)) (Domain F) ))
+--       -- mapK = \(f: F@(\(void)=> \(IOK (Any))=>applyT (Domain (Codomain F)) (Domain F) ))
+--       -- \A=> \ioWorld=> Any
+--       -- mapK = \(f: F@(\(void)=> \(\(Domain F)=> \ioWorld=> Any)=>applyT (Domain (Codomain F)) (Domain F) ))
+--       -- mapK = \(f: F@(\(void)=> \(\(void)=> \ioWorld=> Any)=>Codomain (Domain (Codomain F)) ))
+-- 
+--       --     : applyT (Domain (Codomain F)) (Domain F)
+--       --     : Codomain (Domain (Codomain F))
+-- 
+--   """
+--       let IOK = (A : type) -> { A -> ioWorld -> Any };
+--       let IOK0 =  { ioWorld -> [] };
+--       let iokDon e: IOK0 = (world1 : ioWorld) -> [];
+--       let iokPrint = (contents : Str) -> (k : IOK {[]}) -> (world1 : ioWorld) ->
+--           let [result, world2] = ioPrint contents world1; } in 
+--           k result world2;
+-- 
+--       -- mapK = \(f: F@(\(void)=> \(\(Domain (Domain (Codomain F)))=> \ioWorld=> Any)=> \ioWorld=> Any ))
+--       mapK = \(f: F@(\(void)=> \(\Any=> \ioWorld=> Any)=> \ioWorld=> Any ))
+--           -> \(x: List (Domain F))
+--           -> \(k: IOK (List (Domain (Domain (Codomain F)))))
+--            : \ioWorld=>Any
+--           ->
+--           loop1 (\(x: List (Domain F), ks: IOK (List (Domain (Domain (Codomain F)))))->
+--               case x of {
+--                   ()      -> break (ks []);
+--                   (x1,xs) -> continue (xs, \(ys: (List (Domain (Domain (Codomain F)))))-> f x1 \(y1: Domain (Domain (Codomain F)))-> ks (y1,ys) );
+--               }
+--           ) (x, k);
+--       
+--          printNumList = 
+--            mapK (\(n:Int)-> \(k: IOK Str)->
+--              iokPrint ("Num: "^n) $ \_->
+--              k (n^"."^n)
+--            ) [1,2,3] $ \(result: List Str)->
+--            iokPrint (""^result) $ \_->
+--            \(world: ioWorld)->result;
+-- 
+--      } in ioRun printNumList 
+-- 
+--   """
+--   ]
+--   , ["expected_value", "[\"1.1\",\"2.2\",\"3.3\"]"]
+-- --  , ("expected_type", "List Str")
+--   , ["expected_type", "Any"]
+--   ]
+
+, [ ["name", "Fix-const"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+    """
+       let t1 = 7 : Fix <| (a : Type) ->Int;
+    """
+    ]
+  , ["expectValue", "t1", "7"]
+  , ["expectType", "t1", "Int"]
+  ]
+
+
+, [ ["name", "Fix-list"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+    """
+       let t1 = [7,8,9] : Fix <| A -> { [] | [Int ,, A] };
+    """
+    ]
+  , ["expectValue", "t1", "[7,8,9]"]
+  -- , ["expectType", "t1", "(Rec {A -> { [] | { [Int ,, A] } }})"]
+  , ["expectType", "t1", "(Fix (A -> { [] | { [Int ,, A] } }))"]
+  ]
+
+
+, [ ["name", "tree"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+    """
+          let strCat = jsStrCat;
+
+          let Tree = Fix <| Tree ->
+              let Leaf = { ["Leaf", Int] };
+              let Branch = { ["Branch", Tree, Tree] };
+              { Leaf | Branch };
+
+          let tree0_a = ["Leaf", 1];
+          let tree0_b = ["Branch", ["Leaf", 1], ["Leaf", 2]];
+
+          let tree1 = ["Branch", ["Branch", ["Leaf", 1], ["Leaf", 2]], ["Leaf", 3]];
+          let tree2 = ["Branch", ["Branch", ["Leaf", 1], ["Leaf", 2]], ["Branch", ["Leaf", 3], ["Leaf", 4]]];
+
+          let Maybe = (A : Type) -> { [] | [A] };
+          let headOrElse : { A @ (Maybe Any) -> { -> (Hd A) } -> (Hd A) } =
+            (aMb : A @ Maybe Any) -> orElse ->
+            ifNil aMb
+            [ orElse
+            , [a] -> a
+            ];
+
+          let showTree = fix <| (st : { Tree -> Str }) -> (t : Tree) -> 
+               let leafMb = t |> ["Leaf", n] |=> show n;
+               ifNil leafMb
+               [ ->
+                 let branchMb = t |> ["Branch", a, b] |=> jsStrCat ["< ", st a," ", st b," >"];
+                 ifNil branchMb
+                 [ -> error "pat-mat failure"
+                 , [branch] -> branch
+                 ]
+               , [leaf] -> leaf
+               ];
+
+          let showTree2 = fix <| (st : { Tree -> Str }) -> (t : Tree) -> 
+               headOrElse ( t |> ["Leaf", n] |=> show n ) <| ->
+               headOrElse ( t |> ["Branch", a, b] |=> jsStrCat ["< ", st a," ", st b," >"] ) <| ->
+               error "pat-mat failure";
+
+          let showTree3 = fix <| (st : { Tree -> Str }) -> (t : Tree) -> 
+               headOrElse ( t |> ["Leaf", n] |=> show n ) <| ->
+               headOrElse ( t |> ["Branch", a, ["Branch", b, c]] |=> jsStrCat ["<< ", st a, " ", st b, " ", st c, " >>"] ) <| ->
+               headOrElse ( t |> ["Branch", a, b] |=> jsStrCat ["< ", st a," ", st b," >"] ) <| ->
+               error "pat-mat failure";
+
+          let t0a = showTree tree0_a;
+          let t0b = showTree tree0_b;
+          let t1 = showTree tree1;
+          let t2 = showTree2 tree1;
+          let t3 = showTree2 tree2;
+          let t4 = showTree3 tree2;
+    """
+    ]
+  , ["expectValue", "t0a", "\"1\""]
+  , ["expectValue", "t0b", "\"< 1 2 >\""]
+  , ["expectValue", "t1", "\"< < 1 2 > 3 >\""]
+  , ["expectValue", "t2", "\"< < 1 2 > 3 >\""]
+  , ["expectValue", "t3", "\"< < 1 2 > < 3 4 > >\""]
+  , ["expectValue", "t4", "\"<< < 1 2 > 3 4 >>\""]
+  ]
+
+
+-- , [ ["name", "tree2"]
+--   , ["type_check", "bidir"]
+--   , ["expr", 
+--     """
+--        let { 
+--            Tree = Fix (\Tree->Union
+--                [ Variant "Leaf" Int 
+--                , Variant "Branch" (Pair Tree Tree)
+--                ]);
+-- 
+--            t1 = ("Branch", ("Branch", (("Leaf", 1), ("Leaf", 2))), ("Leaf", 3));
+--            t2 = ("Branch", ("Branch", (("Leaf", 1), ("Leaf", 2))), ("Branch", (("Leaf", 3), ("Leaf", 4))));
+-- 
+--            showTree = fix \(st: \Tree=>Str)-> \(t:Tree)-> case t of
+--                { ("Branch", a, ("Branch", b, c)) -> "<< "^ st a ^" "^ st b ^" "^ st c ^" >>"
+--                ; ("Branch", a, b) -> "< "^ st a ^" "^ st b ^" >"
+--                ; ("Leaf", n)      -> ""^n
+--                ;};
+--        } in
+--        showTree t2
+--     """
+--     ]
+--   , ["expected_value", "\"<< < 1 2 > 3 4 >>\""]
+--   , ["expected_type", "Str"]
+--   ]
+
+
+-- , [ ["name", "tuple-list"]
+--   , ["language", "ferrum/0.1"]
+--   , ["type_check", "bidir"]
+--   , ["decls", 
+--     """
+--        let {
+-- 
+--         reverse = \(l: L1@(List Any))->
+--           loop1 (\(result: List (Elem L1), l: List (Elem L1))->
+--             case l of {
+--               () -> break result;
+--               (l1, ls) -> continue ((l1,result), ls);
+--             }
+--           ) ([], l);
+-- 
+-- 
+--          Tuple = \(x:List type)->
+--            loop1 (\(xs: List type, result: type)->
+--                case xs of {
+--                    [] -> break result;
+--                    (x1,xs2) -> continue (xs2, Pair x1 result);
+--                }
+--            ) (reverse x, nil);
+--   
+--          ParseTreeC = Fix \(PTC: type)-> Tuple [Str, List PTC, List Int, Int];
+--          -- ParseTreeC = Tuple [Str, List Str, List Int, Int];
+--   
+--          ptcPt = \([name, pts, toks, loc]: ParseTreeC) -> (name, pts, toks);
+-- 
+--          init_val = ["a", [], [], 7];
+--        } in
+--        ptcPt init_val
+--     """
+--     ]
+--   , ["expected_value", "[\"a\"]"]
+--   , ["expected_type", ""]
+--   ]
+
+
+, [ ["name", "self-ref-func-type"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+    """
+         -- F = \(A@Void)=> \A=> A;
+         -- F = Fix (\(T:type) -> \(Domain T)=> \(Domain T)=>(Domain T));
+         -- F = Fix (\(T:type) -> \(Void)=> \(Domain T)=>(Domain T));
+         -- F = Fix { {f:F} -> Void -> dom f -> dom f};
+         -- F = Domain ( \(T@( \void => \(Domain T) => Domain T )) => Any );
+
+        let F = SelfT <| T -> { Void -> (Domain T) -> (Domain T) };
+        -- let F = Self <| (t : T @ Any) -> { Void -> (Domain T) -> (Domain T) };
+        
+        let f = (a : Int) -> (b : Int) -> a + b;
+        -- let g = (f : F1 @ F) -> (x : Domain F1): Domain F1 -> f x x;
+        let g = (f : F1 @ F) -> (x : Domain F1) -> f x x;
+        let t1 = g f 7;
+    """
+    ]
+  , ["expectValue", "t1", "14"]
+  , ["expectType", "t1", "Int"]
+  ]
+
+
+-- , [ ["name", "cons-cons-list"]
+--   , ["language", "ferrum/0.1"]
+--   , ["type_check", "bidir"]
+--   , ["decls", 
+--     """
+--           Cons = \A@Any=> \B@Any=> Pair A B;
+--           cons : Cons
+--                = \(a:A@Any)-> \(b:B@Any) -> (a,b);
+-- 
+--           ConsList = \A@Any=> \B@(List Any)=> List (unionT A (Elem B));
+--           consList : ConsList
+--                    = \(a:A@Any)-> \(b:B@(List Any)) -> (a,b);
+--       
+--        } in
+--        (cons: ConsList) 1 [2]
+--     """
+--     ]
+-- --  , ("type_check", "bidir")
+--   , ["expected_value", "[1,2]"]
+--   , ["expected_type", "List Int"]
+--   ]
+
+
+
+, [ ["name", "continuation"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+
+  """
+
+       -- convert = 
+       --     \(num: Int)-> 
+       --     \(k: \Pair Int Str=>Str)->  
+       --     k (num, ""^ num ^"*"^ num ^"="^ (num*num));
+       --     
+       -- call = 
+       --     \(f: \Int=> \(\(Pair Int Str)=>Str)=> Str)-> 
+       --     \(input: Int)-> 
+       --     \(k: \(Pair Int Str)=>Str)-> 
+       --     f input k;
+
+      let strCat = jsStrCat;
+      let convert = 
+           (num : Int) -> 
+           (k : { [Int, Str] -> Str }) ->  
+           k [num, strCat [show num, "*", show num, "=", show (num*num)]];
+           
+      let call = 
+           (f : F @ { Void -> { Any -> Str } -> Str }) -> 
+           (input : (Domain F)) -> 
+           (k : { (Domain (Domain (Codomain F))) -> Str }) -> 
+           f input k;
+
+      let angleK = (result @ [n, s] : { [Int, Str] }) -> strCat ["<", show n, ", ", s, ">"];
+      
+      let t1 = -> call convert 7 angleK;
+
+  """
+  ]
+  , ["expectValue", "t1[]", "\"<7, 7*7=49>\""]
+  , ["expectType", "t1[]", "Str"]
+  ]
+
+, [ ["name", "swap"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+
+  """
+      -- TODO this first version of swap used to work in fe3
+      -- TODO ? do we want it to work again ?
+      -- TODO currently it results in a type of { [B, A] }, the variables have escaped
+
+      -- let swap = [a : A @ Any, b : B @ Any] -> [b : B, a : A];
+
+      -- The type syntax
+      --   "{ T @ [Any, Any] } -> ..." 
+      --  should be written 
+      --   "T @ { [Any, Any] } -> ..."
+      -- TODO Enforce this during parsing, rather than letting the later code trip over it.
+      -- TODO ? Change the AST to include the "@" type-name in ELambda node, so as not to need a separate EAs node ?
+      -- TODO ?   Or include the "@" type-name within the EType node ?
+      -- TODO ?   Or maybe a separate ETypeAs node, only permitted at the root of a lambda (and let?) pattern ?
+      -- let swap : { T @ [Any, Any] -> [(Hd (Tl T)), (Hd T)] } =
+      --     ([a, b] : { T @ [Any, Any] }) -> [b, a];
+
+      let swap : { T @ [Any, Any] -> [(Hd (Tl T)), (Hd T)] } =
+          ([a, b] : T @ { [Any, Any] }) -> [b, a];
+
+      let t1 = swap [1,"one": Str];
+
+  """
+  ]
+  , ["expectValue", "t1", "[\"one\",1]"]
+  , ["expectType", "t1", "{ [Str, Int] }"]
+  ]
+
+, [ ["name", "type-error-foldl"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+        let foldl :  { F @ { Void -> Void -> (Domain F) } -> Z @ (Domain F) -> X @ (List (Domain { F Z })) -> Z } =
+              (f : F @ { Void -> Void -> (Domain F) }) ->
+              (z : Z @ Domain F) ->
+              (x : X @ List (Domain { F Z })) ->
+              loop1 ( [z : Z, x : List (Elem X)] ->
+                  ifNil x
+                  [ -> break z
+                  , [x1 ,, xs] -> continue [f z x1, xs] -- this shouldn't type-check, (f z x1) doesn't neccessarily return something of type Z
+                  ]
+              )
+              [z, x];
+
+        let flipConsList : { B @ (List Any) -> A @ Any -> (List { A | (Elem B) }) } = 
+              (b : B @ List Any) -> (a : A @ Any) -> [a ,, b];
+          
+        let reverse : { L @ (List Any) -> (List (Elem L)) } = 
+              (l : L @ List Any) -> 
+              foldl flipConsList ([]) l;
+              -- foldl (flipConsList: \(List (Elem L))=> \Elem L=>List (Elem L)) [] l; -- this shouldn't type-check without the type annotation on [], hmmm
+
+        let t1 = reverse [1,2,3];
+  """
+  ]
+  , ["expected_type_errors", 1]
+  , ["expectValue", "t1", "[3,2,1]"]
+  ]
+
+
+, [ ["name", "type-error-flip-cons"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+        let F = { B @ (List Any) -> A @ Any -> B };
+        let flipConsList : { B @ (List Any) -> A @ Any -> (List { A | (Elem B) }) } =
+              (b : B @ List Any) -> (a : A @ Any) -> [a ,, b];
+          
+        let t1 = flipConsList : F;
+  """
+  ]
+  , ["expected_type_errors", 1]
+  , ["expectType", "t1", "{ B @ {(List Any)} -> A @ Any -> B }"]
+  ]
+
+
+
+-- , [ ["name", "intersect-variant"]
+--   , ["expr", 
+--   """
+--         let {
+-- 
+--             reverse: \L@(List Any)=>List (Elem L) = \_->error "reverse";
+-- 
+--             Pos = Pair Int Int;
+--             Range = Pair Pos Pos;
+--             Loc = Pair Str Range;
+--             
+--             Atomic = 
+--               Union
+--                 [ Variant "AStr" Str
+--                 , Variant "AInt" Int
+--                 ];
+-- 
+--             Token = 
+--               Pair Pos (Pair Pos (
+--                 Union
+--                   [ Variant "LexAtomic" Atomic
+--                   , Variant "LexId" Str
+--                   , Variant "LexKeyId" Str
+--                   , Variant "LexOp" Str
+--                   , Variant "LexKeyOp" Str
+--                   , Variant "LexSep" Str
+--                   , Variant "LexEOF" niltype-error-flip-cons
+--                   ]));
+-- 
+--             nullToken = [(0,0),(0,0),("LexEOF"]);
+-- 
+--             ParseTree = 
+--               Fix (\(PT:type)->
+--                 Union 
+--                   [ Variant "token" Token
+--                   , Variant "rule" (Pair Str (List PT))
+--                   ]);
+--             
+--             ParseTreeToken = intersectT ParseTree (Pair (singleT "token") Any);
+--             ParseTreeRule  = intersectT ParseTree (Pair (singleT "rule" ) Any);
+--             
+--             
+--             RuleResultOk = Variant "ok" (Pair ParseTree (Pair (List Token) Token));
+--             RuleResultFail = Variant "fail" (Pair Token Token);
+--             RuleResult = Union [RuleResultOk, RuleResultFail];
+--             
+--             Rule = \(List Token)=> RuleResult;
+--             RulesTable = Fix (\(RT:type)-> List (Pair Str (\RT=> \(List Token)=> RuleResult)));
+--             Rule1 = \RulesTable=> \(List Token)=> RuleResult;
+--             
+--             
+--             -- nop = \(rt: RulesTable)-> \(tokens: List Token)-> (("fail", hd tokens): RuleResult);
+--             
+--             furthest = \(a@((rowA,colA),_,__): Token)-> \(b@((rowB,colB),___,____): Token): Token-> 
+--               if rowA > rowB then a else
+--               if rowB > rowA then b else
+--               if colA > colB then a else
+--               if colB > colA then b else
+--               a;
+--               
+--             
+--             def = \(name: Str, rule: Rule1)-> (name: Str, rule: Rule1);
+--             
+--             seq = \(rules:Pair Rule1 (List Rule1))-> \(rt: RulesTable)-> \(tokens: List Token): RuleResult->
+--                 loop1 (\((rule,rules): Pair Rule1 (List Rule1), tokens: List Token, pts: List ParseTree, far: Token)->
+--                   case rule rt tokens of {
+--                       ("ok", pt, tokens2, far2) -> 
+--                           case rules of {
+--                             [] -> break (("ok", ("rule", "seq", reverse ((pt,pts): List ParseTree)): ParseTreeRule, tokens2, furthest far far2): RuleResult);
+--                             (rules1,ruless) -> continue ((rules1,ruless), tokens2, (pt,pts), furthest far far2);
+--                           };
+--                       ("fail", tok, far2) -> break ("fail", tok, furthest far far2);
+--                   }
+--                 ) (rules,tokens,[],nullToken);
+--             
+--         } in
+--         seq
+--   """
+--   ]
+--   , ["expected_type_errors", 0]
+--   ]
+
+
+-- , [ ["name", "pair-match-variant"]
+--   , ["expr", 
+--     """
+--        let {
+--            Pos = Pair Int Int;
+--            Range = Pair Pos Pos;
+--            Loc = Pair Str Range;
+--            
+--            Atomic = 
+--              Union
+--                [ Variant "AStr" Str
+--                , Variant "AInt" Int
+--                ];
+--            
+--            Token = 
+--              Pair Pos (Pair Pos (
+--                Union
+--                  [ Variant "LexAtomic" Atomic
+--                  , Variant "LexId" Str
+--                  , Variant "LexKeyId" Str
+--                  , Variant "LexOp" Str
+--                  , Variant "LexKeyOp" Str
+--                  , Variant "LexSep" Str
+--                  , Variant "LexEOF" nil
+--                  ]));
+--            
+--            TokenNoPos = Tl (Tl Token);
+-- 
+--            parse_tok : \TokenNoPos=> \(Pair Token (List Token))=> List Token
+--                      = \(expected_tok@(expected_tag,expected_value): TokenNoPos)
+--                     -> \(input@(token@(start,finish,tok@(tag,value)),input2): List Token) ->
+--              -- trace ("parse_tok",expected_tok) $
+--              if (tag==expected_tag) && (value==expected_value) 
+--              then input2
+--              else error ("unexpected token",token,"expected",expected_tok);
+-- 
+--        } in
+--        1
+--     """
+--     ]
+--   , ["expected_value", "1"]
+--   , ["expected_type", "Int"]
+--   ]
+
+
+-- -- This test works with the fe4/tree-types implementation but not the fe4/graph-types implementation.
+-- -- It's possible it will never work with both at the same time.
+-- -- This test doesn't need to type-check in order for the fe-in-fe code to type-check.
+-- -- It can be revisited when everything else is more mature and tree-types are ready to be jettisoned.
+-- , [ ["name", "codec-pair"]
+--   , ["language", "ferrum/0.1"]
+--   , ["type_check", "bidir"]
+--   , ["decls", 
+--     """
+--         let Codec = SelfT <| A -> { [Str -> Any, { (Hd A) Str } -> Str] };
+--         -- let Codec = Self <| (a : A @ { [Type, Type] }) -> { [Str -> Any, { (hd a) Str } -> Str] };
+--         -- let Codec = Self <| (a : A @ { [Str -> Any, Void -> Str] }) -> { [Str -> Any, { (Single (hd a)) Str } -> Str] };
+--         -- let Codec = Self <| (a : A @ { [Str -> Any, Void -> Str] }) -> { [Str -> Any, { { _ : (hd a) } Str } -> Str] };
+--         -- This version is possibly the best way to define the type.
+--         --    It makes it possible to take the non-dependent tail of the tuple, 
+--         --    this is useful when computing non-dependent context types.
+--         --    Checking the tail against { Void -> Str } and then checking the whole self-dependent tuple makes sense.
+--         --    Checking the tail against { Any -> Str } or { (Hd V1) Str -> Str } is harder to make work.
+--         -- let Codec = Self <| (a : A @ { [Str -> Any, Void -> Str] }) -> { [Str -> Any, { (Hd A) Str } -> Str] };
+--         let codec1 : Codec = [ (a : A @ Any)  -> a         , (a : Str) -> a         ];
+--         let codec2 : Codec = [ (a : Str)      -> strOrd a  , (a : Int) -> strChr a  ];
+--         let testCodec = 
+--             ([encode, decode] : C @ Codec) -> 
+--             (a : Str) ->
+--             decode (encode a) == a;
+--         let t1 = ->
+--           [ testCodec codec1 "A"
+--           , testCodec codec2 "A"
+--           , testCodec codec1 "Apple"
+--           , testCodec codec2 "Apple"
+--           ];
+--     """
+--     ]
+--   , ["expectValue", "t1[]", "[true,true,true,false]"]
+--   , ["expectType", "t1[]", "{ [Bool, Bool, Bool, Bool] }"]
+--   ]
+-- 
+
+
+
+-- , [ ["name", "sum-product-type"]
+--   , ["language", "ferrum/0.1"]
+--   , ["type_check", "bidir"]
+--   , ["decls", 
+--     """
+--           SumProd = Union
+--             [ Variant "Int" Int
+--             , Variant "Str" Str
+--             ];
+--           -- a@(ax,ay): SumProd = ("Int", 7): SumProd;
+--           -- a@(ax,ay): Pair Any Any = ("Int", 7): SumProd;
+--           (a@(ax,ay): SumProd): Pair Any Any = ("Int", 7): SumProd;
+--           -- a@(ax,ay) = ("Int", 7): SumProd;
+--           -- a: SumProd = ("Int", 7);
+--           b: SumProd = ("Str", "seven");
+--         } in
+--         (a,b)
+--     """
+--     ]
+--   , ["expected_value", "[[\"Int\",7], [\"Str\", \"seven\"]]"]
+--   -- , ("expected_type", "")
+--   -- , ("type_check", "simple")
+--   ]
+
+
+, [ ["name", "type-error-sum-product"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+    """
+        let SumProd = 
+            { ["Int", Int] 
+            | ["Str", Str]
+            };
+        let a @ [ax, ay] : SumProd = ["Int", "seven"];
+        let b: SumProd = ["Str", 7];
+    """
+    ]
+  , ["expected_type_errors", 2]
+  ]
+
+
+-- , [ ["name", "sum-product-func"]
+--   , ["expr",
+--     """
+--         let {
+--           SumProd = Union
+--             [ Variant "Int" Int
+--             , Variant "Str" Str
+--             ];
+--           f = \(sp@(x,y): SumProd)->y;
+--           a = f ("Int", 7);
+--           b = f ("Str", "seven");
+--         } in
+--         (a,b)
+--     """
+--     ]
+--   , ["expected_value", "[7,\"seven\"]"]
+--   -- , ("expected_type", "")
+--   -- , ("type_check", "simple")
+--   ]
+
+
+, [ ["name", "type-error-sum-product-func"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+    """
+        let SumProd = { ["Int", Int] | ["Str", Str] };
+        let f = (sp @ [x,y] : SumProd) -> y;
+        let a = f ["Int", "seven"];
+        let b = f ["Str", 7];
+    """
+    ]
+  , ["expected_type_errors", 2]
+  ]
+
+
+-- , [ ["name", "dup"]
+--   , ["expr",
+--     """
+--         let {
+--           dup = \x->(x,x);
+--         } in
+--         dup 7
+--     """
+--     ]
+--   , ["expected_value", "(7,7)"]
+--   -- , ("type_check", "simple")
+--   ]
+
+
+
+
+-- , [ ["name", "unzip"]
+--   , ["expr",
+--     """
+--         let {
+-- 
+--             reverse = \(l: L@(List Any))->
+--               loop1 (\(result: List (Elem L), l: List (Elem L))->
+--                 case l of {
+--                   () -> break result;
+--                   (l1, ls) -> continue ((l1,result), ls);
+--                 }
+--               ) ([], l);
+-- 
+-- 
+--             unzip : \L@(List (Pair Any Any)) => Pair (List (Hd (Elem L))) (List (Tl (Elem L)))
+--                   = \(l:L@(List (Pair Any Any))) ->
+--                   loop1 (\(a: List (Hd (Elem L)), b: List (Tl (Elem L)), l: (List (Elem L))) ->
+--                     case l of {
+--                       []           -> break (a,b);
+--                       ((a1,b1),ls) -> continue ((a1,a),(b1,b),ls);
+--                     }
+--                   ) ([], [], reverse l);
+-- 
+--             -- reverse = \(l: L1@(List Any))->
+--             --   loop1 (\(result: List (Elem L1), l: List (Elem L1))->
+--             --     case l of {
+--             --       () -> break result;
+--             --       (l1, ls) -> continue ((l1,result), ls);
+--             --     }
+--             --   ) ([], l);
+-- 
+--             -- unzip : \L2@(List (Pair Any Any)) => Pair (List (Hd (Elem L2))) (List (Tl (Elem L2)))
+--             --       = \(l:L2@(List (Pair Any Any))) ->
+--             --       loop1 (\(a: List (Hd (Elem L2)), b: List (Tl (Elem L2)), l: (List (Elem L2))) ->
+--             --         case l of {
+--             --           []           -> break (a,b);
+--             --           ((a1,b1),ls) -> continue ((a1,a),(b1,b),ls);
+--             --         }
+--             --       ) ([], [], reverse l);
+-- 
+-- 
+--         } in 
+--         unzip [(1,2),(3,4),(5,6)]
+--     """
+--     ]
+--   , ["expected_value", "[[1,3,5] ,, [2,4,6]]"]
+--   -- , ("type_check", "simple")
+--   ]
+
+
+-- , [ ["name", "tuple-list-pat"]
+--   , ["expr",
+--     """
+--         let {
+--           [a, b, c]: List Int = [1,2,3];
+--         } in
+--         a+b+c
+--     """
+--     ]
+--   , ["expected_value", "6"]
+--   , ["type_check", "bidir"]
+--   ]
+
+
+-- , [ ["name", "func-type-infer"]
+--   , ["expr",
+--     """
+--         let {
+--           f: \Int=>Int = \x-> x*x;
+--         } in
+--         f 7
+--     """
+--     ]
+--   , ["expected_value", "49"]
+--   , ["type_check", "bidir"]
+--   ]
+
+
+
+, [ ["name", "single"]
+  , ["language", "ferrum/0.1"]
+  -- , ["expect", "\"Apple\" ", "value", "\"Apple\""]
+  -- , ["expect", "\"Apple\" ", "type", "{\"Apple\"}"]
+  , ["expectValue", "\"Apple\" ", "\"Apple\""]
+  , ["expectType", "\"Banana\" ", "{\"Banana\"}"]
+  ]
+
+, [ ["name", "plus"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["expectValue", "1 + 2", "3"]
+  , ["expectType",  "2 + 3", "Int"]
+  ]
+
+, [ ["name", "let"]
+  , ["language", "ferrum/0.1"]
+  , ["decls",
+    """
+       let x = 3;
+       let [x] = [x - 1];
+       let x = x - 1;
+       -- let x = 2;
+       -- let x = 1;
+       let y = 2;
+       let z = 4;
+       let a = x + (y + z);
+       let b = a * 7;
+       let c = b == 49;
+    """
+    ]
+  , ["expectValue", "b", "49"]
+  , ["expectType",  "b", "Int"]
+  , ["expectValue", "c", "true"]
+  , ["expectType",  "c", "Bool"]
+  -- , ["expectValue",  "1 + 5", "2"] -- deliberate error, just to see that it gets reported
+  , ["expectValue",  "1 + 2", "3"]
+  -- , ["expectValue",  "1 + 9", "4"] -- deliberate error, just to see that it gets reported
+  , ["typeCheckDeclsOk", ""]
+  ]
+
+, [ ["name", "list"]
+  , ["language", "ferrum/0.1"]
+  , ["decls",
+    """
+      let a = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40];
+      let b = [1,2,3];
+    """
+    ]
+  , ["expectValue", "b", "[1,2,3]"]
+  ]
+
+, [ ["name", "func"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+       let f = (x : Int) -> x * x;
+       let z = f 7;
+    """
+    ]
+  -- , ["expect", "z", "value", "49", "type", "Int"]
+  -- , ["expectValue", "f", "v1 -> v1 * v1"]
+  , ["expectType",  "f", "{ Int -> Int }"]
+  , ["expectValue", "z", "49"]
+  , ["expectType",  "z", "Int"]
+  ]
+
+, [ ["name", "func-curried"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+       let f = 
+           (a : Int) -> (b : Int) -> (c : Int) -> 
+           (a + c) * (b - c);
+       let x = f 3 7 1;
+       let g = (a : Int) ->
+           let h = 
+               (b : Int) -> (c : Int) -> 
+               (a + c) * (b - c);
+           h;
+       let y = g 3 7 1;
+    """
+    ]
+  , ["expectType",  "f", "{ Int -> Int -> Int -> Int }"]
+  , ["expectValue", "x", "24"]
+  , ["expectType",  "x", "Int"]
+  , ["expectType",  "g", "{ Int -> Int -> Int -> Int }"]
+  , ["expectValue", "y", "24"]
+  , ["expectType",  "y", "Int"]
+  ]
+
+, [ ["name", "type-check"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["typeCheckOk",  "1"]
+  , ["typeCheckOk",  "1 + 2"]
+  , ["typeCheckFail",  "1 + true"]
+  , ["typeCheckFail",  "\"hello\" : Int"]
+  , ["typeCheckFail",  "(a : Str) -> a + 1"]
+  , ["typeCheckFail",  "let a : Str = 1 + 2; a"]
+  , ["typeCheckFail",  "a -> hd []"]
+  , ["typeCheckFail",  "\"seven\" |> (a : Int) -> a * a"]
+  , ["typeCheckFail",  "\"seven\" : Int"]
+  , ["typeCheckFail",  "[\"seven\", 6] : { [\"eight\", Str] | [\"nine\", Int] }"] 
+  -- Test that failing checks do actually get reported
+  -- , ["typeCheckFail",  "1 + 2"]
+  -- , ["typeCheckOk",  "1 + true"]
+  ]
+
+
+, [ ["name", "tuple-repr"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let RGB = { [Int, Int, Int] };
+      -- let a : RGB = [7,8,9];
+      let a : { [Int, Int, Int] } = [7,8,9];
+      let f : { [Int, Int, Int] -> [Int, Int, Int] } =
+        [x, y, z] -> [x*x, y+y, z-z];
+      let b = f a;
+      let [r, s, t] = [7, 8, 9];
+    """
+    ]
+  , ["expectValue", "b", "[49,16,0]"]
+  ]
+
+, [ ["name", "tuple-repr2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let a : { [Int, Int, Int] } = [7,8,9];
+      let f : { (List Int) -> [] | [Int, Int, Int] } =
+        [x, y, z] |-> [x*x, y+y, z-z];
+      let g : { (List Int) -> [] | [Int, Int, Int] } =
+        [] |-> [1,2,3];
+      let b = f a;
+      let c = f [];
+      let d = g a;
+      let e = g [];
+    """
+    ]
+  , ["expectValue", "b", "[49,16,0]"]
+  , ["expectValue", "c", "[]"]
+  , ["expectValue", "d", "[]"]
+  , ["expectValue", "e", "[1,2,3]"]
+  ]
+
+, [ ["name", "list-repr"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let a : List Int = [7,8,9];
+      let a2 : List Int = [11,13,17];
+      let f : { (List Int) -> [] | [(List Int)] } =
+        [x, y, z] |=> [x*x, y+y, z-z];
+      let g : { (List Int) -> (List Int) } =
+        xyz -> [123 ,, xyz];
+      let b = f a;
+      let c = g a;
+    """
+    ]
+  , ["expectValue", "a", "[7,8,9]"]
+  , ["expectValue", "a2", "[11,13,17]"]
+  , ["expectValue", "b", "[[49,16,0]]"]
+  , ["expectValue", "c", "[123,7,8,9]"]
+  ]
+
+, [ ["name", "list-repr2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let a : List Int = [7,8,9];
+      let b : List Any = a;
+    """
+    ]
+  , ["expectValue", "a", "[7,8,9]"]
+  , ["expectValue", "b", "[7,8,9]"]
+  ]
+
+, [ ["name", "maybe-repr"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Maybe : { Type -> Type } = A -> { [] | [A] };
+      let a : Maybe Int = 
+        if true [ -> [7], -> [] ];
+      let b : Maybe Int = 
+        if false [ -> [7], -> [] ];
+      let c : Maybe { [Int, (List Int)] } = 
+        let n = 7;
+        let ns = [8, 9];
+        [ [ n - 1, [n ,, ns] ] ];  
+    """
+    ]
+  , ["expectValue", "a", "[7]"]
+  , ["expectValue", "b", "[]"]
+  , ["expectValue", "c", "[[6,[7,8,9]]]"]
+  ]
+
+
+, [ ["name", "maybe-func"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+       let Maybe = (A : Type) -> { [] | [A] };
+       let MyNum = { ["Int", Int] | ["Str", Str] };
+       let f : { MyNum -> (Maybe Int) } = (["Int", x : Int]) |=> x * x;
+       let x = f ["Int", 7];
+       let y = f ["Str", "seven"];
+       let z = [x, y];
+       let g = (a: Any) -> [a, x, y];
+    """
+    ]
+  , ["expect", "z", "value", "[[49],[]]"]
+  , ["expect", "g 3", "value", "[3,[49],[]]"]
+  -- , ["type_check", "simple"]
+  ]
+
+
+, [ ["name", "pipeFwd"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+
+      let pipeFwd : { A @ Any -> F @ { A -> Any } -> F A } =
+          (a : A @ Any) -> (f : F @ { A -> Any }) ->
+          f a;
+
+      let x = 3;
+      let y = pipeFwd x (a -> a * a); 
+
+    """
+    ]
+  , ["type_check", "bidir"]
+  , ["expect", "y", "value", "9"]
+  ]
+
+, [ ["name", "pipeFwd2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+      let x = 
+        3 
+        |> (x -> x + x)
+        |> (y -> y * y);
+
+    """
+    ]
+  , ["type_check", "bidir"]
+  , ["expect", "x", "value", "36"]
+  ]
+
+
+, [ ["name", "lambda-maybe-types"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+      let Rec = Fix;
+      -- let Tree = 
+      --   Rec <| (T : Type) ->
+      --   { ["A"]
+      --   | ["B", Int]
+      --   | ["C", T, T]
+      --   };
+
+      let Maybe : { Type -> Type } = (T : Type) -> { [] | [T] };
+
+      -- let f : { Tree -> (Maybe { [Int, Int, Int] }) } = (
+      --     ["C"
+      --     , ["C"
+      --       , ["C"
+      --         , ["A"]
+      --         , ["B", x : Int]
+      --         ] 
+      --       , ["C"
+      --         , ["A"]
+      --         , ["A"]
+      --         ] 
+      --       ] 
+      --     , ["C"
+      --       , ["C"
+      --         , ["B", y : Int]
+      --         , ["A"]
+      --         ] 
+      --       , ["C"
+      --         , ["A"]
+      --         , ["B", z : Int]
+      --         ] 
+      --       ] 
+      --     ] 
+      --     : Tree) |=> [x, y, z];
+
+      -- let f1 = f ["A"];  
+
+      let Expr = 
+        Rec <| (E : Type) ->
+        
+        { ["EApply", E, E]
+        | ["EVar", Str]
+
+        -- | ["ELambda", E, E]
+        -- | ["EType", E, E]
+        -- | ["EList", (List E), (Maybe E)]
+
+        | ["E0"]
+        | ["E1", E]
+        | ["E2", E, E]
+        | ["E3", E, E, E]
+        | ["E4", E, E, E, E]
+        | ["E5", E, E, E, E, E]
+        | ["E6", E, E, E, E, E, E]
+        | ["E7", E, E, E, E, E, E, E]
+        | ["E8", E, E, E, E, E, E, E, E]
+        | ["E9", E, E, E, E, E, E, E, E, E]
+
+        };
+
+      -- let Nil = { [] };
+      -- let Datum = { Nil | Bool | Int | Str };
+
+      -- let Expr = 
+      --   Rec <| (ExprA : Type) ->
+      --       { ["EVar",     Str                            ]
+      --       | ["ELambda",        ExprA, ExprA             ]
+      --       | ["ELambdaMaybe",   ExprA, ExprA             ]
+      --       | ["ELambdaNo",      ExprA, ExprA             ]
+      --       | ["ELambdaYes",     ExprA, ExprA             ]
+      --       | ["EApply",   ExprA, ExprA                   ]
+      --       | ["ELit",     Datum                          ]
+      --       | ["ELet",     ExprA, ExprA, ExprA            ]
+      --       | ["ELets",    (List {[ExprA, ExprA]}), ExprA ]
+      --       | ["EPair",    ExprA, ExprA                   ]
+      --       | ["EList",    (List ExprA), (Maybe ExprA)    ]
+      --       | ["EType",    ExprA, ExprA                   ]
+      --       | ["EAs",      Str, ExprA                     ]
+      --       | ["EOper",    Str, (List ExprA)              ]
+      --       | ["ESym",     Str                            ]
+      --       | ["ETypeBrackets",     ExprA                 ]
+      --       | ["ETermBrackets",     ExprA                 ]
+      --       };
+
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+      --         ["EApply"
+      --         ,   ["EVar", "annotate_HandlerMk"] : Expr
+      --         ,   ["EApply"
+      --             ,   ["EVar", "rec"] : Expr
+      --             ,   ["ELambda"
+      --                 ,   ["EType", ["EVar", mkName : Str], _ : Expr] : Expr
+      --                 ,   ["ELambda"
+      --                     ,   ["EVar", stateName : Str] : Expr
+      --                     ,   ["EApply"
+      --                         ,   ["EApply"
+      --                             ,   ["EVar", "hpsDispatch"] : Expr
+      --                             ,   _ : Expr
+      --                             ] : Expr
+      --                         ,   ["EList", methods : List Expr, []] : Expr
+      --                         ] : Expr
+      --                     ] : Expr
+      --                 ] : Expr
+      --             ] : Expr
+      --         ] |=> [mkName : Str, stateName : Str, methods : List Expr] : { [Str, Str, (List Expr)] };
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+      --         ["EApply"
+      --         ,   ["EVar", "annotate_HandlerMk"] 
+      --         ,   ["EApply"
+      --             ,   ["EVar", "rec"] 
+      --             ,   ["ELambda"
+      --                 ,   ["EType", ["EVar", mkName ], _ ] 
+      --                 ,   ["ELambda"
+      --                     ,   ["EVar", stateName ] 
+      --                     ,   ["EApply"
+      --                         ,   ["EApply"
+      --                             ,   ["EVar", "hpsDispatch"] 
+      --                             ,   _ 
+      --                             ] 
+      --                         ,   ["EList", methods , []] 
+      --                         ] 
+      --                     ] 
+      --                 ] 
+      --             ] 
+      --         ] |=> [mkName, stateName, methods];
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+      --         ["EApply"
+      --         ,   ["EVar", "annotate_HandlerMk"] : Expr
+      --         ,   ["EApply"
+      --             ,   ["EVar", "rec"] : Expr
+      --             -- ,   ["EVar", "blank"] : Expr
+      --             ,   ["ELambda"
+      --                 ,   ["EVar", "blank"] : Expr
+      --                 -- ,   ["EType", ["EVar", mkName : Str], _ : Expr] : Expr
+      --                 -- ,   ["EVar", "blank"] : Expr
+      --                 ,   ["ELambda"
+      --                     ,   ["EVar", stateName : Str] : Expr
+      --                     -- ,   ["EVar", "blank"] : Expr
+      --                     ,   ["EApply"
+      --                         -- ,   ["EVar", "blank"] : Expr
+      --                         ,   ["EApply"
+      --                             ,   ["EVar", "hpsDispatch"] : Expr
+      --                             ,   _ : Expr
+      --                             ] : Expr
+      --                         -- ,   ["EList", methods : List Expr, []] : Expr
+      --                         ,   ["EList", [] : List Expr, []] : Expr
+      --                         ] : Expr
+      --                     ] : Expr
+      --                 ] : Expr
+      --             ] : Expr
+      --         -- ] |=> [mkName : Str, stateName : Str, methods : List Expr] : { [Str, Str, (List Expr)] };
+      --         ] |=> ["", "", []] : { [Str, Str, (List Expr)] };
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+      --         ["EApply"
+      --         ,   ["EVar", "annotate_HandlerMk"] : Expr
+      --         ,   ["EApply"
+      --             ,   ["EVar", "rec"] : Expr
+      --             -- ,   ["EVar", "blank"] : Expr
+      --             ,   ["ELambda"
+      --                 -- ,   ["EVar", "blank"] : Expr
+      --                 ,   ["EType", ["EVar", mkName : Str], _ : Expr] : Expr
+      --                 -- ,   ["EType", ["EVar", mkName : Str], ["EVar", "blank"] : Expr] : Expr
+      --                 -- ,   ["EVar", "blank"] : Expr
+      --                 ,   ["ELambda"
+      --                     ,   ["EVar", stateName : Str] : Expr
+      --                     -- ,   ["EVar", "blank"] : Expr
+      --                     ,   ["EApply"
+      --                         -- ,   ["EVar", "blank"] : Expr
+      --                         ,   ["EApply"
+      --                             ,   ["EVar", "hpsDispatch"] : Expr
+      --                             ,   ["EVar", "blank"] : Expr
+      --                             ] : Expr
+      --                         ,   ["EList", [] : List Expr, []] : Expr
+      --                         ] : Expr
+      --                     ] : Expr
+      --                 ] : Expr
+      --             ] : Expr
+      --         ] |=> ["", "", []] : { [Str, Str, (List Expr)] };
+
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+      --         ["EApply"
+      --         ,   ["EVar", "a"] : Expr
+      --         ,   ["EApply"
+      --             ,   ["EVar", "b"] : Expr
+      --             ,   ["EApply"
+      --                 ,   ["EVar", "c"] : Expr
+      --                 ,   ["EApply"
+      --                     ,   ["EVar", "d" : Str] : Expr
+      --                     ,   ["EApply"
+      --                         ,   ["EVar", "e"] : Expr
+      --                         ,   _ : Expr
+      --                         ] : Expr
+      --                     ] : Expr
+      --                 ] : Expr
+      --             ] : Expr
+      --         ] |=> ["", "", []] : { [Str, Str, (List Expr)] };
+
+      let pipeFwd : { A @ Any -> F @ { A -> Any } -> F A } =
+          (a : A @ Any) -> (f : F @ { A -> Any }) ->
+          f a;
+
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+      --                 ["EApply", aFun, aArg] |->
+      --         aFun |> ["EVar", "a"] |-> 
+      --         aArg |> ["EApply", bFun, bArg] |->
+      --         bFun |> ["EVar", "b"] |-> 
+      --         bArg |> ["EApply", cFun, cArg] |->
+      --         cFun |> ["EVar", "c"] |-> 
+      --         cArg |> ["EApply", dFun, dArg] |->
+      --         dFun |> ["EVar", "d"] |-> 
+      --         dArg |> ["EApply", eFun, eArg] |->
+      --         eFun |> ["EVar", "e"] |-> 
+      --         eArg |> _ |=>
+      --         ["", "", []] : { [Str, Str, (List Expr)] };
+
+      let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+                              ["EApply", aFun, aArg] |->
+              pipeFwd aFun <| ["EVar", "a"]          |-> 
+              pipeFwd aArg <| ["EApply", bFun, bArg] |->
+              pipeFwd bFun <| ["EVar", "b"]          |-> 
+              pipeFwd bArg <| ["EApply", cFun, cArg] |->
+              pipeFwd cFun <| ["EVar", "c"]          |-> 
+              pipeFwd cArg <| ["EApply", dFun, dArg] |->
+              pipeFwd dFun <| ["EVar", "d"]          |-> 
+              pipeFwd dArg <| ["EApply", eFun, eArg] |->
+              pipeFwd eFun <| ["EVar", "e"]          |-> 
+              pipeFwd eArg <| _                      |=>
+              ["", "", []] : { [Str, Str, (List Expr)] };
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+      --                 ["EApply", aFun, aArg] |->
+      --         aFun |> ( (["EVar", "a"] : Expr) |-> 
+      --         aArg |> ( _ |=>
+      --         ["", "", []] : { [Str, Str, (List Expr)] } )) ;
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+      --         ["EApply", aFun, aArg] |->
+      --         pipeFwd aFun <| (["EVar", "a"] : Expr) |-> 
+      --         pipeFwd aArg <| _ |=>
+      --         ["", "", []] : { [Str, Str, (List Expr)] };
+
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+      --         ["EApply", aFun, aArg] |->
+      --         -- let g : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } = ( (a : Expr) |=> ["", "", []] );
+      --         -- let g = ( (a : Expr) |=> ["", "", []] );
+      --         -- let g = ( (a : Expr) |=> ["", "", []] );
+      --         -- g aArg;
+      --         aArg |> (_ |=> ["", "", []]);
+
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } = (
+      --                         ["EApply"
+      --                         ,   ["EVar", "e"] : Expr
+      --                         ,   _ : Expr
+      --                         ] : Expr
+      --             ) |=> ["", "", []] : { [Str, Str, (List Expr)] };
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } = (
+      --                         ["EApply"
+      --                         ,   ["EVar", "e"]
+      --                         ,   _
+      --                         ]
+      --             ) |=> ["", "", []];
+
+
+      -- let patMatchHandlerMk : { Expr -> (Maybe { [Str, Str, (List Expr)] }) } =
+      --         ["EVar", a : Str] |=> [a, a, []];
+
+
+        let pmhm1 = patMatchHandlerMk ["EVar", "a"];
+
+    """
+    ]
+  , ["type_check", "bidir"]
+  -- , ["type_check", "simple"]
+  -- , ["expect", "f1", "value", "[]"]
+  , ["expect", "pmhm1", "value", "[]"]
+  ]
+
+
+, [ ["name", "loop1"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let t1 = ->
+        loop1 ([nums : List Int, total : Int] ->
+            ifNil nums
+            [ -> break total
+            , [n ,, ns] -> continue [ns, total + n]
+            ]
+        ) [[1, 2, 3], 0];
+    """
+    ]
+  , ["expectValue", "t1[]", "6"]
+  ]  
+
+, [ ["name", "loop1b"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let loop1b : 
+          SelfT <| L -> {
+              F @ { (Domain (Codomain L)) -> ["break", Any] | ["continue", (Domain F)] } -> 
+              (Domain F) ->
+              (Hd (Tl { ["break", Any] & (Codomain F) }))
+          } =
+          (iterate : F @ { Void -> ["break", Any] | ["continue", (Domain F)] }) ->
+          (initVal : (Domain F)) ->
+          loop1 iterate initVal;
+
+      let t1 = ->
+          -- [[1, 2, 3], 0] : { [(List Int), Int] } -- TODO ? what precedence do we want between ":" and "|>" ?
+          [[1, 2, 3] : List Int, 0 : Int]
+          |> loop1b <|
+          [nums, total] ->
+          ifNil nums
+          [ -> break total
+          , [n ,, ns] -> continue [ns, total + n]
+          ];
+    """
+    ]
+  , ["expectValue", "t1[]", "6"]
+  ]  
+
+, [ ["name", "loop2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let t1 = ->
+        loop2 [[1, 2, 3] : List Int, 0 : Int] <|
+        [nums, total] ->
+        ifNil nums
+        [ -> break total
+        , [n ,, ns] -> continue [ns, total + n]
+        ];
+    """
+    ]
+  , ["expectValue", "t1[]", "6"]
+  ]  
+
+, [ ["name", "while1"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Maybe = (A: Type) -> { [] | [A] };
+
+      let while1 : SelfT <| W -> { F @ { (Domain (Codomain W)) -> (Maybe (Domain F)) } -> (Domain F) -> (Domain F) } =
+          (iterate : F @ { Void -> (Maybe (Domain F)) }) -> (initVal : (Domain F)) ->
+          initVal
+          |> loop1 <| 
+          (val: Domain F) ->
+          ifNil (iterate val)
+          [ [] -> break val
+          , [val2] -> continue val2
+          ];
+
+      let t1 = ->
+          let [_, result] =
+              [[1, 2, 3] : List Int, 0 : Int]
+              |> while1 <| 
+              [ [n ,, ns], total ] |=>
+              [ns, total + n];
+          result;
+
+    """
+    ]
+  , ["expectValue", "t1[]", "6"]
+  ]  
+
+, [ ["name", "while1b"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Maybe = (A: Type) -> { [] | [A] };
+
+      let loop1b : 
+          SelfT <| L -> {
+              F @ { (Domain (Codomain L)) -> ["break", Any] | ["continue", (Domain F)] } -> 
+              (Domain F) ->
+              (Hd (Tl { ["break", Any] & (Codomain F) }))
+          } =
+          (iterate : F @ { Void -> ["break", Any] | ["continue", (Domain F)] }) ->
+          (initVal : (Domain F)) ->
+          loop1 iterate initVal;
+
+      let while1b : SelfT <| W -> { F @ { (Domain (Codomain W)) -> (Maybe (Domain F)) } -> (Domain F) -> (Domain F) } =
+          (iterate : WF @ { Void -> (Maybe (Domain WF)) }) -> (initVal : Domain WF) ->
+          initVal
+          |> loop1b <| 
+          val ->
+          ifNil (iterate val)
+          [ [] -> break val
+          , [val2] -> continue val2
+          ];
+
+      let t2 = ->
+          let [_, result] =
+              [[1, 2, 3] : List Int, 0 : Int]
+              |> while1b <| 
+              [ [n ,, ns], total ] |=>
+              [ns, total + n];
+          result;
+
+      -- TODO ? flip the argument order for if/ifNil/etc too ? 
+      -- TODO ?   "if" is a primitive (unlike "match"), there's nothing to specialize away,
+      -- TODO ?   but it would make for more consistency
+      -- let while : Self <| W -> { F @ { (Domain (Codomain W)) -> (Maybe (Domain F)) } -> (Domain F) -> (Domain F) } =
+      --     iterate ->
+      --     loop <| val ->
+      --     iterate <|
+      --     ifNil
+      --     [ [] -> break val
+      --     , [val] -> continue val
+      --     ];
+
+    """
+    ]
+  , ["expectValue", "t2[]", "6"]
+  ]  
+
+, [ ["name", "while2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Maybe = (A: Type) -> { [] | [A] };
+
+      let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+          (initVal: A @ Any) -> iterate ->
+          loop1 ( (val: A) ->
+              ifNil (iterate val)
+              [ [] -> break val
+              , [val2] -> continue val2
+              ]
+          ) initVal;
+
+      let t1 = ->
+        let [_, result] =
+          while [[1, 2, 3] : List Int, 0 : Int] <| 
+            [ [n ,, ns], total ] |=>
+            [ns, total + n];
+            
+        result;
+    """
+    ]
+  , ["expectValue", "t1[]", "6"]
+  ]  
+
+
+, [ ["name", "count-up"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Maybe = (A: Type) -> { [] | [A] };
+
+      let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+          (initVal: A @ Any) -> iterate ->
+          loop1 ( (val: A) ->
+              ifNil (iterate val)
+              [ [] -> break val
+              , [val2] -> continue val2
+              ]
+          ) initVal;
+
+      let t1 = ->
+        let [_, result] =
+          while [5 : Int, [] : List Int] <| 
+            [ n, ns ] ->
+            if (n==0) 
+            [ -> []
+            , -> [ [ n - 1, [n ,, ns] ] ]
+            ];
+        result;
+    """
+    ]
+  , ["expectValue", "t1[]", "[1,2,3,4,5]"]
+  ]  
+
+, [ ["name", "reverse"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Maybe = (A: Type) -> { [] | [A] };
+
+      let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+          (initVal: A @ Any) -> iterate ->
+          loop1 ( (val: A) ->
+              ifNil (iterate val)
+              [ [] -> break val
+              , [val2] -> continue val2
+              ]
+          ) initVal;
+
+      let reverse : { A @ (List Any) -> (List (Elem A)) } =
+          (a : A @ (List Any)) -> 
+          let [_, result] = 
+              while [a : List (Elem A), [] : List (Elem A)] <|
+                  [ [x1 ,, xs], ys ] |=>
+                  [ xs, [x1 ,, ys] ];
+          result;
+
+      -- let reverse : { A @ (List (Elem A)) -> (List (Elem A)) } =
+      --     (a : A @ (List (Elem A))) -> 
+      --     let [_, result] = 
+      --         while [a : List (Elem A), [] : List (Elem A)] <|
+      --             [ [x1 ,, xs], ys ] |=>
+      --             [ xs, [x1 ,, ys] ];
+      --     result;
+
+      let t1 = ->
+        reverse [5,4,3,2,1];
+    """
+    ]
+  , ["expectValue", "t1[]", "[1,2,3,4,5]"]
+  ]  
+
+
+, [ ["name", "reverse-chars"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Maybe = (A: Type) -> { [] | [A] };
+
+      let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+          (initVal: A @ Any) -> iterate ->
+          loop1 ( (val: A) ->
+              ifNil (iterate val)
+              [ [] -> break val
+              , [val2] -> continue val2
+              ]
+          ) initVal;
+
+      let reverse : { A @ (List Any) -> (List (Elem A)) } =
+          (a : A @ (List Any)) -> 
+          let [_, result] = 
+              while [a : List (Elem A), [] : List (Elem A)] <|
+                  [ [x1 ,, xs], ys ] |=>
+                  [ xs, [x1 ,, ys] ];
+          result;
+
+      let t1 = ->
+        char_concat <| reverse ( ["a", "b", "c", "d", "e"] : List Char);
+    """
+    ]
+  , ["expectValue", "t1[]", "\"edcba\""]
+  ]  
+
+
+, [ ["name", "strCat"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let strCat = jsStrCat;
+
+      let t1 =
+        strCat ["a", "b", "c", "d", "e"];
+      let t2 = ->
+        strCat ["a", "b", "c", "d", "e"];
+    """
+    ]
+  , ["expectValue", "t1", "\"abcde\""]
+  , ["expectValue", "t2[]", "\"abcde\""]
+  ]  
+
+
+, [ ["name", "isDigit"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let isDigit = (a : Str) -> (strOrd a >= strOrd "0") && (strOrd a <= strOrd "9"); 
+      let t1 = isDigit "5";
+      let t2 = isDigit "five";
+      let t3 = -> isDigit "5";
+      let t4 = -> isDigit "five";
+    """
+    ]
+  , ["expectValue", "t1", "true"]
+  , ["expectValue", "t2", "false"]
+  , ["expectValue", "t3[]", "true"]
+  , ["expectValue", "t4[]", "false"]
+  ]  
+
+
+
+, [ ["name", "match"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+        -- let List = (A:Type) -> Fix ( (ListA: Type) -> unionT {[]} {[A,,ListA]} );
+        -- let List = list;
+
+        -- let MaybeFunc = (A:Type) -> (B:Type) -> (C:Type) -> { { B -> [C] } & { {A\B} -> [] } };
+        -- let MaybeFunc = (A:Type) -> (B:Type) -> (C:Type) -> intersectT { B -> [C] } { (relCompT A B) -> [] };
+
+        let strCat = jsStrCat;
+
+        -- let MatchBranch = (A:Type) -> { A -> (unionT {[Any]} {[]}) };
+        let MatchBranch = (A:Type) -> { A -> [] | [Any] };
+
+        -- let match = 
+        --     (val: V @ Any) -> 
+        --     fix ((match2: {MBL @ (List (MatchBranch V)) -> (Hd {(Elem MBL) V})})->
+        --     (cases: MBL @ (List (MatchBranch V))) ->
+        --         ifNil cases
+        --             [ [] -> error "no cases matched"
+        --             , ([c ,, cs] : List (Elem MBL)) -> 
+        --                 ifNil (c val)
+        --                     [ [] -> match2 cs
+        --                     , ([b : Hd { (Elem MBL) V }]) -> b
+        --                     ]
+        --             ]
+        --     );
+            
+        let match = 
+            (val: V @ Any) -> 
+            fix ((match2: {MBL @ (List (MatchBranch V)) -> (Hd {(Elem MBL) V})})->
+            (cases: MBL @ (List (MatchBranch V))) ->
+                ifNil cases
+                    [ [] -> error "no cases matched"
+                    , ([c ,, cs] : List (Elem MBL)) -> 
+        --             , ([c ,, cs]) -> 
+                        ifNil (c val)
+                            [ [] -> match2 cs
+                            , ([b : Hd { (Elem MBL) V }]) -> b
+                            ]
+                    ]
+            );
+            
+
+        -- let MyNum = Union [ {["Int", Int]}, {["Str", Str]} ];
+        let MyNum = { ["Int", Int] | ["Str", Str] };
+
+        let f = (a:MyNum) -> 
+            match a
+                [ ["Int", x:Int] |=> x*x
+                , ["Str", y:Str] |=> strAdd y (strAdd "*" y)
+                ];
+
+        let x = f ["Int", 7];
+        let y = f ["Str", "Seven"];
+        let z = [x,y];
+    """
+    ]
+  , ["expect", "x", "value", "49", "type", "{ Int | Str }"]
+  , ["expect", "y", "value", "\"Seven*Seven\"", "type", "{ Int | Str }"]
+  , ["expect", "z", "value", "[49,\"Seven*Seven\"]", "type", "{ [{ Int | Str }, { Int | Str }] }"]
+  -- , ["type_check", "simple"]
+  --, ["type_check", "none"]
+  ]
+
+
+, [ ["name", "matchLoop"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+        -- let List = (A:Type) -> Fix ( (ListA: Type) -> unionT {[]} {[A,,ListA]} );
+        -- let List = list;
+        let strCat = jsStrCat;
+
+        -- let MatchBranch = (A:Type) -> { A -> (unionT {[Any]} {[]}) };
+        let MatchBranch = (A:Type) -> { A -> [Any] | [] };
+
+        let match = 
+            (val: V@Any) -> 
+            (cases: MBL@(List (MatchBranch V))) ->
+                loop1 
+                    ( (cases2: List (Elem MBL)) ->
+                        ifNil cases2
+                            [ [] -> error "no cases matched"
+                            , ([c: Elem MBL,,cs: List (Elem MBL)]) ->
+                                ifNil (c val)
+                                    [ [] -> continue cs
+                                    , ([b: Hd {(Elem MBL) V}]) -> break b
+                                    ]
+                            ]
+                    )
+                    cases;
+
+
+        -- let MyNum = Union [ {["Int", Int]}, {["Str", Str]} ];
+        let MyNum = { ["Int", Int] | ["Str", Str] };
+
+        let f = (a:MyNum) -> 
+            match a
+                [ ["Int", x:Int] |=> x*x
+                , ["Str", y:Str] |=> strCat [y, "*", y]
+                ];
+
+        let x = f ["Int", 7];
+        let y = f ["Str", "Seven"];
+        let z = [x,y];
+    """
+    ]
+  , ["expect", "x", "value", "49", "type", "{ Int | Str }"]
+  , ["expect", "y", "value", "\"Seven*Seven\""]
+  , ["expect", "z", "value", "[49,\"Seven*Seven\"]"]
+  -- , ["type_check", "simple"]
+  --, ["type_check", "none"]
+  ]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+, [ ["name", "inverse-apply"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+       let F = { Int -> Str };
+       let G = { Str -> Int };
+       -- let H = intersectT F G;
+       let H = { F & G };
+
+       let FInt = { F Int };
+       let GInt = { G Int };
+       let HInt = { H Int };
+ 
+       let FStr = { F Str };
+       let GStr = { G Str };
+       let HStr = { H Str };
+ 
+       -- let F1 = Inverse F;
+       -- let G1 = Inverse G;
+       -- let H1 = Inverse H;
+       -- 
+       -- let F1Int = { F1 Int };
+       -- let G1Int = { G1 Int };
+       -- let H1Int = { H1 Int };
+       -- 
+       -- let F1Str = { F1 Str };
+       -- let G1Str = { G1 Str };
+       -- let H1Str = { H1 Str };
+
+       -- let F1Int = { F ~<| Int };
+       -- let G1Int = { G ~<| Int };
+       -- let H1Int = { H ~<| Int };
+       -- 
+       -- let F1Str = { F ~<| Str };
+       -- let G1Str = { G ~<| Str };
+       -- let H1Str = { H ~<| Str };
+
+       let F1Int = InverseApply F Int;
+       let G1Int = InverseApply G Int;
+       let H1Int = InverseApply H Int;
+  
+       let F1Str = InverseApply F Str;
+       let G1Str = InverseApply G Str;
+       let H1Str = InverseApply H Str;
+
+       
+    """
+    ]
+
+  -- , ["expect", "FInt", "value", "Str"]
+  -- , ["expect", "GStr", "value", "Int"]
+  -- , ["expect", "HInt", "value", "Str"]
+  -- , ["expect", "HStr", "value", "Int"]
+  -- , ["expect", "F1Str", "value", "Int"]
+  -- , ["expect", "G1Int", "value", "Str"]
+  -- , ["expect", "H1Int", "value", "Str"]
+  -- , ["expect", "H1Str", "value", "Int"]
+
+  , ["expectTerm", "FInt", "Str"]
+  , ["expectTerm", "GStr", "Int"]
+  , ["expectTerm", "HInt", "Str"]
+  , ["expectTerm", "HStr", "Int"]
+  , ["expectTerm", "F1Str", "Int"]
+  , ["expectTerm", "G1Int", "Str"]
+  , ["expectTerm", "H1Int", "Str"]
+  , ["expectTerm", "H1Str", "Int"]
+
+  ]
+
+
+, [ ["name", "match2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+        let List1 = (A:Type) -> {[A,,(List A)]};
+        -- let MaybeFunc = (A:Type) -> (B:Type) -> (C:Type) -> { { B -> [C] } & { {A\B} -> [] } };
+        -- let MaybeFunc = (A:Type) -> (B:Type) -> (C:Type) -> intersectT { B -> [C] } { (relCompT A B) -> [] };
+        let strCat = jsStrCat;
+
+
+        -- let MatchBranch = (A:Type) -> { A -> (unionT {[Any]} {[]}) };
+        let MatchBranch = (A:Type) -> { A -> [Any] | [] };
+        
+        -- TODO define match branches such that the last one must take 
+        -- TODO   whatever remains of the V type after the preceeding rules have failed
+
+        -- A type of (MatchBranchList A) is intended to contain a list of maybe-funcions,
+        --   where the first can be called with A, and each subsequent branch can be called
+        --   with whatever remains of A after the earlier branches each had their chance to handle it.
+        -- The matching must be exhaustive, so the last branch must match unconditionally.
+        -- Not sure how best to write this type.
+        -- Infinite unfolding is a risk, it might be best to prevent the infinite unfolding 
+        --   the same way as will be done for general terms when eager specialization is implemented.
+        -- For now, using this impoverished version of MatchBranchList
+        let MatchBranchList = (V:Type) -> {[(MatchBranch V),,(List (MatchBranch V))]};
+        
+        -- let MatchBranchList = Fix ((MBL:Type) -> (A:Type) -> Self ( (B:Type) -> { [ A -> [Any] ] | [MatchBranch A,,(MBL {A \ {(Inverse (Hd B) [Any])}})]} ));
+        -- let MatchBranchList = Fix ((MBL:Type) -> (A:Type) -> Self ( (B:Type) -> { [ A -> [Any] ] | [MatchBranch A,,(MBL {A & {(Inverse (Hd B) [])}})]} ));
+        -- let MatchBranchList = Fix ((MBL:{Type->Type}) -> (A:Type) -> Self ( (B:Type) -> 
+        --     unionT { [ A -> [Any] ]} {[MatchBranch A,,(MBL (intersectT A {(Inverse (Hd B)) []}))]}));
+        -- let MatchBranchList = fix ((MBL:{Type->Type}) -> (A:Type) -> Self ( (B:Type) -> 
+        --     unionT { [ A -> [Any] ] } {[MatchBranch A,,(seq (Hd B) MBL (intersectT A {(Inverse (Hd B)) []}))]}));
+
+        let match = 
+            (val: V@Any) -> 
+            fix ((match2: {[(MatchBranch V),,(List (MatchBranch V))]->Any}) ->
+            ([cas: MatchBranch V,,cases: List (MatchBranch V)]) ->
+                ifNil cases
+                    [ [] -> ifNil (cas val) 
+                              [ [] -> error "last case must match"
+                              , [a] -> a
+                              ]
+                    , (cases2: List1 (MatchBranch V)) -> 
+                      ifNil (cas val)
+                        [ [] -> match2 cases2
+                        , [b] -> b
+                        ]
+                    ]
+            );
+
+        let matchB = 
+            (val: V@Any) -> 
+            fix ((matchB2: {(MatchBranchList V)->Any}) ->
+            ([cas: MatchBranch V,,cases: List (MatchBranch V)]) ->
+                ifNil cases
+                    [ [] -> ifNil (cas val) 
+                              [ [] -> error "last case must match"
+                              , [a] -> a
+                              ]
+                    , (cases2: List1 (MatchBranch V)) -> 
+                      ifNil (cas val)
+                        [ [] -> matchB2 cases2
+                        , [b] -> b
+                        ]
+                    ]
+            );
+
+        -- let MyNum = Union [ {["Int", Int]}, {["Str", Str]} ];
+        let MyNum = { ["Int", Int] | ["Str", Str] };
+
+        let f = (a:MyNum) -> 
+            match a
+                [ ["Int", x:Int] |=> x*x
+                , ["Str", y:Str] |=> strCat [y, "*", y]
+                ];
+
+        let x = f ["Int", 7];
+        let y = f ["Str", "Seven"];
+        let z = [x,y];
+
+        -- let testX = -> x;
+        -- let testX = -> f ["Int", 7];
+
+        let fB = (a : MyNum) -> 
+            matchB a
+                [ ["Int", x2 : Int] |=> x2 * x2
+                , ["Str", y2 : Str] |=> strCat [y2, "*", y2]
+                ];
+
+        let xB = fB ["Int", 7];
+        let yB = fB ["Str", "Seven"];
+        let zB = [xB, yB];
+    """
+    ]
+  , ["expect", "x", "value", "49"]
+  , ["expect", "y", "value", "\"Seven*Seven\""]
+  , ["expect", "z", "value", "[49,\"Seven*Seven\"]"]
+  , ["expect", "xB", "value", "49"]
+  , ["expect", "yB", "value", "\"Seven*Seven\""]
+  , ["expect", "zB", "value", "[49,\"Seven*Seven\"]"]
+  -- , ["type_check", "simple"]
+  --, ["type_check", "none"]
+  ]
+
+
+
+
+-- , [ ["name", "fix0"]
+--   , ["language", "ferrum/0.1"]
+--   , ["decls",
+--     """
+--         -- let fix0 = 
+--         --     f -> 
+--         --     (x -> f (y -> x x y)) 
+--         --     (x -> f (y -> x x y));
+-- 
+--         -- let fix0 = 
+--         --     (f : F @ { { Any -> Void } -> (Dom F) }) -> 
+--         --     ( (x : F) -> f ( (y : Dom (Cod F)) -> x x y)) 
+--         --     ( (x : F) -> f ( (y : Dom (Cod F)) -> x x y));
+-- 
+--         let fix0 = 
+--             (f : F @ { { Any -> Void } -> (Dom F) }) -> 
+--             ( (x : X @ { X -> { (Dom (Dom F)) -> (Dom F) } -> (Dom F) }) -> f ( (y : Dom (Dom F)) -> x x y) ) 
+--             ( (x : X @ { X -> { (Dom (Dom F)) -> (Dom F) } -> (Dom F) }) -> f ( (y : Dom (Dom F)) -> x x y) );
+-- 
+--         let f0 : { { (List Int) -> Int } -> { (List Int) -> Int } } =
+--             (f1: { (List Int) -> Int }) -> 
+--             (x : List Int) -> 
+--             ifNil x 
+--             [ -> 1
+--             , [x0: Int ,, xs: List Int] -> 
+--                 x0 * (f1 xs)
+--             ];
+-- 
+--         let f = fix0 f0;
+--         let x = f [1,2,3,4];
+--         let y = f [];
+--     """
+--     ]
+--   , ["expect", "x", "value", "24"]
+--   , ["expect", "y", "value", "1"]
+--   ]
+
+, [ ["name", "fix"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+       let List2 = 
+          (A : Type) -> 
+          Fix <| (ListA : Type) -> { [] | [A ,, ListA] };
+
+       let f = 
+          fix <| 
+          (f : { (List2 Int) -> Int }) -> (x : List2 Int) -> 
+          ifNil x 
+          [ -> 1
+          , [x0 : Int ,, xs : List2 Int] -> x0 * (f xs)
+          ];
+
+       let x = f [1,2,3,4];
+       let y = f [];
+
+    """
+    ]
+  , ["expect", "x", "value", "24"]
+  , ["expect", "y", "value", "1"]
+  ]
+
+
+, [ ["name", "fix-infer"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+       let List2 = 
+          (A : Type) -> 
+          Fix <| (ListA : Type) -> { [] | [A ,, ListA] };
+
+       let f = 
+          fix <| 
+          (f : { (List2 Int) -> Int }) -> x -> 
+          ifNil x 
+          [ -> 1
+          , [x0 ,, xs] -> x0 * (f xs)
+          ];
+
+       let x = f [1,2,3,4];
+       let y = f [];
+
+    """
+    ]
+  , ["expect", "x", "value", "24"]
+  , ["expect", "y", "value", "1"]
+  , ["type_check", "bidir"]
+  ]
+
+, [ ["name", "type-error-fix"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+       let List2 = 
+          (A : Type) -> 
+          Fix <| (ListA : Type) -> 
+          { [] | [A ,, ListA] };
+
+       let f = 
+          fix <| 
+          (f : { (List2 Int) -> Int }) -> 
+          (x : {[Int ,, (List2 Int)] }) -> 
+          ifNil x 
+          [ -> 1
+          , [x0 : Int ,, xs : List2 Int] -> x0 * (f xs)
+          ];
+
+    """
+    ]
+  , ["expected_type_errors", 1]  
+  ]
+
+
+, [ ["name", "showAst"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+        -- let List = list;
+        let strCat = jsStrCat;
+
+        let MatchBranch = (A:Type) -> { A -> [Any] | [] };
+
+        let match = 
+            (val: V@Any) -> 
+            (cases: MBL@(List (MatchBranch V))) ->
+                loop1 ( (cases2: List (Elem MBL)) ->
+                    ifNil cases2
+                    [ [] -> error "no cases matched"
+                    , ([c: Elem MBL,,cs: List (Elem MBL)]) ->
+                        ifNil (c val)
+                            [ [] -> continue cs
+                            , ([b: Hd {(Elem MBL) V}]) -> break b
+                            ]
+                    ]
+                ) cases;
+
+        let Expr = Fix ( (Expr: Type)->
+            { ["EVar",     Str          ]
+            | ["ELambda",  Str, Expr    ]
+            | ["EApply",   Expr, Expr   ]
+            } );
+
+        -- let showExpr = fix ( (se: {Expr->Str})-> (expr: Expr)->
+        --     match expr
+        --     [ ["EVar",    v: Str                ] |=> v
+        --     , ["ELambda", arg: Str, body: Expr  ] |=> "("^ arg ^"->"^ se body ^")"
+        --     , ["EApply",  func: Expr, arg: Expr ] |=> "("^ se func ^" "^ se arg ^")"
+        --     ] );
+
+        let showExpr = fix ( (se: {Expr->Str})-> (expr: Expr)->
+            match expr
+            [ ["EVar",    v        ] |=> v
+            , ["ELambda", arg, body] |=> strCat ["(", arg, "->", se body, ")"]
+            , ["EApply",  func, arg] |=> strCat ["(", se func, " ", se arg, ")"]
+            ] );
+
+        let exp1 = ["EApply", ["ELambda", "a", ["EVar", "a"]], ["EVar", "b"]];
+        let txt1 = showExpr exp1;
+    """
+    ]
+  , ["expect", "exp1", "value", 
+    """
+     ["EApply",["ELambda","a",["EVar","a"]],["EVar","b"]]
+    """
+    ]
+  , ["expect", "txt1", "value", 
+    """
+     "((a->a) b)"
+    """
+    ]
+  ]
+
+
+
+, [ ["name", "matchForest"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+        -- let List = list;
+        let MatchBranch = (A:Type) -> { A -> [] | [Any] };
+
+        let match = 
+            (val: V@Any) -> 
+            (cases: MBL@(List (MatchBranch V))) ->
+                loop1 ( (cases2: List (Elem MBL)) ->
+                    ifNil cases2
+                    [ [] -> error "no cases matched"
+                    , ([c: Elem MBL,,cs: List (Elem MBL)]) ->
+                        ifNil (c val)
+                            [ [] -> continue cs
+                            , ([b: Hd {(Elem MBL) V}]) -> break b
+                            ]
+                    ]
+                ) cases;
+
+
+        let Forest = Fix ( (F:Type) -> {[Str, (List F), (List Str)]} );
+
+        -- let Tag = { "A" | "B" | "C" };
+        -- let Forest = Fix ( (F:Type) -> {[Str, (List F), (List Str)] | []} );
+        -- let Forest = Fix ( (F:Type) -> {[Str, [], (List Str)]} );
+        -- let Forest = Fix ( (F:Type) -> {[Tag, [], (List Str)]} );
+        -- let Forest = { ["A", [], (List Str)] | ["B", [], (List Str)] | ["C", [], (List Str)] };
+
+        let forest1: Forest = ["A", [], []];
+
+        let t1 = 
+            match forest1
+            [ ["A", _, _] |=> "B"
+            , ["B", _, _] |=> "C"
+            ];
+    """
+    ]
+  , ["expect", "t1", "value", 
+    """
+     "B"
+    """
+    ]
+
+  ]
+
+
+
+-- , [ ["name", "mutuallyRecursiveTypes1"]
+--   , ["language", "ferrum/0.1"]
+--   , ["type_check", "bidir"]
+--   , ["decls",
+--     """
+--         let Rec = Fix;
+--         let Type = type;
+--         let Hd = hdT;
+--         let Tl = tlT;
+--         let EvenOddList = Rec ( (EOL:Type) ->
+--             let EvenList = Hd EOL;
+--             let OddList = Hd (Tl EOL);
+--             let EvenList1 = { [] | [Int,,OddList] };
+--             let OddList1 = { [Int,,EvenList] };
+--             { [EvenList, OddList] }
+--         );
+--         let EvenList = Hd EvenOddList;
+--         let OddList = Hd (Tl EvenOddList);
+--     """
+--     ]
+--   , ["expect", "[1]:OddList", "value", "[1]"]
+--   ]
+
+
+, [ ["name", "mutuallyRecursiveTypes2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+        let Rec = Fix;
+        -- let Type = type;
+        -- let Hd = hdT;
+        -- let Tl = tlT;
+        let EvenList = Rec ( (EL:Type) ->
+            let OddList = { [Int,,EL] };
+            let EvenList = { [] | [Int,,OddList] };
+            EvenList
+        );
+        let OddList = Tl EvenList;
+    """
+    ]
+  , ["expect", "[1]:OddList", "value", "[1]"]
+  ]
+
+
+, [ ["name", "CPS"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+       -- let Type = type;
+       -- let List = list;
+       -- let Elem = Elem;
+       let length: { (List Any) -> Int} = l -> error "TODO";
+       let append: { A@(List Any) -> (List (Elem A)) -> (List (Elem A)) } = a -> b -> error "TODO";
+       let listIndex : { A@(List Any) -> Int -> (Elem A) } = a -> pos -> error "TODO";
+       let listUpdate : { A@(List Any) -> Int -> Str -> (List (Elem A)) } = a -> pos -> value -> error "TODO";
+
+       let Addr = Int;
+       let State = List Str;
+       let StateK = (A:Type) -> { A -> State -> Any };
+
+
+       let alloc = (value: Str) -> (k: K@(StateK Int)) -> (state: State) ->
+          k (length state) (append state [value]);
+
+       let deref = (addr: Int) -> (k: K@(StateK Str)) -> (state: State) ->
+          k (listIndex state addr) state;
+
+       let update = (addr: Int) -> (value: Str) -> (k: K@(StateK {[]})) -> (state: State) ->
+          k [] (listUpdate state addr value);
+
+       let t0 : { State -> Int }= 
+          alloc "Apple" ( appleAddr ->
+          s -> appleAddr );
+
+       let t1 : { State -> Int }= 
+          alloc "Apple" ( appleAddr ->
+          alloc "Banana" ( bananaAddr ->
+          deref appleAddr ( appleStr ->
+          s -> appleAddr )));
+
+       let t2 : { State -> [Str, Str] }= 
+          alloc "Apple" ( appleAddr ->
+          alloc "Banana" ( bananaAddr -> 
+          deref appleAddr ( appleStr ->
+          deref bananaAddr ( bananaStr -> 
+          s -> [appleStr, bananaStr]  ))));
+
+       let dup : { Int -> K@(StateK Int) -> State -> { K Int State } }
+          = (addr: Int) -> (k: K@(StateK Int)) ->
+          deref addr ( value ->
+          alloc value ( newAddr ->
+          k newAddr ));
+
+
+        let MatchBranch = (A:Type) -> { A -> [Any] | [] };
+
+        let match = 
+            (val: V@Any) -> 
+            (cases: MBL@(List (MatchBranch V))) ->
+                loop1 
+                    ( (cases2: List (Elem MBL)) ->
+                        ifNil cases2
+                            [ [] -> error "no cases matched"
+                            , ([c: Elem MBL,,cs: List (Elem MBL)]) ->
+                                ifNil (c val)
+                                    [ [] -> continue cs
+                                    , ([b: Hd {(Elem MBL) V}]) -> break b
+                                    ]
+                            ]
+                    )
+                    cases;
+
+
+
+
+
+
+        -- let LookKBody = Self (LB -> {Void->{Void->Void->Any}->??->{["break", Any] | ["continue", (Domain LB)]}});
+        -- let loopK : { LB@LoopKBody -> LS@(Domain LB) -> K@{Void->Void->Any} -> (Domain (Domain K)) ->(Tl {LB & ["break", Any]})}
+        --     = loopBody -> loopState -> k -> kState ->
+        --     let [kArg2, kState2] = 
+        --         loop1 ( [loopState, kState]
+        --             match (loopBody loopState (kArg->kArg) kState)
+        --             [ ["break", [kArg, kState]] |=> break [kArg, kState]
+        --             , ["continue", [loopState, kState]] |=> continue [loopState, kState]
+        --             ]
+        --         ) [loopState, kArg];
+        --     k kArg kState;
+
+        let LoopState = Int;
+        let LoopResult = Int;
+        let KState = State;
+        let KResult = Int;
+        let LoopKBodyResult = { ["break",LoopResult] | ["continue",LoopState] };
+        let LoopKBody = { LoopState -> { LoopKBodyResult -> KState -> [ LoopKBodyResult, KState ] } -> KState -> [ LoopKBodyResult, KState ] };
+        let loopK : { LoopKBody -> LoopState -> { LoopResult -> KState -> KResult } -> KState -> KResult }
+            = loopBody -> loopState0 -> k -> kState0 ->
+            let [loopResult, kState2] = 
+                loop1 ( [loopState: LoopState, kState: KState] ->
+                    match (loopBody loopState (loopBodyResult->kState3->[loopBodyResult, kState3]) kState)
+                    [ [ ["break",loopResult], kState2 ] |=> break [loopResult, kState2]
+                    , [ ["continue",loopState2], kState2 ] |=> continue [loopState2, kState2]
+                    ]
+                ) [loopState0, kState0];
+            k loopResult kState2;
+
+       let tl1 : { Addr -> Addr -> State -> Int } 
+          = a -> b -> state ->
+          loopK ( (count: Int) -> k -> 
+              deref a ( aStr -> 
+              if (strLen aStr > 10)
+              [ -> k (break count)
+              , -> 
+                  deref b ( bStr ->
+                  let aStr2 = strAdd aStr bStr;
+                  update a aStr2 ( [] ->
+                  k (continue (count+1)) ) )
+              ] )
+          ) 0 (result -> state2 -> result) state;
+          
+        let tl2 = [] -> tl1 0 1 ["ABC", "<xyz>"];
+
+
+    """
+    ]
+  ]
+
+
+, [ ["name", "CPS2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+       -- let Type = type;
+       -- let List = list;
+       -- let Elem = elemT;
+       -- let Hd = hdT;
+       -- let Tl = tlT;
+       let length: { (List Any) -> Int} 
+          = l -> 
+          loop1 ( [elems: List Any, count: Int] ->
+              ifNil elems
+              [ [] -> break count
+              , [l1,,ls] -> continue [ls, count+1] 
+              ]
+           ) [l, 0];
+       let reverseOnto: { A@(List Any) -> (List (Elem A)) -> (List (Elem A)) } 
+           = (a0: A@(List Any)) -> b0 ->
+           loop1 ( [a: List (Elem A), b: List (Elem A)] -> 
+              ifNil a
+              [ [] -> break b
+              , [a1,,as] -> continue [as, [a1,,b]]
+              ]
+           ) [a0, b0];
+       let reverse: { A@(List Any) -> (List (Elem A)) } 
+           = (a: A@(List Any)) ->
+           reverseOnto a [];
+       let append: { A@(List Any) -> (List (Elem A)) -> (List (Elem A)) } 
+           = (a0: A@(List Any)) -> b0 ->
+           loop1 ( [a: List (Elem A), b: List (Elem A)] -> 
+              ifNil a
+              [ [] -> break b
+              , [a1,,as] -> continue [as, [a1,,b]]
+              ]
+           ) [reverse a0, b0];
+       let listIndex : { A@(List Any) -> Int -> (Elem A) } 
+           = (a0: A@(List Any)) -> pos0 -> 
+           loop1 ( [a: List (Elem A), pos: Int] ->
+               ifNil a
+               [ [] -> error ["list index out of range", pos]
+               , [a1,,as] -> 
+                   if (pos==0)
+                   [ -> break a1
+                   , -> continue [as, pos-1]
+                   ]
+               ]
+           ) [a0, pos0];
+       let listUpdate : { A@(List Any) -> Int -> (Elem A) -> (List (Elem A)) } 
+           = (a0: A@(List Any)) -> pos0 -> value ->
+           loop1 ( [a: List (Elem A), b: List (Elem A), pos: Int] -> 
+           ifNil a
+           [ [] -> error ["listUpdate out of range", pos]
+           , [a1,,as] ->
+               if (pos==0)
+               [ -> break (reverseOnto b [value,,as])
+               , -> continue [as, [a1,,b], pos-1]
+               ]
+           ]) [a0, [], pos0];
+
+
+        let MatchBranch = (A:Type) -> { A -> [Any] | [] };
+
+        let match1 = 
+            (val: V@Any) -> 
+            (cases: MBL@(List (MatchBranch V))) ->
+                loop1 
+                    ( (cases2: List (Elem MBL)) ->
+                        ifNil cases2
+                            [ [] -> error "no cases matched"
+                            , ([c: Elem MBL,,cs: List (Elem MBL)]) ->
+                                ifNil (c val)
+                                    [ [] -> continue cs
+                                    , ([b: Hd {(Elem MBL) V}]) -> break b
+                                    ]
+                            ]
+                    )
+                    cases;
+
+        -- let match : { V@Any -> MBL@(List (MatchBranch V)) -> (Hd {(Elem MBL) V}) }
+        let match : { V@Any -> MBL@(List (MatchBranch V)) -> (Hd (Codomain (Elem MBL))) }
+            = 
+            (val: V@Any) -> 
+            (cases: MBL@(List (MatchBranch V))) ->
+                loop1 
+                    ( (cases2: List (Elem MBL)) ->
+                        ifNil cases2
+                            [ [] -> error "no cases matched"
+                            , ([c: Elem MBL,,cs: List (Elem MBL)]) ->
+                                ifNil (c val)
+                                    [ [] -> continue cs
+                                    , ([b: Hd {(Elem MBL) V}]) -> break b
+                                    ]
+                            ]
+                    )
+                    cases;
+
+       let CPS -- : { Type -> Type -> Type }
+         = (Arg: Type) -> (State: Type) -> { K@{ Arg -> State -> Any } -> State -> K Arg State };
+
+
+
+       let Addr = {Int};
+       let Node = {[Str, (List Addr)]};
+       let Heap = List {[Str, (List Addr)]};
+       let HeapK = (A:Type) -> { A -> Heap -> Any };
+
+       let alloc 
+          -- : { Node -> K@(HeapK Int) -> Heap -> K Int Heap }
+          : { Node -> (CPS Int Heap) }
+          = (node: Node) -> (k: K@(HeapK Int)) -> (heap: Heap) ->
+          k (length heap) (append heap [node]);
+
+       let deref = (addr: Int) -> (k: K@(HeapK Node)) -> (heap: Heap) ->
+          k (listIndex heap addr) heap;
+
+       let update = (addr: Addr) -> (node: Node) -> (k: K@(HeapK {[]})) -> (heap: Heap) ->
+          k [] (listUpdate heap addr node);
+
+       -- this unused code reveals a bug in the plumbing of codegen state,
+       -- multiple freshVars get created with the same name.
+       -- so shoving the problem under the carpet for now, by commenting it out 
+       -- let t0 : { Heap -> Addr } = 
+       --    alloc ["Apple",[]] ( appleAddr ->
+       --    s -> appleAddr );
+       -- 
+       -- let t1 : { Heap -> Addr }= 
+       --    alloc ["Apple",[]] ( appleAddr ->
+       --    alloc ["Banana",[]] ( bananaAddr ->
+       --    deref appleAddr ( appleStr ->
+       --    s -> appleAddr )));
+       -- 
+       -- let t2 : { Heap -> [Str, Str] }= 
+       --    alloc ["Apple",[]] ( appleAddr ->
+       --    alloc ["Banana",[]] ( bananaAddr -> 
+       --    deref appleAddr ( [appleStr, appleChildren] ->
+       --    deref bananaAddr ( [bananaStr, bananaChildren] -> 
+       --    s -> [appleStr, bananaStr]  ))));
+
+       let dup : { Addr -> K@(HeapK Addr) -> Heap -> { K Addr Heap } }
+          = (addr: Addr) -> (k: K@(HeapK Addr)) ->
+          deref addr ( node ->
+          alloc node ( newAddr ->
+          k newAddr ));
+
+
+
+        let HeapLoopState = {[ (List Addr), Int ]};
+        let HeapLoopResult = Int;
+        let HeapLoopBodyResult = { ["break",,HeapLoopResult] | ["continue",,HeapLoopState] };
+        let HeapLoopBody = { HeapLoopState -> { HeapLoopBodyResult -> Heap -> [ HeapLoopBodyResult, Heap ] } -> Heap -> [ HeapLoopBodyResult, Heap ] };
+
+        let heapBreak = (a:A@Any) -> (heap: Heap) -> [["break",,a], heap];
+        let heapContinue = (a:A@Any) -> (heap: Heap) -> [["continue",,a], heap];
+
+        let heapLoop1 : { HeapLoopBody -> HeapLoopState -> K@{ HeapLoopResult -> Heap -> Any } -> Heap -> K HeapLoopResult Heap }
+            = loopBody -> loopState0 -> (k: K@{ HeapLoopResult -> Heap -> Any }) -> heap0 ->
+            let [loopResult, heap2] = 
+                loop1 ( [loopState: HeapLoopState, heap: Heap] ->
+                    match (loopBody loopState (loopBodyResult->heap2->[loopBodyResult, heap2]) heap)
+                    [ [ ["break",,loopResult], heap2 ] |=> break [loopResult, heap2]
+                    , [ ["continue",,loopState2], heap2 ] |=> continue [loopState2, heap2]
+                    ]
+                ) [loopState0, heap0];
+            k loopResult heap2;
+
+        -- let countNodes : { Addr -> K@(HeapK Int) -> Heap -> K Int Heap }
+        --     = addr -> 
+        --     heapLoop1 ( [addrs: List Addr, num: Int] -> k ->
+        --       match addrs
+        --       [ [] |=> k (break num)
+        --       , [addr1,,addrs] |=>
+        --             deref addr1 ( [label, edges] -> 
+        --             k (continue [append edges addrs, num+1]) )
+        --       ]
+        --     ) [[addr], 0];
+
+
+        -- -- let HeapLoopBody2 = { Void -> { HeapLoopBodyResult -> Heap -> [ HeapLoopBodyResult, Heap ] } -> Heap -> [ HeapLoopBodyResult, Heap ] };
+        -- -- let HeapLoopBody2 = { Void -> K@{ HeapLoopBodyResult -> Heap -> Any } -> Heap -> K HeapLoopBodyResult Heap };
+        -- let HeapLoopBody2 = { Void -> K@{ A@Any -> Heap -> [A, Heap] } -> Heap -> [(Domain K), Heap] };
+        -- let heapLoop : { HLB@HeapLoopBody2 -> (Domain HLB) -> K@{ HeapLoopResult -> Heap -> Any } -> Heap -> K HeapLoopResult Heap }
+        --     = (loopBody: HLB@HeapLoopBody2) -> (loopState: Domain HLB) -> (k: K@{ HeapLoopResult -> Heap -> Any }) -> heap ->
+        --     let [loopResult, heap2] = 
+        --         loop1 ( [loopState: Domain HLB, heap: Heap] ->
+        --             match (loopBody loopState ((loopBodyResult:R@HeapLoopBodyResult)->(heap:Heap)->[loopBodyResult, heap]) heap)
+        --             [ [ ["break",,loopResult], heap ] |=> break [loopResult, heap]
+        --             , [ ["continue",,loopState], heap ] |=> continue [loopState, heap]
+        --             ]
+        --         ) [loopState, heap];
+        --     k loopResult heap2;
+
+
+        -- let countNodes : { Addr -> K@(HeapK Int) -> Heap -> K Int Heap }
+        --     = addr -> 
+        --     heapLoop1 ( [addrs: List Addr, num: Int] -> (k: K@{ HeapLoopBodyResult -> Heap -> Any }) ->
+        --       match addrs
+        --       [ [] |=> k (break num)
+        --       , [addr1,,addrs] |=>
+        --             deref addr1 ( [label, edges] -> 
+        --             k (continue [append edges addrs, num+1]) )
+        --       ]
+        --     ) [[addr], 0];
+
+        -- let HeapLoopBodyResult = { ["break",,HeapLoopResult] | ["continue",,HeapLoopState] };
+        -- let HeapLoopBody2 = { HeapLoopState -> Heap -> [ HeapLoopBodyResult, Heap ] };
+        let HeapLoopBody2 = SelfT (HLB -> { HeapLoopState -> Heap -> [ ["break",,Any] | ["continue",,(Domain HLB)], Heap ] });
+        let heapLoop2 
+            : { HLB@{ Void -> Heap -> [ ["break",,Any] | ["continue",,(Domain HLB)], Heap ] } 
+              -> (Domain HLB) 
+              -> K@{ (Tl {(Hd (Codomain (Codomain HLB))) & ["break",,Any]}) -> Heap -> Any } 
+              -- -> K@{ (Tl (Hd {HLB (Domain HLB) Heap & [["break",,Any], Any]})) -> Heap -> Any } 
+              -> Heap 
+              -> (Codomain (Codomain K)) 
+              }
+            = (loopBody: HLB@{ Void -> Heap -> [ ["break",,Any] | ["continue",,(Domain HLB)], Heap ] }) 
+            -> (loopState0: Domain HLB) 
+            -> (k: K@{ (Tl {(Hd (Codomain (Codomain HLB))) & ["break",,Any]}) -> Heap -> Any }) 
+            -- -> (k: K@{ (Tl (Hd {HLB (Domain HLB) Heap & [["break",,Any], Any]})) -> Heap -> Any }) 
+            -> heap0 
+            ->
+            let [loopResult, heap2] = 
+                loop1 ( [loopState: Domain HLB, heap: Heap] ->
+                    -- match (loopBody loopState heap)
+                    -- [ [ ["break",,loopResult], heap ] |=> break [loopResult, heap]
+                    -- , [ ["continue",,loopState], heap ] |=> continue [loopState, heap]
+                    -- ]
+                    let [action, heap2] = loopBody loopState heap;
+                    match action
+                    [ ["break",,loopResult] |=> break [loopResult, heap]
+                    , ["continue",,loopState2] |=> continue [loopState2, heap]
+                    ]
+                ) [loopState0, heap0];
+            k loopResult heap2;
+
+        let countNodes : { Addr -> K@(HeapK Int) -> Heap -> (Codomain (Codomain K)) }
+            = addr -> 
+            heapLoop2 ( [addrs: List Addr, num: Int] ->
+                match addrs
+                [ [] |=> heapBreak num
+                , [addr1,,addrs2] |=>
+                      deref addr1 ( [label, edges] -> 
+                      -- heapContinue [append edges addrs2, num+1] ) 
+                      let addrs3 = append edges addrs2;
+                      -- let _ = trace ["addrs3", addrs3] 0;
+                      heapContinue [addrs3, num+1] ) 
+                ]
+            ) [[addr], 0];
+
+
+        let testHeap = 
+          [ ["A0", [1, 2] ]
+          , ["B1", [3] ]
+          , ["C2", [] ]
+          , ["D3", [] ]
+          , ["E4", [] ]
+          ];
+
+        let testCountNodes = ->
+            countNodes 0 ( num -> heap -> num ) testHeap;
+
+
+    """
+  ]
+  , ["expect", "testCountNodes []", "value", "4"]
+   
+  ]
+
+
+
+, [ ["name", "matchLookup"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+       -- let Type = type;
+       -- let List = list;
+       -- let Elem = elemT;
+       -- let Hd = hdT;
+       -- let Tl = tlT;
+
+       let MatchBranch = (A:Type) -> { A -> [Any] | [] };
+
+       let match1 = 
+           (val : V @ Any) -> 
+           (cases : MBL @ (List (MatchBranch V))) ->
+               loop1 
+                   ( (cases2 : List (Elem MBL)) ->
+                      let _ = trace cases2 0;
+                       ifNil cases2
+                           [ [] -> error "no cases matched"
+                           , ([c : Elem MBL,, cs : List (Elem MBL)]) ->
+                               ifNil (c val)
+                                   [ [] -> continue cs
+                                   , ([b : Hd {(Elem MBL) V}]) -> 
+                                      let _ = trace ["match ok", b] 0;
+                                      break b
+                                   ]
+                           ]
+                   )
+                   cases;
+       
+       let match2 : { V@Any -> MBL@(List (MatchBranch V)) -> (Hd {(Elem MBL) V}) }
+           = 
+           (val : V @ Any) -> 
+           (cases : MBL @ (List (MatchBranch V))) ->
+               loop1 
+                   ( (cases2 : List (Elem MBL)) ->
+                       ifNil cases2
+                           [ [] -> error "no cases matched"
+                           , ([c : Elem MBL,, cs : List (Elem MBL)]) ->
+                               ifNil (c val)
+                                   [ [] -> continue cs
+                                   , ([b : Hd {(Elem MBL) V}]) -> break b
+                                   ]
+                           ]
+                   )
+                   cases;
+       
+       let match3 : { V@Any -> MBL@(List (MatchBranch V)) -> (Hd (Codomain (Elem MBL))) }
+           = 
+           (val : V @ Any) -> 
+           (cases : MBL @ (List (MatchBranch V))) ->
+               loop1 
+                   ( (cases2 : List (Elem MBL)) ->
+                       ifNil cases2
+                           [ [] -> error "no cases matched"
+                           , ([c : Elem MBL,, cs : List (Elem MBL)]) ->
+                               ifNil (c val)
+                                   [ [] -> continue cs
+                                   , ([b : Hd {(Elem MBL) V}]) -> break b
+                                   ]
+                           ]
+                   )
+                   cases;
+       
+        
+       let lookup1 = (x : Str) -> (l : L @ (List { [Str, Any] })) ->
+           l |> 
+           loop1 <| ( l2 : List (Elem L)) ->
+               ifNil l2
+               [ -> break []
+               , [elem ,, ls] ->
+                   let [key, val] = elem;
+                   if (key==x)
+                   [ -> break [val]
+                   , -> continue ls
+                   ]
+               ];
+
+       let lookup2 : { Any -> L @ (List {[Any, Any]}) -> [] | [(Hd (Tl (Elem L)))] }
+           = (x: Any) -> (l: L @ (List {[Any, Any]})) ->
+           loop1 ( ( l2: List (Elem L) ) ->
+               ifNil l2
+               [ [] -> break []
+               , [elem,,ls] ->
+                   let [key, val] = elem;
+                   if (key==x)
+                   [ _ -> break [val]
+                   , _ -> continue ls
+                   ]
+               ]
+           ) l;
+
+       -- let lookup3 : { Any -> L@(List {[Any, Any]}) -> [] | [(Hd (Tl (Elem L)))] }
+       --    = lookup1;
+
+       let match = match1;
+       let lookup = lookup1;
+
+       let lookupOrError : { Str -> L2@(List {[Str, Any]}) -> (Hd (Tl (Elem L2))) }
+           = x -> (l: L2@(List {[Str, Any]})) ->
+           match (lookup x l)
+           -- ifNil (lookup x l)
+           [ [] |=> castT <| error ["lookup failed"]
+           , [a] |=> a
+           ];
+           -- [ [a] |=> a
+           -- , [] |=> castT <| error ["lookup failed"]
+           -- ];
+
+        let testA = -> lookup "b" [["a", 1], ["b", 2], ["c", 3]];
+        let testB = -> 
+           let two = lookup "b" [["a", 1], ["b", 2], ["c", 3]];
+           -- let two = [2];
+           match (two)
+           [ [] |=> castT <| error ["lookup failed"]
+           , [a] |=> a
+           ];
+        let test1 = -> lookupOrError "b" [["a", 1], ["b", 2], ["c", 3]];
+        let test2 = -> lookup "b" [["a", 1], ["b", 2], ["c", 3]];
+        let test3 = -> match [7] [ [] |=> 11, [a] |=> a*a];
+        let test4 = -> match [7] [ [a] |=> a*a, [] |=> 11 ];
+
+    """
+  ]
+  , ["expect", "testA []", "value", "[2]"]
+  , ["expect", "testB []", "value", "2"]
+  , ["expect", "test1 []", "value", "2"]
+  , ["expect", "test2 []", "value", "[2]"]
+  , ["expect", "test3 []", "value", "49"]
+  , ["expect", "test4 []", "value", "49"] 
+  ]
+
+
+
+
+
+, [ ["name", "CPS3"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+        -- let Type = type;
+        -- let Tl = tlT;
+        let cps0 : 
+            {  F @ { FK @ { Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> (Codomain (Codomain FK)) } 
+            -> K @ { (Domain (Domain F)) -> [(Domain (Codomain (Domain F))) ,, Any] -> Any }
+            -> { [(Domain (Codomain (Domain F))) ,, (Tl (Domain { K (Domain (Domain F)) }))] }
+            -> (Codomain (Codomain K))
+            }
+            =  (f : F @ { FK @ { Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> (Codomain (Codomain FK)) })
+            -> (k : K @ { (Domain (Domain F)) -> [(Domain (Codomain (Domain F))) ,, Any] -> Any })
+            -> ([state0 ,, stateTl] : { [(Domain (Codomain (Domain F))) ,, (Tl (Domain { K (Domain (Domain F)) }))] })
+            -> 
+            let k2 : { (Domain (Domain F)) -> (Domain (Codomain (Domain F))) -> (Codomain (Codomain K)) }
+                = (arg : Domain (Domain F)) -> (state1 : Domain (Codomain (Domain F))) -> 
+                k arg ( [state1 ,, stateTl] : { [(Domain (Codomain (Domain F))) ,, (Tl (Domain { K (Domain (Domain F)) }))] } );
+            f k2 state0;
+    """
+    ]
+   
+  ]
+
+
+, [ ["name", "CPS3a"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["decls",
+    """
+        -- let Type = type;
+        -- let Tl = tlT;
+        let cpsHd : 
+            {  F @ { FK @ { Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> (Codomain (Codomain FK)) }
+            -> K @ { (Domain (Domain F)) -> [(Domain (Codomain (Domain F))) ,, Any] -> Any }
+            -> [(Domain (Codomain (Domain F))) ,, (Tl (Domain { K (Domain (Domain F)) }))]
+            -> (Codomain (Codomain K))
+            }
+            =  
+               -- (f : F @ { FK @ { Any -> Any -> Any } -> (Domain (Codomain FK)) -> (Codomain (Codomain FK)) })
+               (f : F @ { FK @ { Any -> Any -> Any } -> (Domain (Codomain (Domain F))) -> (Codomain (Codomain FK)) })
+            -> (k : K @ { (Domain (Domain F)) -> [(Domain (Codomain (Domain F))) ,, Any] -> Any })
+            -> (state : {[(Domain (Codomain (Domain F))) ,, (Tl (Domain {K (Domain (Domain F)) }))] })
+            ->
+            -- let k2 = (arg: Domain (Domain F)) -> (state1: (Domain (Codomain (Domain F)))) -> k arg [state1,, tl (state)];
+            -- let k2 = (arg: Domain (Domain F)) -> (state1: (Domain (Codomain (Domain F)))) -> k arg [state1,, tl (state): (Tl (Domain {K (Domain (Domain F))}))];
+            let k2 = (arg : Domain (Domain F)) -> (state1 : (Domain (Codomain (Domain F)))) -> 
+                k arg ( [state1 ,, tl (state)] : { [(Domain (Codomain (Domain F))) ,, (Tl (Domain { K (Domain (Domain F)) }))] });
+            f k2 (hd state);
+
+        -- let cpsTl = f -> k -> state -> error "TODO";
+        -- let cps0 = cpsHd;
+        -- let cps1 = f -> cpsTl (cpsHd f);
+        -- let cps2 = f -> cpsTl (cpsTl (cpsHd f));
+        -- let cps3 = f -> cpsTl (cpsTl (cpsTl (cpsHd f)));
+        -- let cpsN = (n: Int) -> f -> error "TODO";
+        -- let cpsL = (label: Str) -> f -> error "TODO";
+    """
+    ]
+  -- , ["expect", "test1 []", "value", "2"]
+   
+  ]
+
+
+, [ ["name", "cast"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let cast : { { From : Type } -> { To : Type } -> From -> To } =
+          (From : Type) -> (To : Type) -> (a : From) -> 
+          castT a : To;
+
+      -- ? Preferred syntax ?
+      -- F and T correspond to singleton-types,
+      -- The caller either needs to explicitly call Single:
+      --   cast (Single Int) (Single Nat) 7
+      -- or type-literals need to be given singleton-types by default:
+      --   cast Int Nat 7
+
+      -- let cast : { { From : F } @ Type -> { To : T } @ Type -> From -> To } =
+      -- let cast : { { From : F @ Type } -> { To : T @ Type } -> From -> To } =
+      -- let cast : { From : F @ Type -> To : T @ Type -> From -> To } =
+      --     (From : F @ Type) -> (To : T @ Type) -> (a : From) -> 
+      --     From : F @ Type -> To : T @ Type -> a : From -> 
+      --     castT a : To;
+
+      -- Alternatively, F and T are subtypes of (in this case) Type,
+      --   and (assuming non-singleton subtypes), 
+      --   any use of From and To takes us into the multiverse,
+      -- So long as From and To never leave the realm of types, that's fine,
+      --   otherwise we need to fork the universe.
+
+    """
+    ]
+  ]
+
+
+, [ ["name", "cpsCond1"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+        let Nil = { [] };
+        let Maybe : { Type -> Type } = (A : Type) -> { [] | [A] };
+
+        let CpsMbK : { Type -> Type -> Type } =
+            State -> Arg -> 
+            { [ Arg -> State -> Any, [] -> State -> Any] };
+        
+        let CpsMbA : { Type -> Type -> Type } =
+            State -> Arg -> 
+            { K @ (CpsMbK State Arg) -> State -> (Hd K) Arg State | (Hd (Tl K)) Nil State };
+
+        let cpsMaybe2 : 
+            {  { State : Type } 
+            -> A @ Any 
+            -> F @ { A -> (Maybe (CpsMbA State Void)) } 
+            -> (CpsMbA State (Domain (Hd (Domain (Hd { F A })))))
+            } =
+            (State : Type) ->
+            (a : A @ Any) ->
+            (f : F @ { A -> (Maybe (CpsMbA State Void)) }) ->
+            (k : K @ CpsMbK State (Domain (Hd (Domain (Hd { F A }))))) ->
+            (state : State) ->
+            let [kT, kF] = k;
+            ifNil (f a)
+            [ [] ->
+                kF [] state
+            , [b] ->
+                b k state
+            ];
+
+
+    """
+    ]
+  -- , ["expect", "test1 []", "value", "2"]
+   
+  ]
+
+
+, [ ["name", "cpsCond2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+        let Nil = { [] };
+        let Maybe : { Type -> Type } = (A : Type) -> { [] | [A] };
+
+        let State = Int;
+
+        let CpsMbK : { Type -> Type } =
+            Arg -> 
+            { [ Arg -> State -> Any, [] -> State -> Any] };
+        
+        let CpsMbA : { Type -> Type } =
+            Arg -> 
+            { K @ (CpsMbK Arg) -> State -> (Hd K) (Domain (Hd K)) State | (Hd (Tl K)) Nil State };
+
+        let cpsMaybe2 : 
+            {  A @ Any 
+            -> F @ { A -> (Maybe (CpsMbA Any)) } 
+            -> (CpsMbA (Domain (Hd (Domain (Hd { F A })))))
+            } =
+            (a : A @ Any) ->
+            (f : F @ { A -> (Maybe (CpsMbA Any)) }) ->
+            (k : K @ CpsMbK (Domain (Hd (Domain (Hd { F A }))))) ->
+            -- (k @ [kT, kF] : K @ CpsMbK (Domain (Hd (Domain (Hd { F A }))))) ->
+            (state : State) ->
+            let [kT, kF] = k;
+            ifNil (f a)
+            [ [] ->
+                kF [] state
+            , [b] ->
+                b k state
+            ];
+
+
+    """
+    ]
+  -- , ["expect", "test1 []", "value", "2"]
+   
+  ]
+
+
+, [ ["name", "cpsCond3"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+        let Nil = { [] };
+        let Maybe : { Type -> Type } = (A : Type) -> { [] | [A] };
+
+        let State = Int;
+
+        let CpsMbK : { Type -> Type } =
+            Arg -> 
+            { [ Arg -> State -> Any ] };
+        
+        let CpsMbA : { Type -> Type } =
+            Arg -> 
+            { K @ (CpsMbK Arg) -> State -> (Hd K) Arg State };
+
+        let cpsMaybe2 : 
+            {  A @ Any 
+            -> F @ { A -> (Maybe (CpsMbA Any)) } 
+            -> (CpsMbA (Domain (Hd (Domain (Hd { F A })))))
+            } =
+            (a : A @ Any) ->
+            (f : F @ { A -> (Maybe (CpsMbA Any)) }) ->
+            (k : K @ CpsMbK (Domain (Hd (Domain (Hd { F A }))))) ->
+            (state : State) ->
+            error "TODO";
+
+
+    """
+    ]
+  -- , ["expect", "test1 []", "value", "2"]
+   
+  ]
+
+
+
+
+
+
+
+
+, [ ["name", "map"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+        -- let List = list;
+        let reverse = (x0 : X @ (List Any)) ->
+        -- let reverse = (x0 : X @ (List (Elem X))) ->
+          loop1 
+              ( [x : List (Elem X), y : List (Elem X)] ->
+                  ifNil x 
+                      [ _ -> break y
+                      , [x1,, xs] -> continue [ xs, [x1,, y] ]
+                      ]
+              )
+              [x0, []];
+        let map = (f : F @ {Void->Any}) -> (x0 : X @ (List (Domain F))) ->
+          loop1 
+              ( [x : List (Elem X), y : List {F (Elem X)}] ->
+                  ifNil x 
+                      [ _ -> break (reverse y)
+                      , [x1,, xs] -> continue [ xs, [f x1,, y] ]
+                      ]
+              )
+              [x0, []];
+        let test0 = -> reverse [1,2,3,4];
+        let test1 = -> map ((x:Int)->x*x) [1,2,3,4];
+    """
+    ]
+  , ["expect", "test0 []", "value", "[4,3,2,1]"]
+  , ["expect", "test1 []", "value", "[1,4,9,16]"]
+   
+  ]
+
+
+, [ ["name", "ifNil"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+        let ifNil2 : 
+            {  A @ Any 
+            -> K @ [ [] -> Any, { A \ [] } -> Any ] 
+            -> { { (Hd K) [] } | { (Hd (Tl K)) { A \ [] } } } 
+            } = 
+            (a : A @ Any) -> 
+            ([kt, kf] : K @ { [ -> Any, { A \ [] } -> Any] }) ->
+            ifNil a
+            [ -> kt []
+            , a1 -> kf a1
+            ];
+    """
+    ]
+  ]
+
+
+, [ ["name", "eq"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Rec = Fix;
+      let Datum = { Int | Str | [] };
+      let Data = Rec ( Data -> { Datum | [Data,,Data] } );
+      let eq : { A @ Data -> A -> Bool } =
+        a -> b -> false;
+
+      let t1 = eq 1 2;
+      let t2 = eq "A" "A";
+      -- let t3 = eq "A" "B";
+      let t4 = eq ("A" : Str) "B";
+
+    """
+    ]
+  ]
+
+, [ ["name", "while"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Maybe = (A: Type) -> { [] | [A] };
+      -- let ifNil = testIsNil;
+
+      let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+          (initVal: A @ Any) -> iterate ->
+          loop1 ( (val: A) ->
+              ifNil (iterate val)
+              [ [] -> break val
+              , [val2] -> continue val2
+              ]
+          ) initVal;
+
+      let while2 : { F @ { Void -> (Maybe (Domain F)) } -> (Domain F) -> (Domain F) } =
+          (iterate: F @ { Void -> (Maybe (Domain F)) }) -> (initVal: Domain F) ->
+          loop1 ( (val: Domain F) ->
+              ifNil (iterate val)
+              [ [] -> break val
+              , [val2] -> continue val2
+              ]
+          ) initVal;
+
+      let reverse : { A @ (List Any) -> (List (Elem A)) } =
+          (input0 : A @ (List Any)) ->
+          while [input0 : List (Elem A), []: List (Elem A)] (
+              [input, output] ->
+              ifNil input
+              [ [] -> []
+              , [x,,xs] -> [ [xs, [x,,output]] ]
+              ]
+          ) |> [_, output: List (Elem A)] -> output;
+
+      let reverse2 : { A @ (List Any) -> (List (Elem A)) } =
+          (input: A @ (List Any)) ->
+          while [input: List (Elem A), []: List (Elem A)] (
+              [[x,,xs], output] |=>
+              [xs, [x,,output]]
+          ) |> [_, output: List (Elem A)] -> output;
+
+      -- let reverse3 : { A @ (List Any) -> (List (Elem A)) } =
+      --     (input: A @ (List Any)) ->
+      --     let [_, result] = 
+      --     while ( [[x,,xs]: List (Elem A), output: List (Elem A)] |=>
+      --         [xs, [x,,output]]
+      --     ) [input, []];
+      --     result;
+
+      let genNums = 
+           (max : Int) -> 
+           while [1 : Int, []: List Int] ( 
+               [n, nums] -> 
+               if (n <= max)
+               [ -> [ [n+1, [n,,nums]] ]
+               , -> [] 
+               ]
+           ) 
+           |> [_, result: List Int] -> reverse2 result;
+
+      let genNums2 = 
+           (max : Int) -> 
+           while [1 : Int, [] : List Int] ( 
+               [n, nums] -> (n <= max) |=
+               [n+1, [n,,nums]]
+           ) 
+           |> [_, result: List Int] -> reverse2 result;
+
+    """
+    ]
+  , ["expect", "genNums 3", "value", "[1,2,3]"]
+  , ["expect", "genNums2 3", "value", "[1,2,3]"]
+  ]
+
+
+, [ ["name", "stepWhile"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+        let Maybe = (A : Type) -> { [] | [A] };
+        let rec = fix;
+
+        let stepWhile : 
+            {  { Step : Type }
+            -> A @ Any
+            -> { A -> (Maybe { { A -> Step } -> Step }) }
+            -> { A -> Step }
+            -> Step
+            } =
+            ( Step : Type ) ->
+            rec ( (sw : { A @ Any -> { A -> (Maybe { { A -> Step } -> Step }) } -> { A -> Step } -> Step }) -> 
+            (val: A @ Any) -> (body: { A -> (Maybe { { A -> Step } -> Step }) }) -> (k: { A -> Step }) ->
+            let goMaybe = body val;
+            ifNil goMaybe
+            [ [] ->
+                k val
+            , [go] ->
+                go <| val2 ->
+                sw val2 body k
+            ] );
+
+        let stepWhile2 : 
+            {  { Step : Type }
+            -> A @ Any
+            -> { A -> ( { { A -> Step } -> Step }) }
+            -> { A -> Step }
+            -> Step
+            } =
+            ( Step : Type ) ->
+            rec ( (sw : { A @ Any -> { A -> ( { { A -> Step } -> Step } ) } -> { A -> Step } -> Step }) -> 
+            (val: A @ Any) -> (body: { A -> ( { { A -> Step } -> Step } ) }) -> (k: { A -> Step }) ->
+            let go = body val;
+            go <| val2 ->
+            sw val2 body k
+            );
+    """
+    ]
+  , ["expect", "1 + 2", "value", "3"]
+  ]
+
+
+, [ ["name", "stepForEach"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+        let Maybe = (A : Type) -> { [] | [A] };
+        let rec = fix;
+        let reverse : { A @ (List Any) -> (List (Elem A)) } = (a : A @ (List Any)) -> a;
+
+        let stepWhile : 
+            {  { Step : Type }
+            -> A @ Any
+            -> { A -> (Maybe { { A -> Step } -> Step }) }
+            -> { A -> Step }
+            -> Step
+            } =
+            ( Step : Type ) ->
+            rec ( (sw : { A @ Any -> { A -> (Maybe { { A -> Step } -> Step }) } -> { A -> Step } -> Step }) -> 
+            (val: A @ Any) -> (body: { A -> (Maybe { { A -> Step } -> Step }) }) -> (k: { A -> Step }) ->
+            let goMaybe = body val;
+            ifNil goMaybe
+            [ [] ->
+                k val
+            , [go] ->
+                go <| val2 ->
+                sw val2 body k
+            ] );
+
+        let stepWhile2 : 
+            {  { Step : Type }
+            -> A @ Any
+            -> { A -> ( { { A -> Step } -> Step }) }
+            -> { A -> Step }
+            -> Step
+            } =
+            ( Step : Type ) ->
+            rec ( (sw : { A @ Any -> { A -> ( { { A -> Step } -> Step } ) } -> { A -> Step } -> Step }) -> 
+            (val: A @ Any) -> (body: { A -> ( { { A -> Step } -> Step } ) }) -> (k: { A -> Step }) ->
+            let go = body val;
+            go <| val2 ->
+            sw val2 body k
+            );
+
+        let stepForEach : 
+            {  { Step : Type }
+            -> Z @ Any
+            -> A @ (List Any)
+            -> B @ { Z -> (Elem A) -> { [(Domain B), Any] -> Step } -> Step }
+            -> { [(Domain B), (List (Hd (Tl (Domain (Domain (Codomain (Codomain B)))))))] -> Step }
+            -> Step
+            } =
+            (Step : Type) ->
+            (z : Z @ Any) ->
+            (elems : A @ List Any) ->
+            (body : B @ { Z -> (Elem A) -> { [(Domain B), Any] -> Step } -> Step }) ->
+            (k : { [(Domain B), (List (Hd (Tl (Domain (Domain (Codomain (Codomain B)))))))] -> Step }) ->
+            stepWhile Step [z : Domain B, elems : List (Elem A), [] : List ((Hd (Tl (Domain (Domain (Codomain (Codomain B)))))))] (
+                [z2, [e2,,elems2], ys] |=>
+                k2 ->
+                body z2 e2 <| [z3: Domain B, y3: Hd (Tl (Domain (Domain (Codomain (Codomain B)))))] ->
+                k2 [z3, elems2, [y3,,ys]]
+            ) <| [z4, _, result] ->
+            k [z4, reverse result];
+
+    """
+    ]
+  , ["expect", "1 + 2", "value", "3"]
+  ]
+
+
+
+, [ ["name", "hps1"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let Nil = { [] };
+      let Rec = Fix;
+
+      let StateHandler = 
+          Rec <| (SH : Type) ->
+          { { "get" -> Nil -> KG @ { Int -> SH -> Any } -> KG Int SH }
+          & { "set" -> Int -> KS @ { Nil -> SH -> Any } -> KS Nil SH }
+          };
+
+      let StateK : { Type -> Type } =
+          A -> { A -> StateHandler -> Any };
+      let StateA : { Type -> Type } =
+          A -> { K @ (StateK A) -> StateHandler -> K A StateHandler };
+
+      let sGet : { Nil -> (StateA Int) } =
+          [] -> 
+          (k : K1 @ StateK Int) ->
+          (sh : StateHandler) ->
+          sh "get" [] k;
+
+      let sSet : { Int -> (StateA Nil) } =
+          value -> 
+          (k : K @ StateK Nil) ->
+          (sh : StateHandler) ->
+          sh "set" value k;
+      
+      let t0 : StateA Int =
+          (k : K @ StateK Int) ->
+          sGet [] k;
+      
+      let t1 : StateA Int =
+          (k : K @ StateK Int) ->
+          sGet [] <| value ->
+          k value;
+
+
+
+    """
+    ]
+  , ["expect", "1 + 2", "value", "3"]
+  ]
+
+
+
+
+
+, [ ["name", "guard"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let t1 = ( 1 < 2 ) |- 3;
+      let t2 = ( 2 < 1 ) |- 3;
+      let t3 = ( 1 < 2 ) |= 3;
+      let t4 = ( 2 < 1 ) |= 3;
+
+    """
+    ]
+  , ["expect", "t1", "value", "3"]
+  , ["expect", "t2", "value", "[]"]
+  , ["expect", "t3", "value", "[3]"]
+  , ["expect", "t4", "value", "[]"]
+  ]
+
+, [ ["name", "lambda-maybe"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      -- let t1  = ( [a]  -> a ) [3];
+      -- let t2  = ( [a]  => a ) [3];
+      -- let t3a = ( [a : Int] |-> a ) [3];
+      -- let t3b = ( [a : Int] |-> a ) [];
+      -- let t4a = ( [a : Int] |=> a ) [3];
+      -- let t4b = ( [a : Int] |=> a ) [];
+
+      -- -- let f1 : { Any -> [] | [Any] } = [a] |=> a;
+      -- -- let f1 = [a] |=> a;
+      -- let f1 = ([a]: Any) |=> a;
+      -- let f1a = f1 [3];
+
+      -- let lam             = ( [a]  -> a ) [3];
+      -- let lamJust         = ( [a]  => a ) [3];
+      -- let lamNothingOk    = ( [a] |-> a ) [3];
+      -- let lamNothingFail  = ( [a] |-> a ) [];
+      -- let lamMaybeOk      = ( [a] |=> a ) [3];
+      -- let lamMaybeFail    = ( [a] |=> a ) [];
+
+      let lam           = ( [a]  -> a ) : { [Any] -> Any };
+      let lamJust       = ( [a]  => a ) : { [Any] -> [Any] };
+      let lamJust2      = (  a   => a ) : {  Any  -> [Any] };
+      let lamNothing    = ( [a] |-> a ) : { Any -> [] | Any };
+      let lamMaybe      = ( [a] |=> a ) : { Any -> [] | [Any] };
+
+      -- let lam           = ( [a]  -> a ) : { [Int] -> Int };
+      -- let lamJust       = ( [a]  => a ) : { [Int] -> [Int] };
+      -- let lamJust2      = (  a   => a ) : { Int -> [Int] };
+      -- let lamNothing    = ( [a] |-> a ) : { { [Int] | { Any \ [Any] } } -> [] | Int };
+      -- let lamMaybe      = ( [a] |=> a ) : { { [Int] | { Any \ [Any] } } -> [] | [Int] };
+
+      let lamOk           = lam         [3];
+      let lamJustOk       = lamJust     [3];
+      let lamJust2Ok      = lamJust2     3;
+      let lamNothingOk    = lamNothing  [3];
+      let lamNothingFail  = lamNothing  [];
+      let lamMaybeOk      = lamMaybe    [3];
+      let lamMaybeFail    = lamMaybe    [];
+
+
+    """
+    ]
+  -- , ["expect", "t1", "value", "3"]
+  -- , ["expect", "t2", "value", "[3]"]
+  -- , ["expect", "t3a", "value", "3"]
+  -- , ["expect", "t3b", "value", "[]"]
+  -- , ["expect", "t4a", "value", "[3]"]
+  -- , ["expect", "t4b", "value", "[]"]
+
+  , ["expect", "lamOk"          , "value", "3"   ]
+  , ["expect", "lamJustOk"      , "value", "[3]" ]
+  , ["expect", "lamJust2Ok"     , "value", "[3]" ]
+  , ["expect", "lamNothingOk"   , "value", "3"   ]
+  , ["expect", "lamNothingFail" , "value", "[]"  ]
+  , ["expect", "lamMaybeOk"     , "value", "[3]" ]
+  , ["expect", "lamMaybeFail"   , "value", "[]"  ]
+  ]
+
+-- TODO implement ifStr in fe4-builtins.fe so that this test can be re-enabled
+-- , [ ["name", "guard2"]
+--   , ["language", "ferrum/0.1"]
+--   , ["type_check", "bidir"]
+--   , ["decls",
+--     """
+--       let Maybe = (A: Type) -> { [] | [A] };
+-- 
+--       -- let ifStr2 : { A @ Any -> F @ [ Str -> Any, {A \ Str} -> Any ] -> (Codomain F) } =
+-- 
+-- 
+--       let guardStr : { Any -> F @ { Str -> Any } -> { [] | {F Str} } } =
+--           a -> (f : F @ { Str -> Any }) ->
+--           ifStr a
+--           [ a2 -> f a2
+--           , _ -> []
+--           ];
+-- 
+--       let f1 : { Any -> (Maybe Int) } =
+--         a ->
+--         ifStr a
+--         [ a2 -> [7]
+--         , _ -> []
+--         ];
+-- 
+--       let f2 : { Any -> (Maybe Int) } =
+--         a ->
+--         guardStr a <| a2 ->
+--         [7];
+-- 
+--       let f3 : { Any -> (Maybe Int) } =
+--         a ->
+--         guardStr a <| a2 =>
+--         7;
+-- 
+--     """
+--     ]
+--   , ["expect", "f1 0"          , "value", "[]"   ]
+--   , ["expect", "f1 \"\" "      , "value", "[7]"  ]  -- TODO fixup bug meaning a string cannot be the last thing before the EOF
+--   , ["expect", "f2 0"          , "value", "[]"   ]
+--   , ["expect", "f2 \"\" "      , "value", "[7]"  ]
+--   , ["expect", "f3 0"          , "value", "[]"   ]
+--   , ["expect", "f3 \"\" "      , "value", "[7]"  ]
+--   ]
+
+
+, [ ["name", "pair"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let a = [ 1 ,, 2 ];
+      let [b ,, c] = [3, 4];
+      let [x, y ,, z] = [5, 6, 7, 8, 9];
+    """
+  ]
+  , ["expect", "a" , "value", "[1,,2]" ]
+  , ["expect", "b" , "value", "3" ]
+  , ["expect", "c" , "value", "[4]" ]
+  , ["expect", "x" , "value", "5" ]
+  , ["expect", "y" , "value", "6" ]
+  , ["expect", "z" , "value", "[7,8,9]" ]
+  ]
+
+, [ ["name", "typeOps"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls",
+    """
+      let WeekDay = { "Mon" | "Tue" | "Wed" | "Thu" | "Fri" };
+      let WeekEndDay = { "Sat" | "Sun" };
+      let Day = { WeekDay | WeekEndDay };
+      let t1 = {"Mon"};
+    """
+    ]
+  , ["expectTerm", "WeekDay", 
+      """
+       { {"Mon"} | {"Tue"} | {"Wed"} | {"Thu"} | {"Fri"} }
+      """
+    ]
+  , ["expectTerm", "WeekEndDay",
+      """
+       { {"Sat"} | {"Sun"} }
+      """
+    ]
+  , ["expectTerm", "Day", 
+      """
+       { {"Mon"} | {"Tue"} | {"Wed"} | {"Thu"} | {"Fri"} | { {"Sat"} | {"Sun"} } }
+      """
+    ]
+  , ["expectTerm", "t1",
+      """
+       {"Mon"}
+      """
+    ]
+  ]
+
+, [ [ "name", "listAllTrue" ]
+  , [ "language", "ferrum/0.1" ]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , [ "type_check", "bidir" ]
+  -- , [ "project", "../../fe/fe4c.proj.fe" ]
+  , [ "decls",
+      """
+        let Maybe = (A : Type) -> { [] | [A] };
+
+        let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+            (initVal: A @ Any) -> iterate ->
+            loop1 ( (val: A) ->
+                ifNil (iterate val)
+                [ [] -> break val
+                , [val2] -> continue val2
+                ]
+            ) initVal;
+
+        let listAllTrue : { X @ (List Any) -> { (Elem X) -> Bool } -> Bool } =
+            (x : X @ (List Any)) -> p ->
+            let x2 = 
+                while (x : List (Elem X)) <|
+                [x1,,xs] |->
+                -- [xs];
+                if (p x1)
+                [ -> [xs]
+                , -> []
+                ];
+            x2 == [];
+
+        let elems : List Int = [1,2,1,4,6,6,9];
+        let t1 = -> listAllTrue elems (a -> a < 10);
+        let t2 = -> listAllTrue elems (a -> a < 5);
+        let t3 = -> listAllTrue elems (a -> a > 0);
+        let t4 = -> listAllTrue elems (a -> a > 5);
+      """
+    ]
+  , [ "expect", "t1[]", "value", "true"]
+  , [ "expect", "t2[]", "value", "false"]
+  , [ "expect", "t3[]", "value", "true"]
+  , [ "expect", "t4[]", "value", "false"]
+
+  ]
+
+
+-- -- This keyValueTuple test currently passes when using fe4/tree-types, but not when using fe4/graph-types.
+-- -- The { TupleKv : Type } param type used in tupleKvGet isn't clearly a list of tuples, 
+-- --   this blocks the calculation of the context type for the function passed to guardHdDatumSingle.
+-- -- The tree-types implementation intersects synTy and ctxTy types together a bit too freely, and so gets away with it.
+-- -- It would be better for the 
+-- --   { TupleKv : Type }
+-- -- to be
+-- --   { TupleKv : SubType (List { [Str, Any] }) }
+-- -- but "SubType" isn't implemented.
+-- -- The fe-in-fe code uses a different approach to key-value tuples, so commenting out for now.
+-- 
+-- , [ [ "name", "keyValueTuple" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "decls",
+--       """
+--         let Maybe = (A : Type) -> { [] | [A] };
+--         let justTrustMeCast : { { From : Type } -> { To : Type } -> From -> To } =
+--             (From : Type) -> (To : Type) -> (a : From) -> 
+--             castT a : To;
+--         let no = [];
+--         let yes = (a : A @ Any) -> [a];
+--         let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+--             (initVal: A @ Any) -> iterate ->
+--             loop2 initVal <| val ->
+--             ifNil (iterate val)
+--             [ [] -> break val
+--             , [val2] -> continue val2
+--             ];
+-- 
+--         let guardHdDatumSingle : { A @ Str -> B @ Any -> C @ { { [A ,, Any] & B } -> Any } -> [] | (Codomain C) } =
+--             (datum : A @ Str) -> (value : B @ Any) -> (k : C @ { { [A ,, Any] & B } -> Any }) ->
+--             ifPair value
+--             [ value @ [h ,, t] ->
+--                 -- ifDatum h
+--                 ifStr h
+--                 [ h ->
+--                     if (h == datum)
+--                     [ ->
+--                         -- k value
+--                         let result = value |> justTrustMeCast Any { [A ,, Any] & B };
+--                         k result
+--                     , ->
+--                         no
+--                     ]
+--                 , _ -> 
+--                     no
+--                 ]
+--             , _ ->
+--                 no
+--             ];
+-- 
+--         let tupleKvGet : { { TupleKv : Type } -> K @ (Hd (Elem TupleKv)) -> TupleKv -> (Hd (Tl { (Elem TupleKv) & [K, Any] })) } =
+--             (TupleKv : Type) -> (key : K @ (Hd (Elem TupleKv))) -> (fields : TupleKv) ->
+--             let fields = fields |> justTrustMeCast TupleKv (List (Elem TupleKv)); -- TODO implement SubType, so as not to need this cast
+--             let key = key |> justTrustMeCast (Hd (Elem TupleKv)) Str;
+--             let [_, valueMb] =
+--                 while [fields : List (Elem TupleKv), no : Maybe (Hd (Tl { (Elem TupleKv) & [K, Any] }))] <|
+--                 [ [ field ,, fields], [] ] |=>
+--                 -- let _ = trace ["tupleKvGet/while", field, fields] 0;
+--                 let resultMb = 
+--                     guardHdDatumSingle key field <| [_, value] |=>
+--                     let value = value |> justTrustMeCast Any (Hd (Tl { (Elem TupleKv) & [K, Any] }));
+--                     [ [], yes value ] : { [(List (Elem TupleKv)), (Maybe (Hd (Tl { (Elem TupleKv) & [K, Any] })))] };
+--                 ifNil resultMb
+--                 [ ->
+--                     [ fields, no ] : { [(List (Elem TupleKv)), (Maybe (Hd (Tl { (Elem TupleKv) & [K, Any] })))] }
+--                 , [result] -> result  
+--                 ];
+--             ifNil valueMb
+--             [ ->
+--                 -- this should be impossible, the call won't type-check if there is any possibility of the key not being present
+--                 error ["tupleKvGet", "key not found in key-value-tuple", key, fields]
+--             , [value] -> value
+--             ];
+-- 
+--           let Vals = { [ ["a", Int], ["b", Bool], ["c", Str] ] };
+--           let vals : Vals = [ ["a", 3], ["b", true], ["c", "z"] ];
+--           let t1 = -> tupleKvGet Vals "b" vals;
+--           let t2 = -> guardHdDatumSingle "a" ["a", 7] <| val -> val;
+-- 
+--       """
+--     ]
+--   , [ "expect", "t1[]", "value", "true"]
+--   , [ "expect", "t2[]", "value", "[\"a\",7]"]
+-- 
+-- 
+--   ]
+
+
+-- -- This keyValueTuple-get test currently passes when using fe4/tree-types, but not when using fe4/graph-types.
+-- -- Using graph-types results in a stack-overflow due to heap-cycles 
+-- --   when type-checking kvtGet and performing a structural equivalence check of the arguments of the "<:" operator.
+-- --             if (tiIsFalse(tis.tiStructuralRelComp(a, b)) && tiIsFalse(tis.tiStructuralRelComp(b, a))) {
+-- -- More of code needs to be aware of the possibility of cycles.
+-- -- KvTuples are a relatively recent addition and not widely used in fe-in-fe.
+-- -- It makes more sense to focus first on the widely used techniques first, and then come back to KvTuples, so commenting out for now.
+-- , [ [ "name", "keyValueTuple-get" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "decls",
+--       """
+--         let Maybe = (A : Type) -> { [] | [A] };
+--         let justTrustMeCast : { { From : Type } -> { To : Type } -> From -> To } =
+--             (From : Type) -> (To : Type) -> (a : From) -> 
+--             castT a : To;
+--         let no = [];
+--         let yes = (a : A @ Any) -> [a];
+--         let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+--             (initVal: A @ Any) -> iterate ->
+--             loop2 initVal <| val ->
+--             ifNil (iterate val)
+--             [ [] -> break val
+--             , [val2] -> continue val2
+--             ];
+--         let Rec = Fix;    
+--         let rec = fix;
+--         let panic = error;
+-- 
+--         -- let KvListSchema = { [Str, Type] };
+--         -- let KvListSchemaToType : { KvListSchema -> Type } =
+--         --   schema ->
+--         --   -- TODO return a list where the expected entries are mandatory, not just permitted.
+--         --   -- TODO ? create a union of every possible ordering of the list elements ?
+--         --   -- TODO ?   this could get big and slow, unless, perhaps, the type-system plays along
+--         --   error ["TODO", "KvListSchemaToType"];
+-- 
+--         -- let KvtSchema = { [Str, Type] };
+--         -- let KvtSchemaToType : { KvtSchema -> Type } =
+--         --   schema ->
+--         --   -- TODO loop-round creating a tuple-type with the keys in a fixed order
+--         --   error ["TODO", "KvtSchemaToType"];
+-- 
+--         let KvtWithout : { Str -> Type } =
+--           key ->
+--           List { [Str \ (Single key) , Any] };
+-- 
+--         let KvtWith : { Str -> Type -> Type } =
+--           key -> V ->
+--           Rec <| KW ->
+--           { [ [ (Single key)        , V]    ,, (KvtWithout key)  ]
+--           | [ [ Str \ (Single key)  , Any]  ,, KW                ]
+--           };
+-- 
+--         -- ensure a key is absent
+--         -- let KvtWithNone : { Str -> Type -> Type } =
+--         -- ensure a single occurrence of key is present
+--         -- let KvtWithOne  : { Str -> Type -> Type } =
+--         -- ensure at least one occurrence of key is present
+--         -- let KvtWithSone : { Str -> Type -> Type } =
+--         -- permit none, one, or many occurrences of key (so long as the value types are consitent)
+--         -- let KvtWithAny : { Str -> Type -> Type } =
+-- 
+--         let MatchBranch = (A:Type) -> { A -> [] | [Any] };
+-- 
+--         let match = 
+--             (val: V @ Any) -> 
+--             fix ((match2: {MBL @ (List (MatchBranch V)) -> (Hd {(Elem MBL) V})})->
+--             (cases: MBL @ (List (MatchBranch V))) ->
+--                 ifNil cases
+--                     [ [] -> error "no cases matched"
+--                     , ([c ,, cs] : List (Elem MBL)) -> 
+--                         ifNil (c val)
+--                             [ [] -> match2 cs
+--                             , ([b : Hd { (Elem MBL) V }]) -> b
+--                             ]
+--                     ]
+--             );
+-- 
+--         -- let guardHdDatumSingle : { A @ Str -> B @ Any -> C @ { { [A ,, Any] & B } -> Any } -> [] | (Codomain C) } =
+--         --     (datum : A @ Str) -> (value : B @ Any) -> (k : C @ { { [A ,, Any] & B } -> Any }) ->
+--         --     ifPair value
+--         --     [ value @ [h ,, t] ->
+--         --         -- ifDatum h
+--         --         ifStr h
+--         --         [ h ->
+--         --             if (h == datum)
+--         --             [ ->
+--         --                 -- k value
+--         --                 let result = value |> justTrustMeCast Any { [A ,, Any] & B };
+--         --                 k result
+--         --             , ->
+--         --                 no
+--         --             ]
+--         --         , _ -> 
+--         --             no
+--         --         ]
+--         --     , _ ->
+--         --         no
+--         --     ];
+-- 
+-- 
+-- 
+--         -- let kvtGet : { { key : Str } -> T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] })) }   =
+--         --   (key : Str) -> (kvt : T @ KvtWith key Any) ->
+--         --   error ["TODO", "kvtGet"];
+-- 
+--         let kvtGet : { { key : Str } -> T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] })) }   =
+--             (key : Str) -> 
+--             rec <| (get : { T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] }))}) ->
+--             (kvt : T @ KvtWith key Any) ->
+--             match kvt
+--             [ [kv ,, kvts] |->
+--                 -- guardHdDatumSingle key kv <| [k, v] =>
+--                 let [k, v] = kv;
+--                 if (k == key) 
+--                 [ _ ->
+--                     let v = v |> justTrustMeCast Any (Hd (Tl { (Elem T) & [(Single key), Any] }));
+--                     yes v
+--                 , _ -> 
+--                     no
+--                 ]    
+--             , [kv ,, kvts] |=>
+--                 -- let kvts = kvts |> justTrustMeCast (List { [Str, Any] }) (KvtWith key Any);
+--                 let kvts = kvts |> justTrustMeCast Any (KvtWith key Any);
+--                 let v = get kvts;
+--                 let v = v |> justTrustMeCast Any (Hd (Tl { (Elem T) & [(Single key), Any] }));
+--                 v
+--             , [] |=>
+--                 panic ["kvtGet", "impossible, key not found in tuple", key]
+--             ];
+-- 
+--         let MyKvTuple = { [ ["aa", Int], ["bb", Str], ["cc", Bool] ] };
+--         let tuple1 : MyKvTuple = [ ["aa", 7], ["bb", "Seven"], ["cc", true] ];
+-- 
+--         let t1 = -> kvtGet "aa" [ ["aa", 7] ];
+--         let t2 = -> kvtGet "aa" tuple1;
+--         let t3 = -> kvtGet "bb" tuple1;
+--         let t4 = -> kvtGet "cc" tuple1;
+-- 
+--         -- this might work, so long as it only applied to bounded-length tuples, and not arbitrarily long lists
+--         --   might work for arbitrarily long lists too, one day, with some suitable form of memoization
+--         -- let Map : { Type -> Type -> Type } =
+--         --   rec <| (Map : { Type -> Type -> Type }) ->
+--         --   F -> L ->
+--         --   {   { { [] -> [] }
+--         --       & { A @ Any -> [F (Hd A), (Map F (Tl A))] }
+--         --       -- & (List (Elem L)) -> (List { F (Elem L) }) -- this part is, in a sense, redundant, but might help with memoization/termination ?
+--         --       } 
+--         --       L
+--         --   };
+-- 
+--         -- alternatively, use a term/precise function "f", not a type/approximate function "F"
+--         -- let Map : { Type -> { Type -> Type } -> Type } =
+--         --   rec <| (Map : { Type -> { Type -> Type } -> Type }) ->
+--         --   f -> L ->
+--         --   {   { [] -> []
+--         --       & [H ,, T] -> [(f H), (Map f T)] 
+--         --       -- & (List (Elem L)) -> (List (f (Elem L))) -- this part is, in a sense, redundant, but might help with memoization/termination ?
+--         --       } 
+--         --       L
+--         --   };
+-- 
+--         -- let KvtSet : { Str -> Type -> Type -> Type } =
+--         --   key -> V -> T ->
+--         --   -- let F = 
+--         --   --   { {             (Single key)   -> V                                 } 
+--         --   --   & { K @ { Str \ (Single key) } -> (Hd (Tl { (Elem T) & [K, Any] })) }
+--         --   --   };
+--         --   let F = 
+--         --     { {       [       (Single key), Any ] -> [ (Single key), V ]  } 
+--         --     & {  KV @ [ Str \ (Single key), Any ] -> KV                   }
+--         --     };
+--         --   -- let f = ( [key2, val] : KV @ [Str, Any] ) ->
+--         --   --     ifEq [key, key2]
+--         --   --     [ [key, key2] ->
+--         --   --         { [ (Single key), V ]  } 
+--         --   --     , [key, key2] ->
+--         --   --         KV
+--         --   --     };
+--         --   -- error ["TODO", "KvtSet"];  
+--         --   -- -- not sure that Map can be implemented until the reduction-operators are available at the type-level (non-termination will occur)
+--         --   -- --   could implement it as a built-in though ?
+--         --   let T2 = Map F T;
+--         --   T2;  
+-- 
+--         -- ? how do we union-in the (potentially) new (but probably not), value type V with the tuple type T ?
+--         --   applying/mapping an intersected function type, switched on the key, might do it ?
+--         -- let kvtSet : { { k : Str } -> V @ Any -> T @ (KvtWith k V) -> (KvtSet k V T) }   =
+--         --   key -> val -> kvt ->
+--         --   error ["TODO", "kvtGet"];
+--         -- 
+--         -- -- TODO SubType
+--         -- -- let KvtMod : { Str -> Type -> (SubType { Type -> Type }) -> Type } =
+--         -- let KvtMod : { Str -> Type -> Type -> Type } =
+--         --   key -> F -> T ->
+--         --   let F = 
+--         --     { {  KV @ [       (Single key), Any ] -> [ (Single key), F (Hd (Tl KV)) ]  } 
+--         --     & {  KV @ [ Str \ (Single key), Any ] -> KV                                }
+--         --     };
+--         --   -- error ["TODO", "KvtMod"];
+--         --   let T2 = Map F T;
+--         --   T2;  
+--         -- 
+--         -- let kvtMod : { { k : Str } -> F @ { Void -> Any } -> T @ (KvtWith k (Domain F)) -> (KvtMod k F T) } =
+--         --   key -> f -> kvt ->
+--         --   error ["TODO", "kvtMod"];
+-- 
+-- 
+-- 
+--       """
+--     ]
+--   -- these run and pass in both fe-in-ts and fe-in-fe  
+--   , [ "expectValue",  "t1[]",          "7" ]
+--   , [ "expectValue",  "t2[]",          "7" ]
+--   , [ "expectValue",  "t3[]",          "\"Seven\"" ]
+--   , [ "expectValue",  "t4[]",          "true" ]
+-- 
+--   -- these run in both fe-in-ts and fe-in-fe, but only pass in fe-in-ts, as more type operators need to be implemented
+--   , [ "expectType",   "t1[]",         "Int"]
+--   , [ "expectType",   "t2[]",         "Int"]
+--   , [ "expectType",   "t3[]",         "Str"]
+--   , [ "expectType",   "t4[]",         "Bool"]
+-- 
+--   -- obsolete old-style tests
+--   -- -- , [ "expect",       "t1[]", "value", "7" ]
+--   -- , [ "expect",       "t1[]", "type", "Int"]
+--   -- -- , [ "expect",       "t2[]", "value", "7" ]
+--   -- , [ "expect",       "t2[]", "type", "Int"]
+--   -- -- , [ "expect",       "t3[]", "value", "\"Seven\"" ]
+--   -- , [ "expect",       "t3[]", "type", "Str"]
+--   -- -- , [ "expect",       "t4[]", "value", "true" ]
+--   -- , [ "expect",       "t4[]", "type", "Bool"]
+-- 
+--   ]
+
+
+-- -- This keyValueTuple-get-list test currently passes when using fe4/tree-types, but not when using fe4/graph-types.
+-- -- This fails in eactly the same way (type-checking kvtGet) as the previous test.
+-- -- See comments above for the keyValueTuple-get test.
+-- , [ [ "name", "keyValueTuple-get-list" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "decls",
+--       """
+--         let panic = error;
+--         let Rec = Fix;
+--         let rec = fix;
+--         let No = { [] };
+--         let Yes : { Type -> Type } = A -> { [A] };
+--         let Maybe : { Type -> Type } = A -> { No | (Yes A) };
+--         let no = [];
+--         let yes : { A @ Any -> [A] } = (a : A @ Any) -> [a];
+-- 
+--         let cast : { { From : Type } -> {To : Type} -> From -> To }
+--             = (From : Type) -> (To : Type) -> (a : From) -> 
+--             castT a : To;
+--         
+--         let justTrustMeCast = cast;
+-- 
+--         let ifYes : { A @ (Maybe Any) -> K @ [(Hd A) -> Any, -> Any] -> (Hd K) (Hd A) | (Hd (Tl K)) [] } =
+--             (aMb : A @ Maybe Any) -> ([kYes, kNo] : K @ { [(Hd A) -> Any, -> Any] }) ->
+--             ifNil aMb
+--             [ -> kNo []
+--             , [a] -> kYes a
+--             ];
+-- 
+--         let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+--             (initVal: A @ Any) -> iterate ->
+--             loop2 initVal <| val ->
+--             ifNil (iterate val)
+--             [ [] -> break val
+--             , [val2] -> continue val2
+--             ];
+-- 
+-- 
+--         let reverse : { X @ (List Any) -> (List (Elem X)) } = 
+--             (x : X @ (List Any)) ->
+--             let x0 : List (Elem X) = x;
+--             let y0 : List (Elem X) = [];
+--             loop2 [x0, y0] <| 
+--             [x2, y] ->
+--             ifNil x2
+--             [ _ -> break y
+--             , [x1,, xs] -> continue [ xs, [x1,, y] ]
+--             ];
+-- 
+-- 
+--         let forMap : { X @ (List Any) -> F @ { (Elem X) -> Any } -> (List {F (Elem X)}) } =
+--             (xs : X @ (List Any)) -> (f : F @ { (Elem X) -> Any}) ->
+--             let [_, ys] = 
+--                 while [xs : List (Elem X), [] : List {F (Elem X)}] <|
+--                     [ [x1 ,, xs2], ys ] |=> [ xs2, [f x1 ,, ys] ];
+--             let result = reverse ys;
+--             result;
+-- 
+--         let KvtWithout : { Str -> Type } =
+--           key ->
+--           List { [Str \ (Single key) , Any] };
+--         
+--         let KvtWith : { Str -> Type -> Type } =
+--           key -> V ->
+--           Rec <| KW ->
+--           { [ [ (Single key)        , V]    ,, (KvtWithout key)  ]
+--           | [ [ Str \ (Single key)  , Any]  ,, KW                ]
+--           };
+-- 
+--         let kvtGet : { { key : Str } -> T @ (KvtWith key Any) -> (Hd (Tl { (Elem T) & [(Single key), Any] })) }   =
+--             (key : Str) -> 
+--             (kvt : T @ KvtWith key Any) ->
+--             -- debug2 ["kvtGet", key, kvt] <| ->
+--             let kvt = kvt |> justTrustMeCast (KvtWith key Any) (List { [Str, Any] });
+--             -- let kvt : List { [Str, Any] } = kvt |> castT;
+--             let [_, resultMb] =
+--                 while [kvt : List { [Str, Any] }, [] : Maybe Any] <|
+--                     [ [[k,v],,kvs], [] ] |=>
+--                     if (k == key)
+--                     [ -> [ []  , yes v ]
+--                     , -> [ kvs , no    ]
+--                     ];
+--             ifYes resultMb
+--             [ result ->
+--                 -- for some reason, this "justTrustMeCast" causes variable "T" to escape, so using castT instead
+--                 --   probably need to update substTypeEnv to substitute into terms within types
+--                 -- let result = result |> justTrustMeCast Any (Hd (Tl { (Elem T) & [(Single key), Any] }));
+--                 let result : Hd (Tl { (Elem T) & [(Single key), Any] }) = 
+--                     result |> castT;
+--                 result
+--             , ->
+--                 panic ["kvtGet", "impossible: key not found (", key, ") expected one of ", show (forMap kvt <| [k,v] -> k)]
+--             ];
+-- 
+--         let ABC = {
+--             [ ["AA", Int]
+--             , ["BB", Bool]
+--             , ["CC", Str]
+--             ] };
+-- 
+--         let abc1 = [ ["AA", 1], ["BB", true], ["CC", "one"] ];    
+--         let abc2 = [ ["AA", 2], ["BB", true], ["CC", "two"] ];
+--         let abcs : List ABC =  [abc1, abc2];
+-- 
+--         let check : { [(List Str), (List Str)] } =
+--             let names : List Str =
+--                 forMap abcs <|
+--                 defn -> 
+--                 let name = defn |> kvtGet "CC";
+--                 name;
+--             [names, names];    
+-- 
+--       """
+--     ]
+--   ]
+
+
+-- -- This keyValueTuple-set test currently passes when using fe4/tree-types, but not when using fe4/graph-types.
+-- -- This fails in much the same way (type-checking kvtSet) as the previous test.
+-- -- See comments above for the keyValueTuple-get test.
+-- , [ [ "name", "keyValueTuple-set" ]
+--   , [ "language", "ferrum/0.1" ]
+--   , [ "type_check", "bidir" ]
+--   , [ "decls",
+--       """
+--         let Maybe = (A : Type) -> { [] | [A] };
+--         let justTrustMeCast : { { From : Type } -> { To : Type } -> From -> To } =
+--             (From : Type) -> (To : Type) -> (a : From) -> 
+--             castT a : To;
+--         let no = [];
+--         let yes = (a : A @ Any) -> [a];
+--         let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+--             (initVal: A @ Any) -> iterate ->
+--             loop2 initVal <| val ->
+--             ifNil (iterate val)
+--             [ [] -> break val
+--             , [val2] -> continue val2
+--             ];
+--         let Rec = Fix;    
+--         let rec = fix;
+--         let panic = error;
+-- 
+--         let MatchBranch = (A:Type) -> { A -> [] | [Any] };
+-- 
+--         let match = 
+--             (val: V @ Any) -> 
+--             fix ((match2: {MBL @ (List (MatchBranch V)) -> (Hd {(Elem MBL) V})})->
+--             (cases: MBL @ (List (MatchBranch V))) ->
+--                 ifNil cases
+--                     [ [] -> error "no cases matched"
+--                     , ([c ,, cs] : List (Elem MBL)) -> 
+--                         ifNil (c val)
+--                             [ [] -> match2 cs
+--                             , ([b : Hd { (Elem MBL) V }]) -> b
+--                             ]
+--                     ]
+--             );
+-- 
+--         let KvtWithout : { Str -> Type } =
+--           key ->
+--           List { [Str \ (Single key) , Any] };
+-- 
+--         let KvtWith : { Str -> Type -> Type } =
+--           key -> V ->
+--           Rec <| KW ->
+--           { [ [ (Single key)        , V]    ,, (KvtWithout key)  ]
+--           | [ [ Str \ (Single key)  , Any]  ,, KW                ]
+--           };
+-- 
+--         -- let TupleMap : { Type -> Type -> Type } =
+--         --     F -> T -> 
+--         --     -- TODO this probably needs to be a built-in for now
+--         --     Any;
+-- 
+--         -- let KvtSet : { Str -> Type -> Type -> Type } =
+--         --     key -> V -> T ->
+--         --     let F = 
+--         --       { {       [       (Single key), Any ] -> [ (Single key), V ]  } 
+--         --       & {  KV @ [ Str \ (Single key), Any ] -> KV                   }
+--         --       };
+--         --     let T2 = TupleMap F T;
+--         --     T2;  
+-- 
+--         let KvtSet : { { key : Str } -> Type -> Type -> Type } =
+--             (key : Str) -> (V : Type) -> (T : Type) ->
+--             let F = 
+--               { {       [       (Single key), Any ] -> [ (Single key), V ]  } 
+--               & {  KV @ [ Str \ (Single key), Any ] -> KV                   }
+--               };
+--             let T2 = TupleMap F T;
+--             T2;  
+-- 
+--         let kvtSet : { { key : Str } -> V @ Any -> T @ (KvtWith key Any) -> (KvtSet key V T) }   =
+--             (key : Str) -> (val : V @ Any) -> 
+--             rec <| (set : { T @ (KvtWith key Any) -> (KvtSet key V T) }) ->
+--             (kvt : T @ KvtWith key Any) ->
+--             match kvt
+--             [ [kv ,, kvts] |->
+--                 -- guardHdDatumSingle key kv <| [k, v] =>
+--                 let [k, v] = kv;
+--                 let valMb : Maybe Any = 
+--                     if (k == key) 
+--                     [ _ ->
+--                         let kvts = [ [key, val] ,, kvts ];
+--                         -- let kvts = kvts |> justTrustMeCast Any (KvtWith key V);
+--                         -- yes (castT kvts)
+--                         -- The type (Yes Void) is equivalent Void
+--                         -- Left to its own devices, the type-checker will
+--                         --   deduce that this if-statment can only return "no".
+--                         -- This is fine for JS-codegen (which ignores the types),
+--                         --   but upsets the C-codegen, 
+--                         --   which then tries to get a no-value out of the yes-value.
+--                         -- Using the (Maybe Any) annotation above helps avoid this.
+--                         -- The use of Void types and casting is only here because the
+--                         --   type-checker isn't quite smart enough to cope without them yet.
+--                         yes kvts
+--                     , _ -> 
+--                         no
+--                     ];
+--                 let valMb2 : Maybe (KvtSet key V T) = castT valMb;
+--                 valMb2
+--             , [kv ,, kvts] |=>
+--                 -- let kvts = kvts |> justTrustMeCast Any Void; -- (KvtWith key V);
+--                 let kvts = set (castT kvts);
+--                 let kvts = [kv ,, kvts];
+--                 castT kvts
+--             , [] |=>
+--                 panic ["kvtGet", "impossible, key not found in tuple", key]
+--             ];
+--         
+-- 
+--         let MyKvTuple = { [ ["aa", Int], ["bb", Str], ["cc", Bool] ] };
+--         let tuple1 : MyKvTuple = [ ["aa", 7], ["bb", "Seven"], ["cc", true] ];
+-- 
+--         let t1 = -> kvtSet "aa" 11 [ ["aa", 7] ];
+--         let t2 = -> kvtSet "aa" 9 tuple1;
+--         let t3 = -> kvtSet "bb" "Banana" tuple1;
+--         let t4 = -> kvtSet "cc" 99 tuple1;
+-- 
+--       """
+--     ]
+-- 
+--   , [ "expectValue",  "t1[]",  "[[\"aa\",11]]" ]
+--   , [ "expectValue",  "t2[]",  "[[\"aa\",9],[\"bb\",\"Seven\"],[\"cc\",true]]" ]
+--   , [ "expectValue",  "t3[]",  "[[\"aa\",7],[\"bb\",\"Banana\"],[\"cc\",true]]" ]
+--   , [ "expectValue",  "t4[]",  "[[\"aa\",7],[\"bb\",\"Seven\"],[\"cc\",99]]" ]
+-- 
+--   , [ "expectType",   "t1[]",  "{ [{ [{\"aa\"}, Int] }] }" ]
+--   , [ "expectType",   "t2[]",  "{ [{ [{\"aa\"}, Int] }, { [{\"bb\"}, Str] }, { [{\"cc\"}, Bool] }] }" ]
+--   , [ "expectType",   "t3[]",  "{ [{ [{\"aa\"}, Int] }, { [{\"bb\"}, {\"Banana\"}] }, { [{\"cc\"}, Bool] }] }" ]
+--   , [ "expectType",   "t4[]",  "{ [{ [{\"aa\"}, Int] }, { [{\"bb\"}, Str] }, { [{\"cc\"}, Int] }] }" ]
+-- 
+--   ]
+
+
+-- -- This test works with the fe4/tree-types implementation but not the fe4/graph-types implementation.
+-- -- It's possible it will never work with both at the same time.
+-- -- This test doesn't need to type-check in order for the fe-in-fe code to type-check.
+-- -- It can be revisited when everything else is more mature and tree-types are ready to be jettisoned.
+-- , [ ["name", "self-dependent-product"]
+--   , ["language", "ferrum/0.1"]
+--   , ["type_check", "bidir"]
+--   , ["decls",
+--     """
+--         -- let Html = List Str;
+--         -- let WiTabDefn = 
+--         --     Self <| WTD -> {
+--         --     [ Type
+--         --     -- , ["Id", Str]
+--         --     -- , ["Name", Str]
+--         --     -- , ["Display", Str]
+--         --     -- , [ "Render"
+--         --           , { (Hd WTD) -> Html } 
+--         --     --   ]
+--         --     ] };
+--         -- 
+--         -- let wtTestFile : WiTabDefn = 
+--         --     [ Str         
+--         --     -- , ["Id"      , "text1"     ] 
+--         --     -- , ["Name"    , "Test"      ] 
+--         --     -- , ["Display" , "Test File" ]
+--         --     -- , "Render"  
+--         --           , (contents : Str) -> ["div", contents] 
+--         --     --   ]
+--         --     ];
+-- 
+--         -- let Sigma = Fix <| ( a : A @ Any ) -> { [Type, (Hd (Single a))] };
+-- 
+-- 
+--         let Sigma = SelfT <| A -> { [Type, (Hd A)] };
+--         let a : Sigma = [Int, 5];
+--         let b : Sigma = [Str, "five"];
+--         let c : Sigma = [Single "Six", "Six"];
+--         let c2 : Sigma = [{ "Six" }, "Six"];
+--         let d : Sigma = [Bool, true];
+--         let list1 : Sigma = [List Int, [1,2,3]];
+-- 
+--         let pair1 : Sigma = [{ [Int ,, Bool] }, [1 ,, true]];
+-- 
+-- 
+--         -- let Sigma = Self <| A -> { [ -> Any, (Codomain (Hd A))] };
+--         -- let a : Sigma = [ -> 0, 5];
+-- 
+-- 
+--     """
+--     ]
+--   ]
+
+
+
+-- This is an attempt to be using less approximate types in the implementation of intersected function types
+-- This doesn't work yet
+-- , [ ["name", "method-dispatch"]
+--   , ["language", "ferrum/0.1"]
+--   , ["type_check", "bidir"]
+--   , ["decls",
+--     """
+--         let Maybe : { Type -> Type } = A -> { [] | [A] };
+--         let justTrustMeCast : { { From : Type } -> {To : Type} -> From -> To } =
+--             (From : Type) -> (To : Type) -> (a : From) -> 
+--             castT a : To;
+-- 
+-- 
+--         let Method = { { T : Type } -> M @ (Domain T) -> T M };
+--         -- let Method = { T @ Type -> M @ (Domain T) -> T M };
+--         let MethodApprox = { Type -> Str -> Any };
+--         
+--         let methodApprox : MethodApprox =
+--             T -> methodName -> { T (Single methodName) };
+--         
+--         -- let method : { { T : Type } -> M @ (Hd T) -> T M } =
+--         --     T -> (methodName : M @ (Hd T)) -> { T M };
+--         
+--         let method : Method =
+--             justTrustMeCast MethodApprox Method methodApprox;
+-- 
+--         -- let HpsDispatchApprox = { { Handler : Type } -> (List { [Str, Any] }) -> Str -> Any };
+--         let HpsDispatchApprox = { { Handler : Type } -> (List { [Str, (Codomain Handler)] }) -> Str -> (Codomain Handler) };
+--         
+--         let hpsDispatchApprox : HpsDispatchApprox =
+--             (Handler : Type) ->
+--             (handlerMethods) ->
+--             error "TODO";
+--             -- method ->
+--             -- match (lookup method handlerMethods)
+--             -- [ [result] |=> 
+--             --     result
+--             -- , _ |=>
+--             --     error ["dispatch", "unknown method name", "method"]
+--             -- ];
+--         
+--         -- let HpsDispatch = { { Handler : Type } -> H @ (List { [(Domain Handler), Any] }) -> M @ (Domain Handler) -> (Hd (Tl (Elem { H & [M, Any] }))) };
+--         let HpsDispatch = { { Handler : Type } -> H @ (List (Self <| HM -> { [(Domain Handler), Handler (Hd HM)] })) -> M @ (Domain Handler) -> (Hd (Tl (Elem { H & [M, Any] }))) };
+--         
+--         let hpsDispatch = justTrustMeCast HpsDispatchApprox HpsDispatch hpsDispatchApprox;
+-- 
+--         let Store = 
+--             Fix <| S ->
+--             { { "get"  -> Str        -> [S, (Maybe Int)] }
+--             & { "set"  -> [Str, Int] -> [S, []         ] }
+--             };
+-- 
+-- 
+--         let storeMk : { [Str, Int] -> Store } =
+--             fix <| (mk : { [Str, Int] -> Store }) ->
+--             state @ [key, val] -> 
+--             hpsDispatch Store
+--             [ method Store "get" <|
+--                 key2 ->
+--                 if (key2 == key)
+--                 [ -> [mk state, [val]]
+--                 , -> [mk state, []]
+--                 ]
+--             , method Store "set" <|
+--                 [key2, val2] ->
+--                 let state = [key2, val2];
+--                 [mk state, []]
+--             ];
+-- 
+--     """
+--     ]
+--   ]
+
+]
+
+
+
+
+
+
+
+
+
+
+
+
+

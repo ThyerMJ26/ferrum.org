@@ -3,12 +3,10 @@ language ferrum/test/0.1
 
 [
 
--- TODO instantiate types
-
    [ [ "name", "cond" ]
   , [ "language", "ferrum/0.1" ]
   , [ "type_check", "bidir" ]
-  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "project", "../fe4.proj.fe" ]
   , [ "decls",
       """
         let cond1 = 
@@ -28,7 +26,7 @@ language ferrum/test/0.1
 ,  [ [ "name", "instType" ]
   , [ "language", "ferrum/0.1" ]
   , [ "type_check", "bidir" ]
-  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "project", "../fe4.proj.fe" ]
   , [ "decls",
       """
          let t1 = -> instantiateReadBack "1 + 2";
@@ -57,7 +55,7 @@ language ferrum/test/0.1
 ,  [ [ "name", "evalType" ]
   , [ "language", "ferrum/0.1" ]
   , [ "type_check", "bidir" ]
-  , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+  , [ "project", "../fe4.proj.fe" ]
   , [ "decls",
       """
          let t1 = -> graphReduceStrToExpr " {\"A\"} ";
@@ -96,7 +94,7 @@ language ferrum/test/0.1
 , [ [ "name", "array1" ]
   , [ "language", "ferrum/0.1" ]
   , [ "type_check", "bidir" ]
-  , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+  , [ "project", "../fe4d.proj.fe" ]
   , [ "decls",
       """
         -- let array = mkArrayList [1,2,3];
@@ -149,7 +147,7 @@ language ferrum/test/0.1
 , [ [ "name", "assoc1" ]
   , [ "language", "ferrum/0.1" ]
   , [ "type_check", "bidir" ]
-  , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+  , [ "project", "../fe4d.proj.fe" ]
   , [ "decls",
       """
         let t1 = ->
@@ -181,7 +179,7 @@ language ferrum/test/0.1
 -- , [ [ "name", "assoc2" ]
 --   , [ "language", "ferrum/0.1" ]
 --   , [ "type_check", "bidir" ]
---   , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+--   , [ "project", "../fe4d.proj.fe" ]
 --   , [ "decls",
 --       """
 --         let t1 = ->
@@ -216,7 +214,7 @@ language ferrum/test/0.1
 -- , [ [ "name", "html" ]
 --   , [ "language", "ferrum/0.1" ]
 --   , [ "type_check", "bidir" ]
---   , [ "project", "../fe/fe-in-fe/fe4.proj.fe" ]
+--   , [ "project", "../fe4.proj.fe" ]
 --   , [ "decls",
 --       """
 --         let hello : Html = 
@@ -239,7 +237,7 @@ language ferrum/test/0.1
 , [ [ "name", "transient" ]
   , [ "language", "ferrum/0.1" ]
   , [ "type_check", "bidir" ]
-  , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+  , [ "project", "../fe4d.proj.fe" ]
   , [ "decls",
       """
         let testAssoc = (assoc : Assoc1 Int Int) ->
@@ -267,7 +265,7 @@ language ferrum/test/0.1
 , [ [ "name", "transient_data" ]
   , [ "language", "ferrum/0.1" ]
   , [ "type_check", "bidir" ]
-  , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+  , [ "project", "../fe4d.proj.fe" ]
   , [ "decls",
       """
         let testAssoc = (assoc : Assoc1 (List Int) Int) ->
@@ -296,7 +294,7 @@ language ferrum/test/0.1
 , [ [ "name", "assoc_data" ]
   , [ "language", "ferrum/0.1" ]
   , [ "type_check", "bidir" ]
-  , [ "project", "../fe/fe-in-fe/fe4d.proj.fe" ]
+  , [ "project", "../fe4d.proj.fe" ]
   , [ "decls",
       """
         let testAssoc = (assoc : Assoc1 Any Int) ->

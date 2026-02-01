@@ -32,7 +32,10 @@ export async function main() {
         console.error("Command Line Error:\n  " + cmdLineValues.errorMsgs.join("\n  "));
         process.exit(1);
     }
-    await main2(cmdLineValues.values, testDirUlr, fileUrl, testName);
+    process.exitCode = 1;
+    const ok = await main2(cmdLineValues.values, testDirUlr, fileUrl, testName);
+    process.stdout.write("", () => { }); // make sure everything is written out
+    process.exitCode = ok ? 0 : 1;
 }
 if (process.argv[1] === new URL(import.meta.url).pathname) {
     main();

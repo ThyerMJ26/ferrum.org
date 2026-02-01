@@ -37,11 +37,11 @@ function ferrumOrg(w: WebsiteBuilder): unit {
     // w.app("/apps/ide.html", "/gen", "ts/gen", "ide/ide-app.js", "ideApp", args)
 
     w.appDefine("IDE", "/ts/gen/ide/ide-app.js", "ideApp")
-    w.appInstantiate("IDE-1", "IDE", ["tests/fe4-.test.fe"])
+    w.appInstantiate("IDE-1", "IDE", ["tests/short.test.fe"])
     w.appPublish("/apps2/ide1.html", "IDE-1")
 
-    w.appInstantiate("IDE-2", "IDE", ["tests/fe4a.test.fe"])
-    w.appPublish("/apps2/ide2.html", "IDE-2")
+    // w.appInstantiate("IDE-2", "IDE", ["tests/fe4a.test.fe"])
+    // w.appPublish("/apps2/ide2.html", "IDE-2")
 
     // old-style apps, no longer supported
     // w.app("/apps/examples.html", "/gen", "ts/gen", "site/apps/examples-app.js", "examplesApp", [])
