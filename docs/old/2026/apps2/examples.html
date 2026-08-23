@@ -16,15 +16,15 @@ body { margin: 0; width: 100vw; height: 100vh; font-family: sans-serif; }
 <div id=topDiv></div>
 <script type='module'>
 
-  import { setIo } from "/gen/io/io.js"
-  import { mkIoBrowser } from "/gen/io/io-browser.js"
-  setIo(mkIoBrowser(new URL("/", window.location.href)))
+  import { setIo } from "../gen/io/io.js"
+  import { mkIoBrowser } from "../gen/io/io-browser.js"
+  setIo(mkIoBrowser(new URL("../", window.location.href)))
 
 </script>
 <script type='module'>
 
-  import { initApp } from "/gen/ui/browser.js"
-  import { examplesApp as app } from "/gen/ferrum-org/apps/examples-app.js"
+  import { initApp } from "../gen/ui/browser.js"
+  import { examplesApp as app } from "../gen/ferrum-org/apps/examples-app.js"
   initApp(app, [])
 
 </script>

@@ -23,9 +23,9 @@ body { font-family: sans-serif; margin: auto; line-height: 1.5; }
 <body>
 <hr style='margin: 4ch'>
 <script type='module'>
-  import { setIo } from "/gen/io/io.js"
-  import { mkIoBrowser } from "/gen/io/io-browser.js"
-  setIo(mkIoBrowser(new URL('/', window.location.href)))
+  import { setIo } from "./gen/io/io.js"
+  import { mkIoBrowser } from "./gen/io/io-browser.js"
+  setIo(mkIoBrowser(new URL('./', window.location.href)))
 </script>
 <div style="margin-left: calc(50% - 50ch); width: 100ch;">
 <h1>
@@ -42,8 +42,8 @@ Ex
 <div id=topDiv-1 style="margin: 2ch;">
 </div></div>
 <script type='module'>
-  import { initApp2 } from "/gen/ui/browser.js"
-  import { examplesApp as app } from "/gen/ferrum-org/apps/examples-app.js"
+  import { initApp2 } from "./gen/ui/browser.js"
+  import { examplesApp as app } from "./gen/ferrum-org/apps/examples-app.js"
   initApp2("topDiv-1", "EX-1", app, [])
 </script>
 <div class="s1">
@@ -56,8 +56,8 @@ short.test.fe
 <div id=topDiv-2 style="margin: 2ch;">
 </div></div>
 <script type='module'>
-  import { initApp2 } from "/gen/ui/browser.js"
-  import { ideApp as app } from "/gen/ide/ide-app.js"
+  import { initApp2 } from "./gen/ui/browser.js"
+  import { ideApp as app } from "./gen/ide/ide-app.js"
   initApp2("topDiv-2", "IDE-1", app, ["tests/short.test.fe"])
 </script>
 <hr style='margin: 4ch'>
