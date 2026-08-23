@@ -1,0 +1,572 @@
+language ferrum/0.1
+
+let ParseTree = Rec ( (PT:Type) ->
+    { ["PtToken", Token]
+    | ["PtRule", Str, (List PT)]
+    } );
+
+let ParseTreeToken = { ParseTree & ["PtToken",,Any] };
+let ParseTreeRule  = { ParseTree & ["PtRule",,Any] };
+
+let RuleResultOk = { ["ok", ParseTree, (List Token), Token] };
+let RuleResultFail = { ["fail", Token, Token] };
+let RuleResult = { RuleResultOk | RuleResultFail };
+
+let Rule = { (List Token) -> RuleResult };
+
+let RulesTable = Rec ( (RT:Type) -> 
+    List { [Str, RT -> (List Token) -> RuleResult] }
+);
+
+let Rule1 = { RulesTable -> (List Token) -> RuleResult };
+
+-- -- nop = \(rt: RulesTable)-> \(tokens: list Token)-> (("fail", hd tokens): RuleResult);
+ 
+let furthest : { Token -> Token -> Token }
+    = a @ [_, _, [_,_,[lineA,colA,_]]] -> b @ [_, _, [_,_,[lineB,colB,_]]] -> 
+
+    if (lineA > lineB) [ -> a, ->
+    if (lineB > lineA) [ -> b, ->
+    if (colA  > colB ) [ -> a, ->
+    if (colB  > colA ) [ -> b, ->
+    a]]]];
+
+    -- match []
+    -- [ -> lineA > lineB  |- a
+    -- , -> lineB > lineA  |- b
+    -- , -> colA  > colB   |- a
+    -- , -> colB  > colA   |- b
+    -- , -> otherwise      |- a
+    -- ];
+
+
+
+let def = [name: Str, rule: Rule1] -> [name: Str, rule: Rule1];
+ 
+let seq : { (List1 Rule1) -> RulesTable -> (List Token) -> RuleResult }
+    = rules -> rt -> tokens ->
+    loop ( [ [rule,,rules]: List1 Rule1, tokens: List Token, pts: List ParseTree, far: Token] ->
+        match (rule rt tokens) 
+        [ ["ok", pt, tokens2, far2] |=> 
+            match rules 
+            [ [] |=> break (["ok", ["PtRule", "seq", reverse ([pt,,pts]: list ParseTree)]: ParseTreeRule, tokens2, furthest far far2]: RuleResult)
+            , [rules1,,ruless] |=> continue [[rules1,,ruless], tokens2, [pt,,pts], furthest far far2]
+            ]
+        , ["fail", tok, far2] |=> break ["fail", tok, furthest far far2]
+        ]
+    ) [rules,tokens,[],nilToken];
+
+let alt : { (List1 Rule1) -> RulesTable -> (List Token) -> RuleResult }
+    = rules -> rt -> tokens ->
+    loop ( [ [rule,,rules]: List1 Rule1, tokens: List Token, far: Token] ->
+        match (rule rt tokens)
+        [ ["ok", pt, tokens2, far2] |=> 
+            break (["ok", ["PtRule", "alt", [pt]: list ParseTree]: ParseTreeRule, tokens2, furthest far far2]: RuleResult)
+        , ["fail", tok, far2] |=> 
+            match rules
+            [ [] |=> break (["fail", tok, furthest far far2]:RuleResultFail)
+            , [rules1,,ruless] |=> continue [[rules1,,ruless], tokens, furthest far far2]
+            ]
+        ]
+    ) [rules,tokens, nilToken];
+
+
+let rule : { Str -> RulesTable -> (List Token) -> RuleResult }
+    = name -> rt -> tokens ->
+    let rule = lookup name rt;
+    -- let _ = debug ["PARSE ", name, hd tokens];
+    ifNil rule
+    [ [] -> error ["unknown rule", name]
+    , [ruleFunc] ->
+        match (ruleFunc rt tokens)
+        [ ["ok", pt, tokens2, far] |=>
+            -- let _ = debug ["PARSE+", name, hd tokens2];
+            -- let _ = debug ["PARSE+", name, hd tokens];
+            ["ok", ["PtRule", name, [pt]], tokens2, far]: RuleResult
+        , ["fail", tok, far] |=>
+            -- let _ = debug ["PARSE-", name, tok];
+            ["fail", tok, far]: RuleResultFail
+        ]
+    ];
+
+let opt : { Rule1 -> RulesTable -> (List Token) -> RuleResult }
+    = rule -> rt -> tokens ->
+    match (rule rt tokens)
+    [ ["ok", pt, tokens2, far] |=>
+        ["ok", ["PtRule", "opt", [pt]], tokens2, far]: RuleResult
+    , ["fail", tok, far] |=>
+        ["ok", ["PtRule", "opt", []], tokens, far]: RuleResult
+    ];
+
+
+let rep : { Rule1 -> RulesTable -> (List Token) -> RuleResult }
+    =  rule -> rt -> tokens ->
+    loop ( [tokens: list Token, pts: list ParseTree, far: Token] ->
+        match (rule rt tokens)
+        [ ["ok", pt, tokens2, far2] |=> 
+            continue [tokens2, [pt,,pts], furthest far far2]
+        , ["fail", tok, far2] |=> 
+              -- trace ("rep", tok, tokens) $
+            break (["ok", ["PtRule", "rep", reverse pts]: ParseTreeRule, tokens, furthest far far2]: RuleResult)
+        ]
+    ) [tokens,[], nilToken];
+
+
+let rep1 : { Rule1 -> RulesTable -> (List Token) -> RuleResult } 
+    = rule -> 
+    seq [rule, rep rule];
+
+
+let identifierRule : { RulesTable -> (List Token) -> RuleResult }
+    = rt -> tokens ->
+    match tokens
+    [ [tok@["WORD", name, [_,start,end]],,tokens2] |=> ["ok", ["PtToken",tok], tokens2, tok]: RuleResult
+    , [tok,,_] |=> ["fail", tok, tok]: RuleResultFail
+    ];
+
+let operatorRule : { RulesTable -> (List Token) -> RuleResult }
+    = rt -> tokens ->
+    match tokens
+    [ [tok@["OPER", name,[_,start,end]],,tokens2] |=> ["ok", ["PtToken", tok], tokens2, tok]: RuleResult
+    , [tok,,_] |=> ["fail", tok, tok]: RuleResultFail
+    ];
+
+let integerRule : { RulesTable -> (List Token) -> RuleResult }
+    = rt -> tokens ->
+    match tokens
+    [ [tok@["NUMBER", name,[_,start,end]],,tokens2] |=> ["ok", ["PtToken", tok], tokens2, tok]: RuleResult
+    , [tok,,_] |=> ["fail", tok, tok]: RuleResultFail
+    ];
+
+let stringRule : { RulesTable -> (List Token)-> RuleResult }
+    = rt -> tokens ->
+    match tokens
+    [ [tok@["STRING", name,[_,start,end]],,tokens2] |=> ["ok", ["PtToken", tok], tokens2, tok]: RuleResult
+    , [tok,,_] |=> ["fail", tok, tok]: RuleResultFail
+    ];
+
+let sep : { Str -> RulesTable -> (List Token) -> RuleResult }
+    = name -> rt -> tokens ->
+    match tokens
+    [ [tok@["PUNCT", name2, [_,start,end]],,tokens2] |=> 
+        if (name==name2)
+        [-> ["ok", ["PtToken",tok], tokens2, tok] : RuleResult
+        ,-> ["fail", tok, tok] : RuleResultFail
+        ]
+    , [tok,,_] |=> ["fail", tok, tok]: RuleResultFail
+    ];
+    
+ 
+let keyword : { Str -> RulesTable -> (List Token) -> RuleResult }
+    = name -> rt -> tokens ->
+    match tokens
+    -- TODO match on TkKeyWord
+    [ [tok@["KEYWORD", name2, [_,start,end]],,tokens2] |=> 
+        if (name==name2)
+        [-> ["ok", ["PtToken",tok], tokens2, tok] : RuleResult
+        ,-> ["fail", tok, tok] : RuleResultFail
+        ]
+    , [tok,,_] |=> ["fail", tok, tok]: RuleResultFail
+    ];
+
+let wildcard : { RulesTable -> (List Token) -> RuleResult }
+    = rt -> tokens ->
+    match tokens
+    [ [tok@["WILD", name2, [_,start,end]],,tokens2] |=> 
+        ["ok", ["PtToken",tok], tokens2, tok] : RuleResult
+    , [tok,,_] |=> ["fail", tok, tok]: RuleResultFail
+    ];
+
+let keyOp : { Str -> RulesTable -> (List Token) -> RuleResult }
+    = name -> rt -> tokens ->
+    match tokens
+    -- TODO match on TkKeyOper
+    [ [tok@["KEYOPER", name2, [_,start,end]],,tokens2] |=> 
+        if (name==name2)
+        [-> ["ok", ["PtToken",tok], tokens2, tok] : RuleResult
+        ,-> ["fail", tok, tok] : RuleResultFail
+        ]
+    , [tok,,_] |=> ["fail", tok, tok]: RuleResultFail
+    ];
+
+ 
+let eof : { (List Token) -> RuleResult }
+    = tokens ->
+    match tokens
+    [ [tok@["EOF",_,_],,tokens2] |=> ["ok", ["PtToken",tok], tokens2, tok]
+    , [tok,,_] |=> ["fail", tok, tok]
+    ];
+
+
+let rules : List { [Str, Rule1] }
+    = 
+    [ [ "IDENTIFIER", identifierRule ]
+    , [ "OPERATOR", operatorRule ]
+    , [ "INTEGER", integerRule ]
+    , [ "STRING", stringRule ]
+    , [ "NIL", seq [ sep "[", sep "]"] ]
+    , [ "ATOMIC", alt [ rule "INTEGER", rule "STRING", rule "NIL" ] ]
+    , [ "TERM_EXP", seq [ sep "(", rule "EXP", sep ")" ] ]
+    , [ "TYPE_EXP", seq [ sep "{", rule "EXP", sep "}" ] ]
+    , [ "LIST_ELEMS", seq [ rule "EXP", rep (seq [ sep ",", rule "EXP" ] ) ] ]
+    , [ "LIST_TAIL", seq [ sep ",", keyOp "...", rule "EXP" ] ]
+    , [ "LIST_EXP", seq [ sep "[", rule "LIST_ELEMS", opt (rule "LIST_TAIL"), sep "]" ] ]
+    , [ "EXP1",
+        alt 
+        [ rule "IDENTIFIER"
+        , rule "TERM_EXP"
+        , rule "TYPE_EXP"
+        , rule "LIST_EXP"
+        , rule "ATOMIC"
+        , rule "WILDCARD"
+        ] ]
+    , [ "WILDCARD", wildcard]
+    , [ "AS",
+        alt 
+        [ seq [ rule "IDENTIFIER", keyOp "@", rule "EXP1" ]
+        , rule "EXP1"
+        ] ]
+    , [ "APPLY",
+        seq
+        [ rule "AS"
+        , alt 
+            [ seq [ alt [keyOp "->", keyOp "|->"], rule "EXP" ]
+            , rep ( alt [ rule "AS", rule "OPERATOR" ] )
+            ]
+        ] ]
+    , [ "EXP", 
+        alt 
+        [ rule "LET"
+        , seq [ keyOp "->", rule "EXP" ]
+        , seq [ rule "APPLY", opt (rule "TYPE_ANNOT")] 
+        ] ]
+    , [ "TYPE_ANNOT", seq [ keyOp ":", rule "EXP" ] ]
+    , [ "LET", seq [ rule "DECLS", rule "EXP" ] ]
+    , [ "DECLS", rep1 (rule "DECL") ]
+    , [ "DECL",
+        seq 
+        [ keyword "let"
+        , rule "EXP1"
+        , opt (rule "TYPE_ANNOT")
+        , keyOp "="
+        , rule "EXP"
+        , sep ";"
+        ] ]
+    , [ "TOP", rep (rule "DECL") ]
+    ];
+    
+
+
+
+let parseRule : { Str -> (List Token) -> RuleResult }
+    = ruleName -> tokens ->
+    -- let _ = debug ["PARSE", ruleName];
+    rule ruleName rules tokens;
+--    let ruleFuncMaybe = lookup ruleName rules;
+--    match ruleFuncMaybe
+--    [ [] |=> error ["unknown rule", ruleName]
+--    , [ruleFunc] |=> ruleFunc rules tokens
+--    ];
+
+let testParse : { Str -> (List Token) -> Any }
+    = ruleName -> tokens ->
+    let result : RuleResult = parseRule ruleName tokens;
+    match result
+    [  ["ok", pt, [["EOF",_,_]], far]    |=> trace pt "Test PASSED"
+    ,  ["ok", pt, [], far]               |=> ["Test Failed 1", pt, [], far]
+    ,  ["ok", pt, [tok,,tokens], far]  |=> ["Test Failed 2", pt, tok, far]
+    ,  ["fail", tok, far]                |=> ["Test Failed 3", [], tok, far]
+    ,  other -> error ["other", other]
+    ];
+
+
+
+-- -- flattened parse tree
+let ParseTreeF = Rec ( (PTF:Type) -> {[ Str, (List PTF), (List Token) ]} );
+ 
+-- flatten = fix \(flatten:(\ParseTree=>pair (list ParseTreeF) (list Token)))-> \(pt: ParseTree): pair (list ParseTreeF) (list Token) ->
+--     case pt of {
+--         ("token", tok)-> ([], [tok]);
+--         ("rule", name, pts)->
+--           let { (rules, tokens) = unzip (map flatten pts); } in
+--           if isUpper name
+--           then ([(name, concat rules, concat tokens)], [])
+--           else (concat rules, concat tokens);
+--     };
+
+
+
+let flatten1 : { ParseTree -> [ (List ParseTreeF), (List Token) ] }
+    = rec ( (flat: { ParseTree -> [ (List ParseTreeF), (List Token) ] }) -> (pt: ParseTree) ->
+        match pt
+        [ ["PtToken", tok] |=> [[], [tok]]
+        , ["PtRule", name, pts] |=>
+            let [rules, tokens] = unzip (map flat pts);
+            if (isUpper name)
+            [ -> [ [[name, concat rules, concat tokens]], [] ]
+            , -> [concat rules, concat tokens]
+            ]
+        ] 
+    );
+
+let flatten2 : { ParseTree -> ParseTreeF }
+    = pt ->
+        -- let _ = debug ["flatten2", pt];
+        match pt
+        [ ["PtToken", tok] |=> ["", [], [tok]]: ParseTreeF
+        , ["PtRule", name, pts] |=>
+            let [rules, tokens] = unzip (map flatten1 pts);
+            [name, concat rules, concat tokens]: ParseTreeF
+        ];
+
+let PrecRel = { "Higher" | "Lower" | "None" };
+let Associativity = { "Left" | "Right" | "None" };
+-- let Fixity = { "Prefix" | "Infix" | "Postfix" };
+
+let OpCat = List Str;
+
+let OpTableRow = { [ OpCat, Fixity, Associativity, (List Str) ] };
+
+let opTable : List OpTableRow = 
+    [ [ ["Projection"],             "Infix",   "Left",  ["!", "!!"] ]
+    , [ ["Composition", "Forward"], "Infix",   "Right", [">>"] ]
+    , [ ["Composition", "Reverse"], "Infix",   "Left",  ["<<"] ]
+    , [ ["Numeric", "Exp"],         "Infix",   "Right", ["**"] ]
+    , [ ["Numeric", "MulDiv"],      "Infix",   "Left",  ["*", "/"] ]
+    , [ ["Numeric", "AddSub"],      "Infix",   "Left",  ["+", "-"] ]
+    -- , [ ["StrAdd"],                 "Infix",   "Right", ["^"] ]
+    , [ ["Compare"],                "Infix",   "None",  ["==", "/=", "<", "<=", ">=", ">"] ]
+    , [ ["Logical", "And"],         "Infix",   "Left",  ["&&"] ]
+    , [ ["Logical", "Or"],          "Infix",   "Left",  ["||"] ]
+    , [ ["Type", "RelComp"],        "Infix",   "Left",  ["\\"] ]
+    , [ ["Type", "Intersect"],      "Infix",   "Left",  ["&"] ]
+    , [ ["Type", "Union"],          "Infix",   "Left",  ["|"] ]
+    , [ ["Pipeline", "Forward"],    "Infix",   "Left",  ["|>"] ] 
+    , [ ["Pipeline", "Reverse"],    "Infix",   "Right", ["<|"] ] 
+    , [ ["Reduction"],              "Postfix", "None",  ["$?", "$!"] ]
+    ];
+
+let lookupOp : { Str -> [OpTableRow, Int] }
+    = opName ->
+    loop ( [ops: List OpTableRow, pos: Int] ->
+        ifNil ops
+        [ [] -> 
+            -- let _ = debug ["Unknown Op", opName]; break []
+            error ["Unknown Operator", opName]
+        , [row@[_,_,_,opNames],,rows] -> 
+            if (isElem opName opNames)
+            [ -> break [row, pos]
+            , -> continue [rows, pos+1]
+            ]
+        ]
+    ) [opTable, 0];
+ 
+
+let getOpPrecRel : { Str -> Str -> PrecRel }
+    = a -> b ->
+    let [[_, _, assoc, ops], aPos] = lookupOp a;
+    if (isElem b ops)
+    [ ->
+        match assoc
+        [ "Left" |=> "Lower"
+        , "Right" |=> "Higher"
+        , "None" |=> "None" -- error ["No precedence relationship exists between operators", a, b]
+        ]
+    , ->
+        let [bOp, bPos] = lookupOp b;
+        if (aPos < bPos)
+        [ -> "Higher"
+        , ->
+            if (aPos > bPos)
+            [ -> "Lower"
+            , -> error "Impossible"
+            ]
+        ]
+    ];
+
+
+let foldOps1 : { (List Expr) -> Expr }
+    = expList ->
+    loop ( [stack: List Expr, queue: List Expr] ->
+        ifNil queue
+        [ [] ->
+            match stack
+            [ [result] |=> break result
+            , [exp1, exp2,,exps] |=>
+                continue [ [ ["EApply", exp1, exp2],,exps], [] ]
+            ]
+        , [elem,,elems] ->
+            ifNil stack
+            [ [] -> continue [ [elem], elems ]
+            , [s1,,ss] ->
+                -- continue [ [elem,,stack], elems ]
+                let app = ["EApply", s1, elem];
+                continue [ [app,,ss], elems ]
+            ]
+        ]
+    ) [ [], expList ];
+
+let isOp : { Str -> Bool }
+    = a -> not (isAlpha a);
+
+let foldOps : { (List Expr) -> Expr }
+    = expList ->
+    loop ( [operators: List Expr, operands: List Expr, input: List Expr, argMode: Bool] ->
+        -- let _ = debug ["FOLD OPS", "Operators", operators, "Operands", operands, "Input", input, "ArgMode", argMode];
+        ifNil input
+        [ [] ->
+            match operators
+            [ [] |=> 
+                match operands 
+                [ [result] |=> break (result: Expr)
+                , _ |=> error ["failed to fold operators"]
+                ]
+            , [op1@["EVar", opName],,ops] |=>
+                match operands
+                [ [arg1, arg2,,args] |=>
+                    -- let app = ["EApply", ["EApply", op1, arg2], arg1];
+                    -- let ["EVar", opName] = op1;
+                    let app = ["EOper", opName, [arg2, arg1]];
+                    continue [ ops, [app,,args], [], argMode ]
+                , _ |=> error ["failed to fold operators"]
+                ]
+            ]
+        , [inp1,,inps] ->
+            ifNil operands
+            [ [] -> -- TODO check for prefix operators
+                continue [ operators, [inp1], inps, true ]
+            , [arg1,,args] ->
+                match inp1
+                [ ["EVar", name] |=>
+                    if (isOp name)
+                    [ ->
+                        match operators
+                        [ [] |=> 
+                            continue [ [inp1,,operators], operands, inps, false ]
+                        , [["EVar", op1],,ops] |=>
+                            match (getOpPrecRel name op1)
+                            [ "Higher" |=> continue [ [inp1,,operators], operands, inps, false ]
+                            , "Lower"  |=> 
+                                match args
+                                [ [arg2,,args2] |=>
+                                    -- continue [ ops, [ ["EApply", ["EApply", ["EVar", op1], arg2], arg1],,args2], input, argMode ]
+                                    continue [ ops, [ ["EOper", op1, [arg2, arg1]],,args2], input, argMode ]
+                                , _ |=> error ["failed to fold operators"]
+                                ]
+                            , "None"   |=> error ["Operators do not have a precedence relationship", name, op1]
+                            ]
+                        ]
+                    , ->
+                        if argMode
+                        [ -> continue [ operators, [ ["EApply", arg1, inp1],,args], inps, true ]
+                        , -> continue [ operators, [inp1,,operands], inps, true ]
+                        ]
+                    ]
+                , _ |=>
+                    if argMode
+                    [ -> continue [ operators, [ ["EApply", arg1, inp1],,args], inps, true ]
+                    , -> continue [ operators, [inp1,,operands], inps, true ]
+                    ]
+                    
+                ]
+            ]
+        ]
+    ) [ [], [], expList, false ];
+
+
+
+let convertDecl : { { ParseTreeF -> Expr } -> ParseTreeF -> [Expr, Expr] } 
+    = conv -> pt ->
+    match pt 
+    [ ["DECL", [pat,defn], _]          |=> [conv pat, conv defn]
+    , ["DECL", [pat,typAnnot,defn], _] |=> [["EType", conv pat, conv typAnnot], conv defn]
+    , [name, pts, toks]                |=> error ["failed to convert decl", name, map hd pts, map hd toks]
+    ];
+
+let convertExpr : { ParseTreeF -> Expr }
+    = rec ( (conv: { ParseTreeF -> Expr }) -> pt ->
+        match pt
+        [ [ "IDENTIFIER", [], [["WORD", name, _]] ] |=> ["EVar", name]
+        , [ "OPERATOR", [], [["OPER", name, _]] ]   |=> -- let _ = lookupOp name; 
+            ["EVar", name]
+        , [ "INTEGER", [], [["NUMBER", num, _]] ]   |=> ["ELit", num]
+        , [ "STRING", [], [["STRING", strg, _]] ]   |=> ["ELit", strg]
+        , [ "NIL", _, _ ]                           |=> ["ELit", []]
+        , [ "ATOMIC", [pt1], _ ]                    |=> conv pt1
+        , [ "TERM_EXP", [pt1], _ ]                  |=> conv pt1
+        , [ "TYPE_EXP", [pt1], _ ]                  |=> conv pt1
+        , [ "LIST_ELEMS", pts, _ ]                  |=> ["EList", map conv pts, []]
+        , [ "LIST_TAIL", [pt1], _ ]                 |=> conv pt1
+        , [ "LIST_EXP", [pt1], _ ]                  |=> conv pt1
+        , [ "LIST_EXP", [pt1, pt2], _ ]             |=> match (conv pt1) [ ["EList", elems, []] |=> ["EList", elems, [conv pt2]] ]
+        , [ "EXP1", [pt1], _ ]                      |=> conv pt1
+        , [ "WILDCARD", _, _ ]                      |=> ["EVar", "_"] -- TODO ? a wildcard constructor ?
+        , [ "AS", [pt1], _ ]                        |=> conv pt1
+        , [ "AS", [["IDENTIFIER",[],[["WORD",name,_]]], pt1], _ ] 
+                                                    |=> ["EAs", name, conv pt1]
+        , [ "APPLY", [pt1,pt2], [["KEYOPER", "->", _]] ] 
+                                                    |=> ["ELambda", conv pt1, conv pt2]
+        , [ "APPLY", [pt1,pt2], [["KEYOPER", "|->", _]] ] 
+                                                    |=> ["ELambdaMaybe", conv pt1, conv pt2]
+        , [ "APPLY", pts, _ ]                       |=> foldOps (map conv pts)
+        , [ "EXP", [pt1], [] ]                      |=> conv pt1
+        , [ "EXP", [pt1], [["KEYOPER", "->", _]] ]  |=> ["ELambda", ["ELit", []], conv pt1]
+        , [ "EXP", [pt1, pt2], _ ]                  |=> ["EType", conv pt1, conv pt2]
+        , [ "TYPE_ANNOT", [pt1], _ ]                |=> conv pt1
+        , [ "LET", [["DECLS",decls,_],exp], _ ]     |=> 
+            let declsExpr = map (convertDecl conv) decls;
+            let expExpr = conv exp;
+            ["ELets", declsExpr, expExpr]
+        , [ _, pts, toks ] |=> error ["parse conversion failed", hd pt, map hd pts, map hd toks]
+        ]
+    );
+
+let convertTop : { ParseTreeF -> (List {[Expr, Expr]}) }
+    = pt ->
+    match pt
+    [ ["TOP", decls, _] |=>
+        map (convertDecl convertExpr) decls
+    , _ |=> error ["failed to convert top"]
+    ];
+
+
+let testParse2 : { Str -> (List Token) -> Any }
+    = ruleName -> tokens ->
+    let result : RuleResult = parseRule ruleName tokens;
+    match result
+    -- [  ["ok", pt, [["EOF",_,_]], far]    |=> convert (hd (hd (flatten1 pt)))
+    [  ["ok", pt, [["EOF",_,_]], far]    |=> convertExpr (flatten2 pt)
+    -- [  ["ok", pt, [["EOF",_,_]], far]    |=> flatten pt
+    ,  ["ok", pt, [], far]               |=> ["Test Failed 1", pt, [], far]
+    ,  ["ok", pt, [tok,,tokens], far]  |=> ["Test Failed 2", pt, tok, far]
+    ,  ["fail", tok, far]                |=> ["Test Failed 3", [], tok, far]
+    ,  other -> error ["other", other]
+    ];
+
+let testParse3 : { Str -> (List Token) -> Expr }
+    = ruleName -> tokens ->
+    let result : RuleResult = parseRule ruleName tokens;
+    match result
+    [  ["ok", pt, [["EOF",_,_]], far]    |=> convertExpr (flatten2 pt)
+    ,  ["ok", pt, [], far]               |=> error ["Test Failed 1", pt, [], far]
+    ,  ["ok", pt, [tok,,tokens], far]  |=> error ["Test Failed 2", pt, tok, far]
+    ,  ["fail", tok, far]                |=> error ["Test Failed 3", [], tok, far]
+    ,  other -> error ["other", other]
+    ];
+
+let testConvert : { Str -> (List Token) -> Any }
+    = ruleName -> tokens ->
+    let result : RuleResult = parseRule ruleName tokens;
+    match result
+    [ ["ok", pt, [["EOF",_,_]], far]    |=> 
+        -- let _ = convert (hd (hd (flatten1 pt)));
+        let _ = convertTop (flatten2 pt);
+        "Test PASSED"
+    , ["ok", pt, [], far]               |=> ["Test Failed 1", pt, [], far]
+    , ["ok", pt, [tok,,tokens], far]  |=> ["Test Failed 2", pt, tok, far]
+    , ["fail", tok, far]                |=> ["Test Failed 3", [], tok, far]
+    , other -> error ["other", other]
+    ];
+
+
+

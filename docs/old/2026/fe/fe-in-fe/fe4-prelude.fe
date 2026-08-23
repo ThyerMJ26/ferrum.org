@@ -1,0 +1,2226 @@
+language ferrum/0.1
+
+let Rec = Fix;
+let rec = fix;
+
+let panic = error;
+
+-- let IdentityFunc = { A @ Any -> A };
+let identityFunc = (a : A @ Any) -> a;
+
+let Nil = {[]};
+-- let Unit = {[]};
+-- let Nothing = {[]};
+
+let Datum = { Nil | Bool | Int | Str };
+let Data = Rec (Data -> { Datum | [Data,,Data]} );
+
+-- let DataPair = Rec <| D -> { Datum | [D,,D] };
+-- let DataList = Rec <| D -> { Datum | (List D) };
+
+-- TODO ? 
+-- let Data = DataList;
+
+
+-- let Discernable = { Datum | [Any ,, Any] };
+-- let Discernable = { Datum | (List Any) };
+
+-- TODO option 1
+-- TODO Parametericity for All
+-- TODO   (currently we have "Parametericity for Fun(ction types)")
+-- TODO ifBool/ifInt/etc should only accept discerable arguments
+-- TODO If you don't already know you have a piece of data, or something discerable, 
+-- TODO   then no runtime operations should reveal anything about what it is.
+-- TODO Currently it would be possible for a function taking a continuation (k : K @ { Int -> Any }),
+-- TODO   to check the result of the continuation
+-- TODO The result would likely be a tuple containing a request-response pair, when using a shallow approach to effects
+-- TODO but the result would be the very final result of the program, when using a deep approach to effects
+-- TODO   the continuation taking function shouldn't be able to do this.
+-- TODO one fix would be to always use function types, no information can be gleaned from a function if you don't have anything to call it with.
+-- TODO but ensuring parametericity-for-all seems preferable
+-- TODO also lambda-maybe functions should only match against discerable things
+
+
+-- TODO option 2
+-- TODO Parametericity for All (but not for Any)
+-- TODO no need to complicate things with "Discernable" types
+-- TODO ifBool/ifInt/etc can still take arguments of type Any
+-- TODO    but they are forbidden from accepting arguments of type All
+-- TODO Any and All can actually be the same type, so long as no one lets the type system in on this secret
+-- TODO alternatively
+-- TODO   let All = { Any | Unknown };
+-- TODO Either way
+-- TODO   { All \ Any }  -reduces-to->  Unknown (or just doesn't reduce, so as not to contradict { Any \ All })
+-- TODO   { Any \ All }  -reduces-to->  Void
+-- TODO 
+-- TODO The generic continuation above (in option 1) would then be written (k : K @ { Int -> All })
+-- TODO   no non-parametric function can then inspect the result of calling k
+-- TODO 
+-- TODO option 2 should help keep the types for lambda-maybe functions more manageable
+
+
+-- TODO implement List and Elem here in the prelude rather than as built-ins
+-- let List = (A : Type) -> Rec ( (ListA: Type) -> { [] | [A,, ListA] } );
+-- let List : { Type->Type } = A -> Rec ( ListA -> { [] | [A,, ListA] } );
+-- let Elem = ( Rec ( ListA -> { [] | [A@Any,,ListA] }): Type ) -> A;
+-- let Elem = rec ( (Elem: {Type->Type}) -> (A: Type) -> { Hd A | (Elem (Tl A)) } );
+-- let Elem : { Type->Type } = rec ( Elem -> A -> { Hd A | (Elem (Tl A)) } ) ;
+-- let Elem : { Type->Type } = rec (memoRef ( Elem -> A -> { Hd A | (Elem (Tl A)) } ) );
+-- let Elem : { Type->Type } = rec <| memoRef <| Elem -> A -> { Hd A | (Elem (Tl A)) };
+
+-- let Maybe = (A : Type) -> { [] | [A] };
+let ListNonEmpty = (A : Type) -> { [A ,, (List A)] };
+
+-- TODO ?
+-- let None : Type = { [] };
+-- let NoneOf : { Type -> Type } = A -> None;
+-- let OneOf  : { Type -> Type } = A -> [A];
+-- let SomeOf : { Type -> Type } = A -> { [A ,, (List A)] };
+-- let Maybe  : { Type -> Type } = A -> { None | (OneOf A) };
+-- let none : None = [];
+-- let oneOf  : { A @ Any -> (OneOf A) } = a -> [a];
+-- let someOf : { A @ [Any ,, (List Any)] -> (SomeOf (Elem A)) } = a -> a;
+let No = { [] };
+let Yes : { Type -> Type } = A -> { [A] };
+let Maybe : { Type -> Type } = A -> { No | (Yes A) };
+let no = [];
+let yes : { A @ Any -> [A] } = (a : A @ Any) -> [a];
+
+let fromYesOrPanic : { A @ (Maybe Any) -> (Hd A) } =
+    (aMb : A @ (Maybe Any)) ->
+    ifNil aMb
+    [ -> panic ["fromYesOrPanic", "expected a yes value, but got a no value"]
+    , [a] -> a
+    ];
+
+let ifYes : { A @ (Maybe Any) -> K @ [(Hd A) -> Any, -> Any] -> (Hd K) (Hd A) | (Hd (Tl K)) [] } =
+    (aMb : A @ Maybe Any) -> ([kYes, kNo] : K @ { [(Hd A) -> Any, -> Any] }) ->
+    ifNil aMb
+    [ -> kNo []
+    , [a] -> kYes a
+    ];
+
+-- TODO ? Functor / ListFunctor ?
+-- opposite of Elem
+--   (Elem    (Maybe Int))         -reduces-to->  Int
+--   (Functor (Maybe Int))         -reduces-to->  (A -> Maybe A)
+--   (Elem    (ListNonEmpty Int))  -reduces-to->  Int
+--   (Functor (ListNonEmpty Int))  -reduces-to->  (A -> ListNonEmpty A)
+--   (Elem    { [Int, Int] })      -reduces-to->  Int
+--   (Functor { [Int, Int] })      -reduces-to->  (A -> { [A, A] })
+--   (Elem    None)                -reduces-to->  Void
+--   (Functor None)                -reduces-to->  (A -> None)
+-- could be used in structure preserving functions, e.g. reverse/map
+--   let reverse : { A @ (List Any) -> (Functor A (Elem A)) } = ...
+--   let map : { A @ (List Any) -> F @ { (Elem A) -> Any } -> (Functor A { B (Elem A) }) } = ...
+-- currently, if reverse/map is called on a maybe/non-empty-list/tuple, the result type is always a plain List
+
+let Ok : { Type -> Type } =
+    T -> { ["Ok", T] };
+
+let ok : { A @ Any -> (Ok A) } =
+    (a : A @ Any) -> ["Ok", a];
+
+let Error : { Type -> Type } =
+    T -> { ["Error", T] };
+
+-- TODO rename this to error, once all the current references to error are changed to panic
+let error2 : { A @ Any -> (Error A) } =
+    (a : A @ Any) -> ["Error", a];
+
+let Result : { Type -> Type -> Type } = 
+    OK -> ERR -> 
+    { (Ok OK) | (Error ERR) };
+
+-- let Result : { Type -> Type -> Type } = 
+--     OK -> ERR -> 
+--     { ["Ok", OK] | ["Err", ERR] };
+
+-- let List = (A: Type) -> Rec (ListA: Type) -> { {A :: ListA} | Nil };
+-- let List = (A: Type) -> Rec (ListA: Type) -> { {A :: ListA} | [] };
+
+-- let Thunkable = { Datum | [Any, ..Any] };
+-- let Thunk = (A: Type) -> { [] -> A };
+-- let Thunk = (A: Type) -> { A | [] -> A };
+-- let Thunk = (A: SubType Thunkable) -> { A | [] -> A };
+
+-- let BoolThunk = { Bool | { [] -> Bool } };
+
+
+let debug = msg -> trace msg [];
+
+-- let debug2 : { Any -> K @ { Nil -> Any } -> K Nil } =
+--     msg -> (k : K @ { Nil -> Any }) -> 
+--     let _ = trace msg [];
+--     k [];
+
+let debug2 : { Any -> K @ { Nil -> Any } -> (Codomain K) } =
+    msg -> (k : K @ { Nil -> Any }) -> 
+    trace2 msg k;
+
+let debug2Skip : { Any -> K @ { Nil -> Any } -> K Nil } =
+    msg -> (k : K @ { Nil -> Any }) -> 
+    k [];
+
+
+let cast : { { From : Type } -> {To : Type} -> From -> To }
+    = (From : Type) -> (To : Type) -> (a : From) -> 
+    castT a : To;
+
+let justTrustMeCast = cast;
+
+-- -- TODO ? implement while using loop / or implement loop using while ?
+-- let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+--     (initVal: A @ Any) -> iterate ->
+--     loop1 ( (val: A) ->
+--         ifNil (iterate val)
+--         [ [] -> break val
+--         , [val2] -> continue val2
+--         ]
+--     ) initVal;
+
+let while : { A @ Any -> { A -> (Maybe A) } -> A } =
+    (initVal: A @ Any) -> iterate ->
+    loop2 initVal <| val ->
+    ifNil (iterate val)
+    [ [] -> break val
+    , [val2] -> continue val2
+    ];
+
+-- TODO refine the result to be something that the F while-body would reject (where ~ is postfix function-type inverse)
+-- let while : { A @ Any -> F @ { A -> (Maybe A) } -> { A & F ~ [] }
+-- let while : { A @ Any -> F @ { A -> (Maybe A) } -> F ~ [] } 
+-- "while" returns something that "f" could produce (when given something of type A), but wouldn't accept (would return [] when called)
+-- let while : { A @ Any -> F @ { A -> (Maybe A) } -> { F A } & { F ~ [] } }
+-- let while : { A @ Any -> F @ { A -> (Maybe A) } -> (Hd { F A }) & { F ~ [] } }
+
+-- let while2 =
+--     justTrustMeCast 
+--     { A @ Any -> { A -> (Maybe A) } -> A }
+--     -- { A @ Any -> F @ { A -> (Maybe A) } -> { A & (Inverse F) [] } }
+--     { A @ Any -> F @ { A -> (Maybe A) } -> { A \ (Inverse F) [Any] } }
+--     while;
+
+-- TODO ? perhaps instead of lambda-maybes, lambda-or-else might make things easier
+-- TODO e.g.
+-- TODO   ( [a, b] --> a + b ) [3,4]   (_ -> "oops")     reduces to  7
+-- TODO but
+-- TODO   ( [a, b] --> a + b ) [3,4,5] (_ -> "oops")     reduces to  "oops"
+-- TODO it's then easier to reason about the failure case without inverting function types
+
+-- let while3 : 
+--     {  A @ Any 
+--     -> B @ { A 
+--           -> { A -> Any } 
+--           -> { A -> Any } 
+--           -> (Codomain (Domain (Codomain B))) | (Codomain (Domain (Codomain (Codomain B)))) 
+--           } 
+--     -- explicitly returns the type that made the "iterate" function call the failure/loop-exit case
+--     -> (Codomain (Domain (Codomain (Codomain B)))) =
+--     (initVal : A @ Any) -> 
+--     (iterate : B @ { A -> { A -> Any } -> { A -> Any } -> (Codomain (Domain (Codomain B))) | (Codomain (Domain (Codomain (Codomain B)))) }) ->
+--     loop1 ( (val : A) ->
+--         iterate val ( val2 -> continue val2 ) ( val2 -> break val2 )
+--     ) initVal;
+
+-- TODO or maybe a lambda-if expression
+-- TODO e.g.
+-- TODO   ( [a, b] --> a + b ) [3,4]   [ result -> ["xyz",result], other -> ["oops", other] ]     reduces to  ["xyz",7]
+-- TODO but
+-- TODO   ( [a, b] --> a + b ) [3,4,5] [ result -> ["xyz",result], other -> ["oops", other] ]     reduces to  ["oops", [3,4,5]]
+
+-- TODO ? lambda-if     ( ?-> )
+-- TODO ? lambda-then   ( !-> )
+-- TODO ? for example:  
+-- TODO ?   let f =
+-- TODO ?     ( [a, b] ?-> 
+-- TODO ?       guardInt a <| a2 ?->
+-- TODO ?       guardInt b <| b2 !->
+-- TODO ?       a2 + b2 
+-- TODO ?     ) [result -> [result], mismatch -> ["error",mismatch]];
+-- TODO ?   f [1,2]      == [3];
+-- TODO ?   f [1,2,3]    == ["error", [1,2,3]];
+-- TODO ?   f ["1", 2]   == ["error",["1",2]];
+-- TODO ? 
+-- TODO ? lambda-if takes an argument and a 2-tuple of continuations, 
+-- TODO ?   calls the failure-continuation if the pattern match fails, 
+-- TODO ?   otherwise, calls body of the lambda, with the argument value and the continuation tuple so that the body can conditionally fail too.
+-- TODO ? lambda-then takes an argument and a 2-tuple of continuations, 
+-- TODO ?   calls the failure-continuation if the pattern match fails, 
+-- TODO ?   otherwise, evaluates the lambda body and calls the success-continuation with the result.
+-- TODO ? ( need to clarify what the failure continuation gets called with, the argument to the first lambda seems preferable, but not entirely natural, and there are other options )
+-- TODO ? this might avoid the need/desire to invert function types, but doesn't necessarily seem simpler overall.
+
+
+-- TODO in practice, perhaps the main reason to call Inverse is to compute { F ~ [] } and { F ~ [Any] }
+-- TODO if handling these two cases is simple enough, perhaps that makes for the lowest overall level of sufficient complexity.
+
+-- TODO ? maybe consider type inversion followed by function type application as a single operation. ?
+-- TODO e.g.
+-- TODO   { F ~ A }
+-- TODO would be an infix inverse-apply operator, rather than a post-fix operation followed by a type application
+-- TODO ? do we (would we) ever use type-inversion, and not immediately perform a type-application with the result ?
+
+
+-- TODO ? infix lookUP operators
+-- TODO ?   -- ( ^- ) lookup item by position, (keep taking the tail of "a" and decrementing "b" until we reach zero, then return the head)
+-- TODO ?   let (a ^- b) : { A @ (List Any) -> B @ Int -> A ^- B }
+-- TODO ?   let (a ^- b) : { A @ (List Any) -> B @ (IntRange 0 { (Length A) - 1 }) -> A ^- B }
+-- TODO ?   -- ( ^= ) lookup item by name, (keep taking the tail of "a" until the first element of the head of "a" equals "b", then return the second element )
+-- TODO ?   let (a ^= b) : { A @ (List { [Data, Any] }) -> B @ Data -> A ^= B }
+-- TODO ?   let (a ^= b) : { A @ (List { [Data, Any] }) -> B @ (Hd (Elem A)) -> A ^= B }
+-- TODO ?   let (a ^= b) : { { { a : A } @ (List { [Data, Any] }) -> B @ (Hd (Elem (Single a))) -> A ^= B }
+-- TODO ? lookup functions can either have a dependent key type, or they should return a maybe type.
+-- TODO ?   perhaps there should be a maybe variant and a definite variant
+-- TODO ?   alternatively, an intersected dependent type returning a yes or a no,
+-- TODO ?   if the index/key can be seen to be in the list, the return type is a yes-type, 
+-- TODO ?   if the index/key can be seen not to be in the list, the return type is the no-type, 
+-- TODO ?   if it cannot be clearly seen either way, the return type is a maybe-type
+-- TODO ? if returning a yes-type, we could do with a concise way to extract the value,
+-- TODO ?     [7,8,9] ^- 1 |> head
+-- TODO ?   a post-fix "^" would make some sense 
+-- TODO ?     [7,8,9] ^- 1 ^  
+-- TODO ? alternatively, incorporate the projection from the maybe-value into the projection from the list  
+-- TODO ?     [7,8,9] ^- 1 : (Maybe Int)
+-- TODO ?     [7,8,9] ^^- 1 : Int -- (this is the same symbol as the lookup-and-update operator, oops)
+-- TODO ?     [7,8,9] ^-^ 1 : Int
+-- TODO ?   
+  
+
+
+-- TODO ? index from both ends of a list
+-- TODO ?   (a ^+ 0)  -- first element in list (a[0] in Python)
+-- TODO ?   (a ^- 1)  -- last element in list  (a[-1] in Python)
+-- TODO ?   similar to Python, but without the risk of mis-calculated indices being accidentally valid, when an error would be preferable
+-- TODO ? only really sensible to use with lists/tuples with a constant-access-time representation
+
+-- TODO ? list slicing operator
+-- TODO ?   (a ^++ [1,2])  similar to Python (a[1:2])
+-- TODO ?   (a ^+- [1,2])  similar to Python (a[1:-2])
+-- TODO ?   similar to Python, but without the risk of mis-calculated indices being accidentally valid, when an error would be preferable
+-- TODO ? only really sensible to use with lists/tuples with a constant-access-time representation
+
+-- TODO ? prefix lookUP operators
+-- TODO ?   ( ^- idx ) list
+-- TODO ?   ( ^= key ) kvList
+
+-- TODO ? infix lookUP and UPdate operators (double UP arrow)
+-- TODO ?   (  1  ^^- "banana" ) ["a", "b", "c"]                 --->  ["a", "banana", "c"]
+-- TODO ?   ( "b" ^^=  99      ) [["a", 3], ["b", 5], ["c", 8]]  --->  [["a", 3], ["b", 99], ["c", 8]]
+
+-- TODO ? extend the domain of lookUP operators to allow functions as well as lists ?  
+
+-- TODO ? custom handling of dot operator ?
+-- TODO ?   ( a.xyz )   --->   ( a ^= "xyz" )
+-- TODO ?   ( a.7   )   --->   ( a ^- 7     )
+
+
+-- TODO ? ( |> |>> |>>> <| <<| <<<| ) multiple forward/backward pipe-operators with varying precedence 
+-- TODO ? ( $> $>> $>>> <$ <<$ <<<$ ) specializing/inlining variants
+-- TODO ?   further reduce the need for distant brackets
+-- TODO ?   for example:
+-- TODO ?     myData 
+-- TODO ?       |>>  map <| num -> num * num
+-- TODO ?       |>>  foldLeft 0 <| total -> num -> total + num
+-- TODO ?   
+-- TODO ?   or, a specializing/inlining version:
+-- TODO ?     myData 
+-- TODO ?       |>>  map <$ num -> num * num
+-- TODO ?       |>>  foldLeft 0 <$ total -> num -> total + num
+-- TODO ?   
+-- TODO ?  ( deforestation is best handled by stream fusion ) 
+
+
+-- TODO ? A different way of handling booleans and conditions
+-- TODO ?   let Bool = Maybe Any;
+-- TODO ?   let false = [];
+-- TODO ?   let true = [[]];
+-- TODO ?   "false" is the absense of proof, "true" is the presence of proof, very uninformative proof in the case of literal "true", but more informative in other cases
+-- TODO ?   let (a && b) : { A @ Bool -> B @ Bool -> [] | [ [A, B] ] };
+-- TODO ?   let (a < b) : { (a : A @ Int) -> (b : B @ Int) -> (Maybe { [ A & IntRange [] { b : _ }, B & IntRange { a : _ } [] ] })) };
+-- TODO ?   let (a < b) : { (a : A @ Int) -> (b : B @ Int) -> (Maybe (Self ({ p : P } -> { [ A & IntRange [] { p ^- 0 : _ }, B & IntRange { p ^- 1 : _ } [] ] }))) };
+-- TODO ?   let if : { A @ (Maybe Any) -> { [ (Hd A) -> Any , [] -> Any ] }}
+-- TODO ? This way, the true branch of an if-expression is called with the proof of whatever was checked in the condition  
+-- TODO ?   if ( a < b && c < d ) 
+-- TODO ?   [ [[[a2,b2],[c2,d2]]] -> ... -- a wildcard pattern "[_]" (or just "_") can be used if we don't need the values with refined integer types a2..d2
+-- TODO ?   , [] -> ...
+-- TODO ?   ]
+-- TODO ? This removes the need to ifEq, ifLt, ifInt, ifStr operators
+-- TODO ?   let isInt : { Discernable -> (Maybe Int) };
+-- TODO ?   let isStr : { Discernable -> (Maybe Str) };
+-- TODO ?   if (isInt a)
+-- TODO ?   [ [a2] -> ...
+-- TODO ?   , [] -> ...
+-- TODO ?   ]
+-- TODO ?   
+-- TODO ?   if (isInt a && isStr b)
+-- TODO ?   [ [[a2, b2]] -> ...
+-- TODO ?   , [] -> ...
+-- TODO ?   ]
+-- TODO ?   
+-- TODO ? perhaps (&&) should make the proof of its LHS available to its RHS
+-- TODO ?   
+-- TODO ?   if (isInt a && aa -> aa < b)
+-- TODO ?   [ [[a2, [aa2, b2]]] -> ...
+-- TODO ?   , [] -> ...
+-- TODO ?   ]
+-- TODO ?   
+-- TODO ? We could do much of the above by using "match" instead of "if", and some suitably defined boolean-like functions/operators working with Maybe types instead.
+
+
+-- -- TODO find a way to write loop2 with simpler types
+-- let loop2 : { A @ Any -> B @ { A -> { ["break",,(Tl { (Codomain B) & ["break",,Any] })] | ["continue",,A] } } -> (Tl { (Codomain B) & ["break",,Any] }) } =
+--     (initVal : A @ Any) -> (loopBody : B @ { A -> { ["break",,(Tl { (Codomain B) & ["break",,Any] })] | ["continue",,A] } }) ->
+--     let tagVal = 
+--         while (continue initVal : { ["break",, (Tl { (Codomain B) & ["break",,Any] })] | ["continue",, A]}) <|
+--         ["continue",,val] |=>
+--         loopBody val;
+--     -- ifNil ( (["break",,result: Tl { (Codomain B) & ["break",,Any] }] |=> result) tagVal )
+--     -- ifNil ( (["break",,result: Any] |=> result) tagVal )
+--     -- [ -> 
+--     --     error ["loop2", "impossible"]
+--     -- , [result] -> 
+--     --     result
+--     -- ];
+--     match tagVal
+--     [ ["break",,result] |=> result 
+--     , _ |=> error ["loop2", "impossible"]
+--     ];
+
+
+-- let loop2 : 
+--     {  A @ Any 
+--     -> B @ { A -> { ["break" ,, Any] | ["continue" ,, A] } } 
+--     -> (Tl { { B A } & ["break" ,, Any] }) 
+--     } =
+--     (initVal : A @ Any) -> 
+--     (loopBody : B @ { A -> { ["break" ,, Any] | ["continue" ,, A] } }) ->
+--     let tagVal = 
+--         while (continue initVal : { { B A } | ["continue" ,, A] }) <|
+--         ["continue" ,, val] |=>
+--         loopBody val;
+--     match tagVal
+--     [ ["break",,result] |=> result 
+--     , _ |=> error ["loop2", "impossible"]
+--     ];
+
+let pipeFwd : { A @ Any -> F @ { A -> Any } -> F A } =
+    (a : A @ Any) -> (f : F @ { A -> Any }) ->
+    f a;
+
+
+
+-- let length : { (List Any) -> Int } =
+--     x0 ->
+--     loop2 [x0, 0] <|
+--     [x : List Any, n : Int] ->
+--     ifNil x 
+--     [ [] -> break n
+--     , [x1 ,, xs] -> continue [ xs, n + 1 ]
+--     ];
+
+let length : { X @ (List (Elem X)) -> Int } =
+    (x0 : X @ (List Any)) ->
+    let [_, result] = 
+        while [x0 : List (Elem X), 0 : Int] <|
+        [ [x1 ,, xs] : List (Elem X), n : Int ] |=>
+        [ xs, n + 1 ];
+    result;
+
+
+-- let lengthLt : { (List Any) -> Int -> Bool } =
+--     x0 -> max ->
+--     loop2 [x0, 0] <|
+--     [x : List Any, n : Int] ->
+--     ifNil x 
+--     [ [] -> 
+--         break true
+--     , [x1 ,, xs] -> 
+--         if ((n + 1) < max)
+--         [ -> continue [ xs, n + 1 ]
+--         , -> break false
+--         ]
+--     ];
+
+let lengthLt : { X @ (List (Elem X)) -> Int -> Bool } =
+    (x0 : X @ (List (Elem X))) -> max ->
+    let [_, _, result] = 
+        while [x0 : List (Elem X), 0 : Int, true : Bool] <|
+        [ [x1 ,, xs] : List (Elem X), n : Int, _ ] |=>
+          if ((n + 1) < max)
+          [ -> [ xs, n + 1, true ]
+          , -> [ [], 0, false ]
+          ];
+    result;
+
+
+
+-- let reverse = (x : X @ (List Any)) ->
+--   loop1 
+--       ( [x : List (elemT X), y : List (elemT X)] ->
+--           matchList x 
+--               [ _ -> break y
+--               , [x1,, xs] -> continue [ xs, [x1,, y] ]
+--               ]
+--       )
+--       [x, []];
+
+-- let reverse : { X @ (List Any) -> (List (Elem X)) } = 
+--     (x : X @ (List Any)) ->
+--     let x0 : List (Elem X) = x;
+--     let y0 : List (Elem X) = [];
+--     loop2 [x0, y0] <| 
+--     [x2, y] ->
+--     ifNil x2
+--     [ _ -> break y
+--     , [x1,, xs] -> continue [ xs, [x1,, y] ]
+--     ];
+
+let reverse : { X @ (List (Elem Any)) -> (List (Elem X)) } = 
+    (x : X @ (List Any)) ->
+    let x0 : List (Elem X) = x;
+    let y0 : List (Elem X) = [];
+    let [_, result] = 
+        while [x0 : List (Elem X), y0 : List (Elem X)] <| 
+        [ [x1 ,, xs], y ] |=>
+        [ xs, [x1 ,, y] ];
+    result;
+
+-- let reverseOnto : { A @ (List Any) -> (List (Elem A)) -> (List (Elem A)) } 
+--     = (a : A @ (List Any)) -> b ->
+--     loop1 ( [a : List (Elem A), b : List (Elem A)] -> 
+--        matchList a
+--        [ [] -> break b
+--        , [a1 ,, as] -> continue [as, [a1 ,, b]]
+--        ]
+--     ) [a, b];
+
+-- let listLast : { A @ (ListNonEmpty Any) -> (Elem A) } =
+--     (a0 : A @ (ListNonEmpty Any)) ->
+--     let a = a0 : ListNonEmpty (Elem A);
+--     let [result ,, _] =
+--         while a <|
+--         [a1 , a2 ,, as] |=>
+--         [a2 ,, as];
+--     result;
+
+-- -- all but last
+-- let listInit : { A @ (ListNonEmpty Any) -> (List (Elem A)) } =
+--     (a : A @ ListNonEmpty Any) ->
+--     let result0 = [] : List (Elem A);
+--     let [_, result] =
+--         while [a, result0] <|
+--         [ [a1 , a2 ,, as], result2] |=>
+--         [ [a2 ,, as], [a1 ,, result2] ];
+--     reverse result;
+
+-- -- all but last
+-- let listInit : { A @ (ListNonEmpty Any) -> (List (Elem A)) } =
+--     (a : A @ ListNonEmpty Any) ->
+--     ifNil (reverse a)
+--     [ [] ->
+--         error ["impossible"]
+--     , [a1 ,, as] ->
+--         reverse as
+--     ];
+
+
+
+-- let reverseOnto : { A @ (List Any) -> (List (Elem A)) -> (List (Elem A)) } =
+--     (a : A @ (List Any)) -> b0 ->
+--     let a0 : List (Elem A) = a;
+--     loop2 [a0, b0] <| 
+--     [a2, b] ->
+--     ifNil a2
+--     [ [] -> break b
+--     , [a1 ,, as] -> continue [as, [a1 ,, b]]
+--     ];
+
+let reverseOnto : { A @ (List (Elem A)) -> (List (Elem A)) -> (List (Elem A)) } =
+    (a : A @ (List (Elem A))) -> b0 ->
+    let a0 : List (Elem A) = a;
+    let [_, result] = 
+        while [a0, b0] <| 
+        [ [a1 ,, as], b ] |=>
+        [ as, [a1 ,, b] ];
+    result;
+
+-- let map = (f : F @ { Void -> Any }) -> (x : X @ (List (Domain F))) ->
+--     let x0 : List (Elem X) = x;
+--     let y0 : List { F (Elem X) } = [];
+--     loop2 [x0, y0] <| [x2, y] -> 
+--     ifNil x2 
+--     [ _ -> break (reverse y)
+--     , [x1 ,, xs] -> continue [ xs, [f x1 ,, y] ]
+--     ];
+
+let map : { F @ { Void -> Any } -> X @ (List (Domain F)) -> (List { F (Elem X) }) } =
+    (f : F @ { Void -> Any }) -> (x : X @ (List (Domain F))) ->
+    let x0 : List (Elem X) = x;
+    let y0 : List { F (Elem X) } = [];
+    let [_, result] = 
+        while [x0, y0] <| 
+        [ [x1 ,, xs], y ] |=>
+        [ xs, [f x1 ,, y] ];
+    reverse result;
+
+let for : { X @ (List (Elem X)) -> F @ { (Elem X) -> Any } -> (List {F (Elem X)}) } =
+    (xs : X @ (List (Elem X))) -> (f : F @ { (Elem X) -> Any}) ->
+    let [_, ys] = 
+        while [xs : List (Elem X), [] : List {F (Elem X)}] <|
+            [ [x1 ,, xs2], ys ] |=> [ xs2, [f x1 ,, ys] ];
+    let result = reverse ys;
+    result;
+
+let forMap = for;
+
+let maybeMap : { F @ { Void -> Any } -> (Maybe (Domain F)) -> (Maybe (Codomain F))} =
+    (f : F @ { Void -> Any }) -> x ->
+    ifNil x
+    [ [] -> []
+    , [x1] -> [f x1]
+    ];
+
+
+-- let forEach : { X @ (List Any) -> Z @ Any -> F @ { Z -> (Elem X) -> [Z, Any] } -> [Z, (List (Hd (Tl {F Z (Elem X)})))] } =
+--     (xs: X @ (List Any)) -> (z : Z @ Any) -> (f: F @ { Z -> (Elem X) -> [Z, Any] }) ->
+--     let [_, z3, ys] = 
+--         while [xs: List (Elem X), z, []: List (Hd (Tl {F Z (Elem X)}))] <|
+--             [ [x1,, xs2], z1, ys ] |=> 
+--             let [z2, y2] = f z1 x1;
+--             [ xs2, z2, [y2,,ys] ];
+--     let result = [z3, reverse ys];
+--     result;
+
+let forEach : { Z @ Any -> X @ (List (Elem X)) -> F @ { Z -> (Elem X) -> [Z, Any] } -> [Z, (List (Hd (Tl {F Z (Elem X)})))] } =
+    (z : Z @ Any) -> (xs: X @ (List (Elem X))) -> (f: F @ { Z -> (Elem X) -> [Z, Any] }) ->
+    let [_, z3, ys] = 
+        while [xs : List (Elem X), z, [] : List (Hd (Tl { F Z (Elem X) }))] <|
+            [ [x1 ,, xs2], z1, ys ] |=> 
+            let [z2, y2] = f z1 x1;
+            [ xs2, z2, [y2 ,, ys] ];
+    let result = [z3, reverse ys];
+    result;
+
+-- TODO
+-- let forFoldL =
+-- let forFoldR =
+-- let forFilter =
+
+let forFoldLeft : { Z @ Any -> X @ (List (Elem X)) -> F @ { Z -> (Elem X) -> Z } -> Z } =
+    (z : Z @ Any) -> (xs: X @ (List (Elem X))) -> (f: F @ { Z -> (Elem X) -> Z }) ->
+    let [_, z3] = 
+        while [xs : List (Elem X), z] <|
+        [ [x1 ,, xs2], z1 ] |=> 
+        let z2 = f z1 x1;
+        [ xs2, z2 ];
+    let result = z3;
+    result;
+
+let forFoldRight : { Z @ Any -> X @ (List (Elem X)) -> F @ { Z -> (Elem X) -> Z } -> Z } =
+    (z : Z @ Any) -> (xs: X @ (List (Elem X))) -> (f: F @ { Z -> (Elem X) -> Z }) ->
+    let xs2 = reverse xs;
+    forFoldLeft z xs2 f;
+
+-- TODO ? change argument order ?
+-- let forFoldRight : { X @ (List Any) -> Z @ Any -> F @ { (Elem X) -> Z -> Z } -> Z } =
+
+
+-- TODO
+-- let whileUnfoldLeft = 
+-- let whileUnfoldRight = 
+
+let max : { Int -> Int -> Int } =
+    a -> b ->
+    if (a > b) [ -> a, -> b];
+
+let sum : { (List Int) -> Int } =
+    xs ->
+    forFoldLeft 0 xs <| result -> x1 -> result + x1;
+
+
+-- TODO ? generalize Maybe to List ?
+let forFlatMap : { X @ (List (Elem X)) -> F @ { (Elem X) -> (Maybe Any) } -> (List (Hd { F (Elem X) })) } =
+    (xs : X @ (List (Elem X))) -> (f : F @ { (Elem X) -> (Maybe Any) }) ->
+    let [_, ys] =
+        while [xs : List (Elem X), [] : List (Hd { F (Elem X) })] <|
+        [ [x1 ,, xs2], ys ] |=>
+        ifNil (f x1)
+        [ [] -> 
+            [xs2, ys] : { [ (List (Elem X)), (List (Hd { F (Elem X) })) ] }
+        , [y1] ->
+            [xs2, [y1 ,, ys] ] : { [ (List (Elem X)), (List (Hd { F (Elem X) })) ] }
+        ];
+    reverse ys;
+
+
+-- let intCmp = (a : Int) -> (b : Int) -> error "TODO";
+
+-- let List1 = (A : Type) -> { [A,,(List A)] };
+-- let MatchBranch = (A : Type) -> { A -> (unionT {[Any]} {[]}) };
+let MatchBranch = (A : Type) -> { A -> [] | [Any] };
+-- let MatchBranchList = (V : Type) -> { [(MatchBranch V) ,, (List (MatchBranch V))] };
+
+-- let match = (val: V@any) -> (branches: MatchBranchList V) -> error "TODO";
+-- let match = 
+--     (val: V@any) -> 
+--     fix ((matchB2: {(MatchBranchList V)->any}) ->
+--     ([cas: MatchBranch V,,cases: list (MatchBranch V)]) ->
+--         testIsNil cases
+--             [ [] -> testIsNil (cas val) 
+--                       [ [] -> error "last case must match"
+--                       , [a] -> a
+--                       ]
+--             , (cases2: List1 (MatchBranch V)) -> 
+--               testIsNil (cas val)
+--                 [ [] -> matchB2 cases2
+--                 , [b] -> b
+--                 ]
+--             ]
+--     );
+
+
+-- let match1 = 
+--     (val : V @ any) -> 
+--     (cases : MBL @ (list (MatchBranch V))) ->
+--         loop1 
+--             ( (cases2 : List (elemT MBL)) ->
+--                 matchList cases2
+--                     [ [] -> error "no cases matched"
+--                     , ([c : elemT MBL,, cs : List (elemT MBL)]) ->
+--                         matchMaybe (c val)
+--                             [ [] -> continue cs
+--                             , ([b : hdT {(elemT MBL) V}]) -> break b
+--                             ]
+--                     ]
+--             )
+--             cases;
+-- 
+-- let match2 : { V@Any -> MBL@(List (MatchBranch V)) -> (Hd {(Elem MBL) V}) }
+--     = 
+--     (val : V @ any) -> 
+--     (cases : MBL @ (list (MatchBranch V))) ->
+--         loop1 
+--             ( (cases2 : List (elemT MBL)) ->
+--                 matchList cases2
+--                     [ [] -> error "no cases matched"
+--                     , ([c : elemT MBL,, cs : List (elemT MBL)]) ->
+--                         matchMaybe (c val)
+--                             [ [] -> continue cs
+--                             , ([b : hdT {(elemT MBL) V}]) -> break b
+--                             ]
+--                     ]
+--             )
+--             cases;
+-- 
+-- let match3 : { V@Any -> MBL @ (List (MatchBranch V)) -> (Hd (Codomain (Elem MBL))) }
+--     = 
+--     (val : V @ any) -> 
+--     (cases : MBL @ (list (MatchBranch V))) ->
+--         loop1 
+--             ( (cases2 : List (elemT MBL)) ->
+--                 matchList cases2
+--                     -- [ [] -> error "no cases matched"
+--                     [ [] -> error ["no cases matched", val]
+--                     , ([c : elemT MBL ,, cs : List (elemT MBL)]) ->
+--                         matchMaybe (c val)
+--                             [ [] -> continue cs
+--                             , ([b : hdT { (elemT MBL) V }]) -> break b
+--                             ]
+--                     ]
+--             )
+--             cases;
+
+let match4 : { V @ Any -> MBL @ (List (MatchBranch V)) -> (Hd (Codomain (Elem MBL))) } =
+    (val : V @ Any) -> 
+    (cases : MBL @ (List (MatchBranch V))) ->
+    let cases0 : List (Elem MBL) = cases;
+    loop2 cases0 <| 
+    (cases2 : List (Elem MBL)) ->
+    ifNil cases2
+    [ [] -> error ["no cases matched", val, cases]
+    , [c ,, cs] ->
+        ifNil (c val)
+        [ [] -> continue cs
+        , [b] -> break b
+        ]
+    ];
+
+let match = match4;
+
+-- TODO tryMatch
+-- let tryMatch = _ -> error ["TODO"];
+-- TODO implement match in terms of tryMatch
+-- TODO can we make "match" only accept match-branches that, in aggregate, will definately accept the argument ?
+-- TODO   i.e while tryMatch can return [], can we ensure, type-wise, that whenever match calls tryMatch, 
+-- TOOO      tryMatch will return [result], not [].
+-- TODO how about:
+-- TODO   intersect together all the match-branch types,
+-- TODO   invert, apply to success result, then invert back.
+-- TODO   that sould give a union of all the types the match function will successfully match against.
+-- TODO   then ensure that its not called with anything outside that type.
+
+
+-- let List2 = (A : type) -> Fix ( (ListA : type) -> { [] | [A,, ListA] } );
+-- let List2 = (A : type) -> unionT {[]} {[A,, Fix ( ListA -> unionT {[]} {[A,, ListA]} ) ]};
+
+-- let List2 = (A : type) -> 
+--   let ListA = Fix ((ListA : type) -> unionT {[]} {[A,, ListA]});
+--   let Result = unionT {[]} {[A,, ListA]};
+--   Result;
+
+
+-- let List2 = (A : type) -> Fix ( (ListA : type) -> unionT {[]} {[A,, ListA]} );
+let List2 = List;
+
+-- let ifNil = testIsNil;
+
+
+-- let foldl : { F @ {Void -> Void -> (Domain F)} -> (Domain F) -> X @ (List2 (Domain (Codomain F))) -> (Domain F) }
+--       = (f : F @ {Void -> Void -> (Domain F)})
+--      -> (z :(Domain F))
+--      -> (x : (List2 (Domain (Codomain F))))
+--      -- : Domain F
+--      ->
+--     loop1 
+--         ([z : Domain F, x : List2 (Domain (Codomain F))] ->
+--             match x 
+--                 [ ([]) |=> break z
+--                 , ([x1,, xs] : List2 (Domain (Codomain F))) |=> continue [f z x1, xs]
+--                 -- , ([x1 : Domain (Codomain F) ,, xs : List (Domain (Codomain F))]) |=> continue [f z x1, xs]
+--                 ])
+--          [z, x];
+
+let foldl : { F @ { Void -> Void -> (Domain F) } -> (Domain F) -> X @ (List2 (Domain (Codomain F))) -> (Domain F) } =
+    (f : F @ { Void -> Void -> (Domain F) }) ->
+    (z0 : Domain F) ->
+    (x0 : (List (Domain (Codomain F)))) ->
+    loop2 [z0, x0] <|
+    [z, x] ->
+    match x 
+    [ [] |=> break z
+    , [x1,, xs] |=> continue [f z x1, xs]
+    ];
+
+-- let foldl1 -- : { F @ {Void -> (Domain F) -> (Domain F)} -> X @ (ListNonEmpty (Domain F)) -> (Domain F) }
+--     = (f : F @ {Void -> (Domain F) -> (Domain F)}) -> ([xH ,, xT] : (ListNonEmpty (Domain F))) ->
+--     loop1 ( [z : Domain F, x : List (Domain F)] ->
+--         match x 
+--         [ [] |=> break z
+--         , [x1,, xs] |=> continue [f z x1, xs]
+--         ]
+--     ) [xH, xT];
+
+
+
+-- let feStrCat = (strs : List Str) -> foldl ((a : Str)->(b : Str)-> strAdd a b) "" strs;
+
+-- let feStrJoin : { Str -> (List Str) -> Str } =
+--     delim -> parts ->
+--     ifNil parts
+--     [ [] -> "" 
+--     , [p ,, ps] -> foldl ( (a : Str) -> (b : Str) -> feStrCat [a, delim, b] ) p ps
+--     ];
+
+-- let strCat : { (List Str) -> Str } = feStrCat;
+-- let strJoin : { Str -> (List Str) -> Str } = feStrJoin;
+
+let strCat : { (List Str) -> Str } = jsStrCat;
+let strJoin : { Str -> (List Str) -> Str } = jsStrJoin;
+
+-- let strSlice : { [Int, Int] -> Str -> Str } =
+--     [from, to] -> s ->
+--     let [_, chars] = 
+--         while [from, "" : Str] <|
+--         [pos, chs] ->
+--         if (pos < to)
+--         [ -> 
+--             let ch = strCharAt s pos;
+--             yes <| [ pos + 1, [ch ,, chs] ]
+--         , ->
+--             no
+--         ];
+--     jsStrCat (reverse chars);
+
+let strFrom : { Int -> Str -> Str } =
+    from -> s ->
+    let [_, chars] = 
+        while [from, [] : List Str] <|
+        [pos, chs] ->
+        let chMb = strCharAtMb s pos;
+        ifYes chMb
+        [ ch -> 
+            yes <| [ pos + 1, [ch ,, chs] ]
+        , ->
+            no
+        ];
+    jsStrCat (reverse chars);
+
+let strSplitAt : { Char -> Str -> (List Str) } =
+    c -> s ->
+    [0 : Int, [] : List Char, [] : List Str] |>
+    loop1 <| [pos : Int, part : List Char, parts : List Str] ->
+    ifNil (strCharAtMb s pos)
+    [ -> break <| reverse [strCat <| reverse part ,, parts]
+    , [c2] -> 
+        if (c2 == c)  
+        [ -> continue [pos + 1, [], [strCat <| reverse part ,, parts]]
+        , -> continue [pos + 1, [c2 ,, part], parts]
+        ]
+    ];
+
+let pathBasename : { Str -> Str } =
+    path ->
+    let parts1 = strSplitAt "/" path;
+    let parts2 = reverse <| ifNil (reverse parts1) [ -> [], [p ,, ps] -> ps];
+    strJoin "/" parts2;
+
+-- let strStartsWith : { Str -> Str -> Bool } =
+--     prefix -> value ->
+--     0 |> loop1 <| pos ->
+
+let pathJoin : { (List Str) -> Str } =
+    -- TODO ignore any path segments that occur earlier than an absolute path segment
+    pathSegments ->
+    -- debug2 ["pathJoin: pathSegments", pathSegments] <| ->
+    let [_, pathSegments2] = 
+        while [reverse pathSegments, [] : List Str] <|
+        [ [x1 ,, xs], ys ] |=>
+        -- debug2 ["pathJoin: x1", x1] <| ->
+        -- debug2 ["pathJoin: xs", xs] <| ->
+        -- debug2 ["pathJoin: ys", ys] <| ->
+        -- debug2 ["pathJoin:", strCharAtMb x1 0, strCharAtMb x1 0 == ["/"]] <| ->
+        -- debug2 ["pathJoin:", strCharAt x1 0, strCharAt x1 0 == "/"] <| ->
+        -- if (strCharAtMb x1 0 == ["/"])
+        -- if (x1 |> strStartsWith "/")
+        if (strCharAt x1 0 == "/")
+        [ -> [ [], [x1 ,, ys] ]
+        , -> [ xs, [x1 ,, ys] ]
+        ];
+    -- debug2 ["pathJoin: pathSegments2", pathSegments2] <| ->
+    strJoin "/" pathSegments2;
+
+-- let lookup1 = (x : Any) -> (l : L @ (List { [Any, Any] })) ->
+--     loop1 ( ( l2 : List (elemT L) ) ->
+--         matchList l2
+--         [ [] -> break []
+--         , [elem ,, ls] ->
+--             let [key, val] = elem;
+--             if (key == x)
+--             [ _ -> break [val]
+--             , _ -> continue ls
+--             ]
+--         ]
+--     ) l;
+-- 
+-- -- let lookup2 : { Data -> L@(List {[Data, Any]}) -> [] | [(Hd (Tl (Elem L)))] }
+-- let lookup2 : { Any -> L @ (List { [Any, Any] }) -> [] | [(Hd (Tl (Elem L)))] }
+--     = (x : Any) -> (l : L @ (List {[Any, Any]})) ->
+--     loop1 ( ( l2 : List (elemT L) ) ->
+--         matchList l2
+--         [ [] -> break []
+--         , [elem ,, ls] ->
+--             let [key, val] = elem;
+--             if (key == x)
+--             [ _ -> break [val]
+--             , _ -> continue ls
+--             ]
+--         ]
+--     ) l;
+
+-- let lookup3a : { Any -> L @ (List { [Any, Any] }) -> [] | [(Hd (Tl (Elem L)))] } =
+--     (x : Any) -> (l : L @ (List {[Any, Any]})) ->
+--     let l0 = l : List ({ [(Hd (Elem L)), (Hd (Tl (Elem L)))] });
+--     loop2 l0 <| l2 ->
+--     ifNil l2
+--     [ [] -> break []
+--     , [[key,val] ,, ls] ->
+--         if (key == x)
+--         [ _ -> break [val]
+--         , _ -> continue ls
+--         ]
+--     ];
+
+let lookup3 : { Any -> L @ (List { [Any, Any] }) -> [] | [(Hd (Tl (Elem L)))] } =
+    (x : Any) -> (l : L @ (List {[Any, Any]})) ->
+    let l0 = l : List (Elem L);
+    loop2 l0 <| l2 ->
+    ifNil l2
+    [ [] -> break []
+    , [elem ,, ls] ->
+        let [key, val] = elem;
+        if (key == x)
+        [ _ -> break [val]
+        , _ -> continue ls
+        ]
+    ];
+
+let lookupAny : { Any -> L @ (List { [Any, Any] }) -> [] | [(Hd (Tl (Elem L)))] } =
+    (x : Any) -> (l : L @ (List {[Any, Any]})) ->
+    let l0 = l : List (Elem L);
+    let resultMb0 = [] : (Maybe (Hd (Tl (Elem L))));
+    let [_, resultMb1] =
+        while [l0, resultMb0] <| 
+        [ [[key, val] ,, ls], [] ] |=>
+            if (key == x)
+            [ -> [ [], yes val ]
+            , -> [ ls, no      ]
+            ];
+    resultMb1;
+
+-- let lookupStr : { Str -> L @ (List { [Str, Any] }) -> (Maybe (Hd (Tl (Elem L)))) } = 
+--     (x : Str) -> (l : L @ (List {[Str, Any]})) ->
+--     let l0 = l : List (Elem L);
+let lookupStr : { Str -> L @ (List { [Str, (Hd (Tl (Elem L)))] }) -> (Maybe (Hd (Tl (Elem L)))) } = 
+    (x : Str) -> (l : L @ (List { [Str, (Hd (Tl (Elem L)))] })) ->
+    let l0 = l : List { [Str, (Hd (Tl (Elem L)))] };
+    let resultMb0 = [] : (Maybe (Hd (Tl (Elem L))));
+    let [_, resultMb1] =
+        while [l0, resultMb0] <| 
+        [ [[key, val] ,, ls], [] ] |=>
+            if (key == x)
+            [ -> [ [], yes val ]
+            , -> [ ls, no      ]
+            ];
+    resultMb1;
+
+let lookup = lookupStr;
+
+-- -- let lookupTail : { Data -> L@(List {[Data,,Any]}) -> [] | [(Tl (Elem L))] }
+-- let lookupTail : { Any -> L @ (List { [Any ,, Any] }) -> [] | [(Tl (Elem L))] }
+--     = (x : Any) -> (l : L @ (List { [Any ,, Any] })) ->
+--     loop1 ( ( l2 : List (elemT L) ) ->
+--         matchList l2
+--         [ [] -> break []
+--         , [elem ,, ls] ->
+--             let [key ,, val] = elem;
+--             if (key == x)
+--             [ _ -> break [val]
+--             , _ -> continue ls
+--             ]
+--         ]
+--     ) l;
+
+-- TODO ? rename lkvGetOrPanic ?
+let lookupOrError : { Str -> L2 @ (List { [Str, Any] }) -> (Hd (Tl (Elem L2))) } =
+    x -> (l : L2 @ (List { [Str, Any] })) ->
+    match (lookup x l)
+    [ [] |=> error ["lookup failed", x]
+    , [a] |=> a
+    ];
+
+
+-- let zip = (a: A@(List Any)) -> (b: B@(List Any)) -> 
+--     -- let A1 = Elem A; 
+--     -- let B1 = Elem B;
+--     loop1 ( [a : List (Elem A), b : List (Elem B), result : List { [(Elem A), (Elem B)] }] ->
+-- --        match [a, b]
+-- --        [ [ [], b ] |=> break (reverse result)
+-- --        , [ a, [] ] |=> break (reverse result)
+-- --        , [ [a1,,as], [b1,,bs] ] |=> 
+-- --            continue [ as, bs, [ [a1, b1],,result] ]
+-- --        ]
+--         matchList a
+--         [ [] -> break (reverse result)
+--         , [a1 ,, as] ->
+--             matchList b
+--             [ [] -> break (reverse result) 
+--             , [b1 ,, bs] ->
+--                 continue [as, bs, [[a1, b1] ,, result] ]
+--             ]
+--         ]
+--     ) 
+--     [a, b, []];
+
+let zip : { A @ (List Any) -> B @ (List Any) -> (List { [(Elem A), (Elem B)] }) } = 
+    (a : A @ (List Any)) -> (b : B @ (List Any)) -> 
+    let a0 = a : List (Elem A);
+    let b0 = b : List (Elem B);
+    let result0 = [] : List { [(Elem A), (Elem B)] };
+    loop2 [a0, b0, result0] <|
+    [a2, b2, result] ->
+    ifNil a2
+    [ [] -> break (reverse result)
+    , [a1 ,, as] ->
+        ifNil b2
+        [ [] -> break (reverse result) 
+        , [b1 ,, bs] ->
+            continue [as, bs, [[a1, b1] ,, result] ]
+        ]
+    ];
+
+-- let unzip = (a : A @ (List { [Any, Any] })) ->
+--     loop1 ( [a : List { [(Hd (Elem A)), (Hd (Tl (Elem A)))] }, x : List (Hd (Elem A)), y : List (Hd (Tl (Elem A)))] ->
+--     -- loop1 ( [a: List (Elem A), x: List (Hd (Elem A)), y: List (Hd (Tl (Elem A)))] ->
+--         matchList a
+--         [ [] -> break [reverse x, reverse y]
+--         , [[ax, ay] ,, as] ->
+--             continue [as, [ax ,, x], [ay ,, y]]
+--         ]
+--     ) [a, [], []];
+    
+let unzip : { A @ (List { [Any, Any] }) -> [ (List (Hd (Elem A))), (List (Hd (Tl (Elem A)))) ] } =
+    (a : A @ (List { [Any, Any] })) ->
+    let a0 = a : List { [(Hd (Elem A)), (Hd (Tl (Elem A)))] };
+    let x0 = [] : (List (Hd (Elem A)));
+    let y0 = [] : List (Hd (Tl (Elem A)));
+    loop2 [a0, x0, y0] <| [a2, x, y] ->
+    ifNil a2
+    [ [] -> break [reverse x, reverse y]
+    , [[ax, ay] ,, as] ->
+        continue [as, [ax ,, x], [ay ,, y]]
+    ];
+    
+
+-- let unzip2 = (a: A@(List {[Any,,Any]})) ->
+--     loop1 ( [a: List {[(Hd (Elem A)),,( (Tl (Elem A)))]}, x: List (Hd (Elem A)), y: List ( (Tl (Elem A)))] ->
+--     -- loop1 ( [a: List (Elem A), x: List (Hd (Elem A)), y: List (Hd (Tl (Elem A)))] ->
+--         matchList a
+--         [ [] -> break [reverse x, reverse y]
+--         , [[ax,,ay],,as] ->
+--             continue [as, [ax,,x], [ay,,y]]
+--         ]
+--     ) [a, [], []];
+
+
+let append = (xs : X @ (List Any)) -> (ys : List (Elem X)) ->
+    foldl 
+    -- (flip cons: { (List (Elem X)) -> (Elem X) -> (List (Elem X)) } ) 
+    ( (as : List (Elem X)) -> (a : Elem X) -> [a ,, as] )
+    ys 
+    (reverse xs);
+
+-- let append2 : { X @ (List Any) -> Y @ (List Any) -> (List { (Elem X) | (Elem Y) }) } = 
+--     (xs : X @ (List Any)) -> (ys : Y @ (List Any)) ->
+--     loop1 ( [ xs : List (Elem X), result : List { (Elem X) | (Elem Y) } ] ->
+--         match xs
+--         [ [] |=>
+--             break result
+--         , [x1 ,, xs2] |=>
+--             continue [xs2, [x1 ,, result]]
+--         ]
+--     ) [reverse xs, ys];
+
+let append2 : { X @ (List Any) -> Y @ (List Any) -> (List { (Elem X) | (Elem Y) }) } = 
+    (xs : X @ (List Any)) -> (ys : Y @ (List Any)) ->
+    let xs0 = reverse xs;
+    let result0 = ys : List { (Elem X) | (Elem Y) };
+    loop2 [xs0, result0] <| [xs1, result] ->
+    match xs1
+    [ [] |=>
+        break result
+    , [x1 ,, xs2] |=>
+        continue [xs2, [x1 ,, result]]
+    ];
+
+
+let appendTail = (xs : X @ (List Any)) -> (ys : Any) ->
+    foldl 
+    -- (flip cons: { (List (Elem X)) -> (Elem X) -> (List (Elem X)) } ) 
+    ( (as : Any) -> (a : Elem X) -> [a ,, as] )
+    ys 
+    (reverse xs);
+
+
+let concat = (l0 : L @ (List (List Any))) ->
+    -- debug2 ["concat-input", l0] <| ->
+    loop1 ( [result : List (Elem (Elem L)), l : List (Elem L)] ->
+        ifNil l
+        [ [] -> 
+            -- debug2 ["concat-output", result] <| ->
+            break result
+        , [l1 ,, ls] ->
+            continue [append l1 result, ls]
+        ]
+    ) [[], reverse l0];
+
+
+-- let intersperse : { A @ Any -> B @ (List Any) -> (List { A | (Elem B) }) }
+--     = (a : A @ Any) -> (b : B @ (List Any)) ->
+--     loop1 ( [b : List (Elem B), c : List { A | (Elem B)} ] ->
+--         match b
+--         [ [] |=> break c
+--         , [b1] |=> break [b1 ,, c]
+--         , [b1 ,, bs] |=> continue [ bs, [a, b1 ,, c] ]
+--         ]
+--     ) [reverse b, []];
+
+let intersperse : { A @ Any -> B @ (List Any) -> (List { A | (Elem B) }) } =
+    (a : A @ Any) -> (b : B @ (List Any)) ->
+    let b0 = reverse b : List (Elem B); 
+    let c0 = [] : List { A | (Elem B) };
+    loop2 [b0, c0] <| [b2, c] ->
+    match b2
+    [ [] |=> break c
+    , [b1] |=> break [b1 ,, c]
+    , [b1 ,, bs] |=> continue [ bs, [a, b1 ,, c] ]
+    ];
+
+-- let filter : { P @ { Void -> Bool } -> X @ (List (Domain P)) -> (List (Elem X)) }
+--     = (p : P @ { Void -> Bool }) -> (x : X @ (List (Domain P))) ->
+--     loop1 ( [input : List (Elem X), output : List (Elem X)] ->
+--         match input
+--         [ [] |=> break (reverse output)
+--         , [x1 ,, xs] |=> 
+--             if (p x1)
+--             [ -> continue [xs, [x1,,output]]
+--             , -> continue [xs, output]
+--             ]
+--         ]
+--     ) [x, []];
+
+let filter : { P @ { Void -> Bool } -> X @ (List (Domain P)) -> (List (Elem X)) } =
+    (p : P @ { Void -> Bool }) -> (x : X @ (List (Domain P))) ->
+    let input0 = x : List (Elem X);
+    let output0 = [] : List (Elem X);
+    loop2 [input0, output0] <| 
+    [input, output] ->
+    match input
+    [ [] |=> break (reverse output)
+    , [x1 ,, xs] |=> 
+        if (p x1)
+        [ -> continue [xs, [x1,,output]]
+        , -> continue [xs, output]
+        -- [ -> continue <| ([xs, [x1,,output]] : { [(List (Elem X)), (List (Elem X))] })
+        -- , -> continue <| ([xs, output] : { [(List (Elem X)), (List (Elem X))] })
+        ]
+    ];
+
+-- -- TODO reverse order of arguments?
+-- -- would make predicate argument type synthesizable
+-- let listExists : { P @ { Void -> Bool } -> X @ (List (Domain P)) -> Bool }
+--     = (p : P @ { Void -> Bool }) -> ( x : X @ (List (Domain P))) ->
+--     loop1 ( (input : List (Elem X)) ->
+--         match input
+--         [ [] |=> break false
+--         , [x1 ,, xs] |=> 
+--             if (p x1)
+--             [ -> break true
+--             , -> continue xs
+--             ]
+--         ]
+--     ) x;
+-- 
+-- let listForAll : { P @ { Void -> Bool } -> X @ (List (Domain P)) -> Bool }
+--     = (p : P @ { Void -> Bool }) -> (x : X @ (List (Domain P))) ->
+--     not (listExists ((x : Elem X) -> not (p x)) x);
+
+-- TODO ? replace okay/fail with oneOf/none ? 
+let okay : { A @ Any -> [A] } = (a : A @ Any) -> [a];
+let fail = [];
+
+
+-- TODO remove the short-circuited operators from Ferrum (the core language at least)
+-- let BoolLazy = { Bool | -> Bool };
+-- ( lazy isn't really the write word here, as there's no requirement to share/memoize the function call )
+-- how about:
+--     let BoolSuspended = { Bool | -> Bool };
+--     let BoolDelayed = { Bool | -> Bool };
+--     let BoolOrBoolDelayed = { Bool | -> Bool };
+--     let BoolShortCircuitable = { Bool | -> Bool };
+--     let BoolCond = { Bool | -> Bool };
+-- let and : { (List BoolLazy) -> Bool } = ...
+-- let or : { (List BoolLazy) -> Bool } = ...
+-- or, fix the strictness of the arguments, 
+-- at least to begin with, 
+-- the domain can always be widened to the above later
+-- let and : { [Bool ,, (List { -> Bool })]) -> Bool } = ...
+-- let or : { [Bool ,, (List { -> Bool })]) -> Bool } = ...
+-- so instead of
+--   if (f a && g b && h c) ...
+-- write
+--   if (and [f a, -> g b, -> h c]) ...
+-- this means the lambda operator is the only mechanism by which computation can be suspended
+-- code-generators can still output the (&&) and (||) operators for suitable languages (C, JS)
+
+
+let listAllTrue : { X @ (List Any) -> { (Elem X) -> Bool } -> Bool } =
+    (x : X @ (List Any)) -> p ->
+    let x2 = 
+        while (x : List (Elem X)) <|
+        [x1 ,, xs] |->
+        if (p x1) 
+        [ -> okay xs
+        , -> fail
+        ];
+    x2 == [];
+
+let listAllFalse : { X @ (List Any) -> { (Elem X) -> Bool } -> Bool } =
+    (x : X @ (List Any)) -> p ->
+    listAllTrue x (x1 -> not (p x1));
+
+-- TODO ? rename listAnyTrue to listExistsTrue ? or listSomeTrue ?
+-- TODO ? if Any and All are to mean almost the same thing at the type level (All = { Any | Unknown }),
+-- TODO ?   then having listAll / listAny mean distinctly different things is asking for confusion
+let listAnyTrue : { X @ (List Any) -> { (Elem X) -> Bool } -> Bool } =
+    (x : X @ (List Any)) -> p ->
+    not (listAllFalse x p);
+
+-- TODO ? rename listAnyFalse to listExistsFalse ?
+-- let listAnyFalse : { X @ (List Any) -> { (Elem X) -> Bool } -> Bool } =
+--     (x : X @ (List Any)) -> p ->
+--     not (listAllTrue x p);
+
+-- TODO an (n log n) implmentation, before this (n^2) implementation becomes noticably slow
+let listUniq : { L @ (List Any) -> (List (Elem L)) } =
+    (x : L @ (List Any)) ->
+    let [_, result] =
+        while [x : List (Elem L), []: List (Elem L)] <| 
+        [ [x1,,xs], ys ] |->
+        if (listAnyTrue ys (y1 -> x1 == y1))
+        [ _ => [xs, ys]
+        , _ => [xs, [x1,,ys]]
+        ];
+    reverse result;
+
+-- TODO an (n log n) version
+let listDiff : { L @ (List Any) -> (List Any) -> (List (Elem L)) } =
+    (xs : L @ (List Any)) -> (ys : (List Any)) ->
+    -- forFilter xs <| x -> listAllTrue ys <| y -> not (x == y);
+    filter ((x : (Elem L)) -> listAllTrue ys <| y -> not (x == y)) xs;
+
+-- let listSlice { Int -> Int -> L @ (List Any) } =
+--     from -> to -> (elems : L @ List Any) ->
+--     let [ [_, elems2], _] =
+--         forEach [0 : Int, [] : List (Elem L)] elems <| 
+--         [pos, ys] -> x ->
+--         if ((pos >= from) && (pos < to) 
+--         [ -> [ [pos + 1, ys], [] ]
+--         , -> [ [pos + 1, [x ,, ys] ], [] ]
+--         ];
+--     elems2;
+
+-- let listSlice : { Int -> Int -> L @ (List Any) -> (List (Elem L)) } =
+--     from -> to -> (elems : L @ (List Any)) ->
+--     let [_, _, elems2] =
+--         while [elems : List (Elem L), 0 : Int, [] : List (Elem L)] <| 
+--         [ [x1 ,, xs], pos, ys ] |=>
+--         if (pos == to) 
+--         [ -> [ [], pos, ys ]
+--         , -> 
+--             if (pos >= from)
+--             [ -> [ xs, pos + 1, [x1 ,, ys] ]
+--             , -> [ xs, pos + 1, ys ]
+--             ]
+--         ];
+--     elems2;
+
+
+
+-- let repeat : { Int -> A @ Any -> (List A) }
+--     = n -> (a: A @ Any) ->
+--     loop1 ( [n: Int, b: List A] ->
+--         if (n <= 0)
+--         [ -> break b
+--         , -> continue [n-1, [a ,, b] ]
+--         ]
+--      ) [n, []];
+
+let repeat : { Int -> A @ Any -> (List A) } =
+    n -> (a: A @ Any) ->
+    let b0 = [] : List A;
+    loop2 [n, b0] <| 
+    [n1, b] ->
+    if (n1 <= 0)
+    [ -> break b
+    , -> continue [n1 - 1, [a ,, b] ]
+    ];
+
+let strRepeat : { Int -> Str -> Str } =
+    n -> s ->
+    strCat (repeat n s);
+
+let strPadEnd : { Int -> Str -> Str } =
+    n -> s ->
+    let sLen = strLen s;
+    if (sLen >= n)
+    [ -> s
+    , -> strCat [s, strRepeat (n - sLen) " "]
+    ];
+
+
+-- let strPadStart : { Int -> Str -> Str } =
+--     n -> s ->
+--     let sLen = strLen s;
+--     if (sLen >= n)
+--     [ -> s
+--     , -> strCat [strRepeat (n - sLen) " ", s]
+--     ];
+
+-- let strPadEnd : { Str -> Int -> Str }
+--     = s -> n ->
+--     loop1 ( [n: Int, result: Str] ->
+--         if (strLen result >= b)
+--         [ -> break result]
+--         , -> continue [n-1, result^" "]
+--         ]
+--     ) [n, s];
+
+
+-- let strContains : { Str -> Str -> Bool } =
+--     a -> b ->
+--     if (not (strLen b == 1))
+--     [ ->
+--         error ["strContains", "expected a single character string", "not", b]
+--     , ->
+--         let aLen = strLen a;
+--         let pos = 
+--             loop2 (0 : Int) <|
+--             pos ->
+--             if (pos == aLen)
+--             [ -> break aLen
+--             , -> 
+--                 if (strCharAt a pos == b)
+--                 [ -> break pos
+--                 , -> continue (pos + 1)
+--                 ]
+--             ];
+--         not (pos == aLen)
+--     ];
+
+-- let implode = (strList: List Str) -> foldl ((a: Str) -> (b: Str) -> a^b) ("" : Str) strList;
+
+
+
+
+-- let ifNil  : { A@Any -> K @ [ []           -> Any, {A\[]}           -> Any ] -> { {(Hd K) A} | {(Hd (Tl K)) A} } } 
+--      = _ -> error "TODO";
+-- let ifNil  : { A@Any -> K @ [ [] -> Any, {A\[]} -> Any ] -> { {(Hd K) []} | {(Hd (Tl K)) {A\[]}} } } 
+--      = (a: A@Any) -> ([kt,kf]: K@{[[]->Any,{A\[]}->Any]}) ->
+--      testIsNil a
+--      [ _ -> kt []
+--      , a1 -> kf a1
+--      ];
+
+-- let ifBool : { A@Any -> K @ [ Bool -> Any, {A\Bool} -> Any ] -> { {(Hd K) Bool} | {(Hd (Tl K)) {A/Bool}} } } -- = _ -> error "TODO";
+--     = (a: A@Any) -> ([kt, kf]: K@{[Bool->Any, {A\Bool}->Any]}) -> 
+
+-- let ifStr  : { A@Any -> K @ [ Str          -> Any, {A\Str}          -> Any ] -> { {(Hd K) A} | {(Hd (Tl K)) A} } } = _ -> error "TODO";
+-- let ifPair : { A@Any -> K @ [ [Data, Data] -> Any, {A\[Data,Data]}  -> Any ] -> { {(Hd K) A} | {(Hd (Tl K)) A} } } = _ -> error "TODO";
+
+-- let ifEq = -- TODO - call the success-branch with intersected types
+-- TODO ? what do we do in the failure-branch ? pass one argument, but which, pass both, each with a type excluding the other ?
+
+
+-- let Guard : { Type -> Type } =
+--     T -> 
+--     -- { Any -> F @ { T -> Any } -> { [] | {F T} } };
+--     -- { Any -> F @ { T -> Any } -> { [] | (Codomain F) } };
+--     { Any -> F @ { T -> (Codomain F) } -> { [] | (Codomain F) } };
+--     -- { Any -> F @ { T -> Any } -> { [] | (Codomain F) } };
+
+let Guard : { Type -> Type } = 
+    -- T -> { Any -> F @ { T -> Any } -> { [] | (Codomain F) } };
+    T -> { A @ Any -> F @ { T -> Any } -> { [] | F T } };
+
+let Guard2 : { Type -> Type -> Type } = 
+    T1 -> T2 -> 
+    { A @ T1 -> F @ { T2 -> Any } -> { [] | F T2 } };
+
+
+let guardStr : { Any -> F @ { Str -> Any } -> { [] | {F Str} } } =
+    a -> (f : F @ { Str -> Any }) ->
+    ifStr a
+    [ a2 -> f a2
+    , _ -> []
+    ];
+
+-- let guardStr2 : Guard Str = guardStr;
+
+-- let isStr : { Any -> Bool } =
+--     a ->
+--     ifStr a [ _ -> true, _ -> false];
+
+let guardInt : { Any -> F @ { Int -> Any } -> { [] | {F Int} } } =
+    a -> (f : F @ { Int -> Any }) ->
+    ifInt a
+    [ a2 -> f a2
+    , _ -> []
+    ];
+
+let guardBool : { Any -> F @ { Bool -> Any } -> { [] | {F Bool} } } =
+    a -> (f : F @ { Bool -> Any }) ->
+    ifBool a
+    [ a2 -> f a2
+    , _ -> []
+    ];
+
+let ifDatum : { Any -> K @ { [ Datum -> Any, Any -> Any ] } -> (Hd K) Datum | (Hd (Tl K)) Any } =
+    (a : Any) -> ([kTrue, kFalse] : K @ { [ Datum -> Any, Any -> Any ] }) ->
+    ifNil  a [ a2 -> kTrue a2, _ ->
+    ifBool a [ a2 -> kTrue a2, _ ->
+    ifInt a  [ a2 -> kTrue a2, _ ->
+    ifStr a  [ a2 -> kTrue a2, _ ->
+    kFalse a ] ] ] ];
+
+-- TODO ? curried "if" ?
+-- TODO     let cif = c -> t -> f -> if c [t, f];
+-- TODO     let cif = c -> curry (if c);  
+-- TODO     cif (a == 1) <| ->
+-- TODO         "one"
+-- TODO     <<| ->
+-- TODO     cif (a == 2) <| ->
+-- TODO         "two"
+-- TODO     <<| ->
+-- TODO     "many"
+-- TODO 
+-- TODO saves nesting of chained if statments
+
+
+
+let guardDatum : { Any -> F @ { Datum -> Any } -> { [] | {F Datum} } } =
+    a -> (f : F @ { Datum -> Any }) ->
+    ifDatum a
+    [ a2 -> f a2
+    , _ -> []
+    ];
+
+
+
+-- let Guard : { Type -> Type } = T -> { Any -> F @ { T -> Any } -> { [] | (Codomain F) } };
+-- let guardList1 : { G @ (Guard Void) -> Any -> F @ { (List (Domain (Codomain G))) -> Any } -> { [] | { F (List (Domain (Codomain G))) } } } =
+--     (g : G @ (Guard Void)) -> a -> (f : F @ { (List (Domain (Codomain G))) -> Any }) ->
+--     loop1 ( [a : Any, ys : List (Domain (Codomain G))] ->
+--         ifNil a 
+--         [ ->
+--             break (f (reverse ys))
+--         , _ -> 
+--             ifPair a
+--             [ [aHd ,, aTl] ->
+--                 ifNil (g aHd ( (aHd2 : (Domain (Codomain G))) -> [aHd2] ))
+--                 [ -> 
+--                     break []
+--                 , [aHd3] ->
+--                     continue [aTl, [aHd3,,ys]]
+--                 ]
+--             , _ ->
+--                 break []
+--             ]
+--         ]
+--     ) [a, []];
+
+-- let guardList : { G @ (Guard Any) -> Any -> F @ { (List (Domain (Codomain G))) -> Any } -> { [] | { F (List (Domain (Codomain G))) } } } =
+--     (g : G @ (Guard Any)) -> a -> (f : F @ { (List (Domain (Codomain G))) -> Any }) ->
+--     loop1 ( [a : Any, ys : List (Domain (Codomain G))] ->
+--         ifNil a 
+--         [ ->
+--             break (f (reverse ys))
+--         , _ -> 
+--             ifPair a
+--             [ [aHd ,, aTl] ->
+--                 ifNil (g aHd ( (aHd2 : (Domain (Codomain G))) -> [aHd2] ))
+--                 [ -> 
+--                     break []
+--                 , [aHd3] ->
+--                     continue [aTl, [aHd3,,ys]]
+--                 ]
+--             , _ ->
+--                 break []
+--             ]
+--         ]
+--     ) [a, []];
+-- 
+-- let guardListStr : Guard (List Str) = guardList guardStr;
+
+
+-- let guardList : { G @ (Guard Any) -> Any -> F @ { (List (Domain (Domain (Codomain G)))) -> Any } -> { [] | { F (List (Domain (Domain (Codomain G)))) } } } =
+--     (g : G @ (Guard Any)) -> a -> (f : F @ { (List (Domain (Domain (Codomain G)))) -> Any }) ->
+--     loop1 ( [a : Any, ys : List (Domain (Domain (Codomain G)))] ->
+--         ifNil a 
+--         [ ->
+--             break (f (reverse ys))
+--         , _ -> 
+--             ifPair a
+--             [ [aHd ,, aTl] ->
+--                 -- let k : { (Domain (Domain (Codomain G))) -> [(Domain (Domain (Codomain G)))] } = (aHd2 : (Domain (Domain (Codomain G)))) -> [aHd2];
+--                 let k : { (Domain (Domain { G Any })) -> [(Domain (Domain { G Any }))] } = (aHd2 : (Domain (Domain { G Any }))) -> [aHd2];
+--                 let aHd2 : (Maybe (Domain (Domain (Codomain G)))) = g aHd k;
+--                 ifNil aHd2
+--                 [ -> 
+--                     break []
+--                 , [aHd3] ->
+--                     continue [aTl, [aHd3,,ys]]
+--                 ]
+--             , _ ->
+--                 break []
+--             ]
+--         ]
+--     ) [a, []];
+
+let guardList : 
+    {  G @ (Guard Any) 
+    -> Any 
+    -> F @ { (List (Domain (Domain (Codomain G)))) -> Any } 
+    -> { [] | { F (List (Domain (Domain (Codomain G)))) } } 
+    } =
+    (g : G @ (Guard Any)) -> 
+    a -> 
+    (f : F @ { (List (Domain (Domain (Codomain G)))) -> Any }) ->
+    let ys0 = [] : List (Domain (Domain (Codomain G)));
+    loop2 [a, ys0] <| [a1, ys] ->
+    ifNil a1 
+    [ ->
+        break (f (reverse ys))
+    , _ -> 
+        ifPair a1
+        [ [aHd ,, aTl] ->
+            let k : { (Domain (Domain { G Any })) -> [(Domain (Domain { G Any }))] } =
+                (aHd2 : (Domain (Domain { G Any }))) -> 
+                [aHd2];
+            let aHd2 : (Maybe (Domain (Domain (Codomain G)))) = g aHd k;
+            ifNil aHd2
+            [ -> 
+                break []
+            , [aHd3] ->
+                continue [aTl, [aHd3,,ys]]
+            ]
+        , _ ->
+            break []
+        ]
+    ];
+
+-- TODO give this a better name, 
+-- TODO   "guardFor" perhaps
+-- TODO guardList can check if an Any is actually a list (suitable for desierializing arbitrary data)
+-- TODO whereas this function, can only be called with a value which is already known to be a list
+let guardList2 : 
+    {  G @ (Guard2 Void Any) 
+    -> (List (Domain G))
+    -> F @ { (List (Domain (Domain (Codomain G)))) -> Any } 
+    -> { [] | { F (List (Domain (Domain (Codomain G)))) } } 
+    } =
+    (g : G @ (Guard2 Void Any)) -> 
+    (a0 : List (Domain G)) -> 
+    (f : F @ { (List (Domain (Domain (Codomain G)))) -> Any }) ->
+    let ys0 = [] : List (Domain (Domain (Codomain G)));
+    -- let _ = debug ["GL-a", a0];
+    loop2 [a0, ys0] <| [a, ys] ->
+    ifNil a 
+    [ ->
+        break (f (reverse ys))
+    , [aHd ,, aTl] -> 
+        -- let _ = debug ["GL-hd", aHd];
+        let k : { (Domain (Domain { G (Domain G) })) -> [(Domain (Domain { G (Domain G) }))] } =
+            (aHd2 : (Domain (Domain { G (Domain G) }))) -> 
+            [aHd2];
+        let aHd2 : (Maybe (Domain (Domain (Codomain G)))) = g aHd k;
+        ifNil aHd2
+        [ -> 
+            break []
+        , [aHd3] ->
+            continue [aTl, [aHd3,,ys]]
+        ]
+    ];
+    
+
+-- let guardListStr : Guard (List Str) = guardList guardStr;
+
+let guardNil : { Any -> F @ { [] -> Any } -> { [] | { F [] } } } =
+    a -> (f : F @ { [] -> Any }) ->
+    ifNil a
+    [ a2 -> f a2
+    , _ -> []
+    ];
+
+-- TODO generalize Datum to Data, not needed for now.
+-- TODO tighten the type of "f" to guarantee it will be called with arguments of the same type, not needed for now.
+--    passing "a" and "b" together keeps this guard consistent with others, and making it possible to treat uniformly.
+--    using a curried form of guards for comparators could cause confusion.
+--    e.g.  ( x -> guardLt x 10 => ...) seems okay, but
+--          ( filterGuard (guardLt 10) [1,11,111] ) -- could easily be mistaken for a (x < 10) meaning, but infact it would return [11,111]
+--    "a" and "b" may have the same type, but different representations
+let guardEq : { [Datum, Datum] -> F @ { [Datum, Datum] -> Any } -> { [] | F [Datum, Datum] } } =
+    d @ [a, b] -> (f : F @ { [Datum, Datum] -> Any }) ->
+    if (a == b) [ -> f d, -> [] ];
+
+
+-- let guardNeq : { [Datum, Datum] -> F @ { [Datum, Datum] -> Any } -> { [] | F [Datum, Datum] } } =
+--     d @ [a, b] -> (f : F @ { [Datum, Datum] -> Any }) ->
+--     if (not (a == b)) [ -> f d, -> [] ];
+
+let guardLt : { [Int, Int] -> F @ { [Int, Int] -> Any } -> { [] | F [Int, Int] } } =
+    d @ [a, b] -> (f : F @ { [Int, Int] -> Any }) ->
+    if (a < b) [ -> f d, -> [] ];
+
+let guardTrue : { Bool -> F @ { Bool -> Any } -> { [] | F Bool } } =
+    d @ a -> (f : F @ { Bool -> Any }) ->
+    if a[ -> f a, -> [] ];
+
+-- TODO rename this guardCons
+let guardPair : 
+    {  GH @ (Guard Any) 
+    -> GT @ (Guard Any) 
+    -> Any 
+    -> F @ { [(Domain (Domain (Codomain GH))),,(Domain (Domain (Codomain GT)))] -> Any } 
+    -> { [] | { F [(Domain (Domain (Codomain GH))),,(Domain (Domain (Codomain GT)))] } } 
+    } =
+    (gh : GH @ (Guard Any)) -> 
+    (gt : GT @ (Guard Any)) -> 
+    a -> 
+    (f : F @ { [(Domain (Domain (Codomain GH))),,(Domain (Domain (Codomain GT)))] -> Any }) ->
+    ifPair a 
+    [ [h,,t] ->
+        gh h <| h2 ->
+        gt t <| t2 ->
+        f [h2,,t2]
+    , _ ->
+        []
+    ];
+
+let guardLookup : { Str -> B @ (List { [Str, Any] }) -> K @ { (Hd (Tl (Elem B))) -> Any } -> [] | K (Hd (Tl (Elem B))) } =
+    (a : Str) -> (bs : B @ List { [Str, Any] }) -> (k : K @ { (Hd (Tl (Elem B))) -> Any }) ->
+    ifNil (lookup a bs)
+    [ []  -> []
+    , [v] -> k v
+    ];
+
+
+
+
+-- TODO
+-- let guardTuple : { GS @ (List (Guard Any)) -> Any -> F @ <???> -> { [] -> F <???> } } =
+-- <???> needs to iterate over GS without causing compile-time non-termination, might need to use reduction-operators for this
+
+
+-- TODO ?
+-- these can refine the type of the Tail (Head) for a given value of the Head (Tail).
+-- let guardHd : { A @ Datum -> B @ Any -> C @ { { [A ,, Any] & B } -> Any } -> [] | (Codomain C) }
+-- let guardTl : { A @ Datum -> B @ Any -> C @ { { [Any ,, A] & B } -> Any } -> [] | (Codomain C) }
+-- taking a guard as the first argument, instead of a Datum, would be more flexible/useful
+
+let guardHdDatumSingle : { A @ Datum -> B @ Any -> C @ { { [A ,, Any] & B } -> Any } -> [] | (Codomain C) } =
+    (datum : A @ Datum) -> (value : B @ Any) -> (k : C @ { { [A ,, Any] & B } -> Any }) ->
+    ifPair value
+    [ [h ,, t] ->
+        ifDatum h
+        [ h ->
+            if (h == datum)
+            [ ->
+                let result = t |> justTrustMeCast Any { [A ,, Any] & B };
+                k <| result
+            , ->
+                no
+            ]
+        , _ -> 
+            no
+        ]
+    , _ ->
+        no
+    ];
+
+
+
+
+-- TODO ?
+-- a generic version of guard which works with predicates with a dependent/intersected function type
+-- let guard : { P @ { Any -> Bool } -> Any -> K @ { { (Inverse P) (Single true) -> Any } -> [] | (Codomain K) }
+-- e.g. 
+--   let isStr : { { Str -> { true : _ } } & { { Any \ Str } -> { false : _ } } }
+--   let isStr : { { Str -> (Single true) } & { { Any \ Str } -> (Single false) } }
+--   guard isStr a1 <| a2 ->
+-- equivalent to current:
+--   guardStr a1 <| a2 ->
+-- where a1 has type Any, and a2 has type Str.
+-- means not needing a separate guardX for every isX
+-- needs singleton types extended to booleans before we can do that though.
+-- could probably do something with ifStr more easily than with isStr
+--   guard ifStr a1 <| a2 ->
+
+
+let isNil  : { Any -> Bool } =  a -> ifNil  a [ _ -> true, _ -> false ];
+let isBool : { Any -> Bool } =  a -> ifBool a [ _ -> true, _ -> false ];
+let isInt  : { Any -> Bool } =  a -> ifInt  a [ _ -> true, _ -> false ];
+let isStr  : { Any -> Bool } =  a -> ifStr  a [ _ -> true, _ -> false ];
+
+
+
+let showNil : { Nil -> Str } = a -> 
+    "[]";
+let showBool : { Bool -> Str } = a-> 
+    if a [ -> "true", -> "false"];
+
+-- let showInt : { Int -> Str } = a -> "" ^ a;
+let showInt : { Int -> Str } = a -> show a;
+
+-- let showStr1 : { Str -> Str } = a -> 
+--     loop1 ( [x: List Str, y: List Str] ->
+--         match x
+--         [ []            |=> break ("\"" ^ strCat (reverse y) ^ "\"")
+--         , ["'",,xs] |=> continue [xs, [ "'",,         y ] ]
+--         , ["\"",,xs] |=> continue [xs, [ "\"",  "\\",,y ] ]
+--         , ["\\",,xs] |=> continue [xs, [ "\\", "\\" ,,y ] ]
+--         , ["\n",,xs] |=> continue [xs, [ "n",  "\\" ,,y ] ]
+--         , ["\r",,xs] |=> continue [xs, [ "r",  "\\" ,,y ] ]
+--         , ["\t",,xs] |=> continue [xs, [ "t",  "\\" ,,y ] ]
+--         -- TODO ? use "\x??" to output other control codes ?
+--         , [x1,,  xs] |=> continue [xs, [ x1,,          y ] ]
+--         , x2 |=> error ["missing case", x2]
+--         ]
+--     ) [explode a, []];
+
+-- let showStr2 : { Str -> Str } = a -> 
+--     loop1 ( [pos: Int, x: Str, y: Str] ->
+--         if (pos >= strLen x)
+--         [ ->
+--             break (strCat ["\"", y, "\""])
+--         , ->
+--             let x1 = strCharAt x pos;
+--             let pos2 = pos + 1;
+--             match x1
+--             [ "'"  |=> continue [ pos2, x, strCat [y, "\\"        ] ]
+--             , "\"" |=> continue [ pos2, x, strCat [y, "\\", "\""  ] ]
+--             , "\\" |=> continue [ pos2, x, strCat [y, "\\", "\\"  ] ]
+--             , "\n" |=> continue [ pos2, x, strCat [y, "\\", "n"   ] ]
+--             , "\r" |=> continue [ pos2, x, strCat [y, "\\", "r"   ] ]
+--             , "\t" |=> continue [ pos2, x, strCat [y, "\\", "t"   ] ]
+--             -- TODO ? use "\x??" / "\u{??????}" to output other control codes ?
+--             , _    |=> continue [ pos2, x, strCat [y, x1          ] ]
+--             ]
+--         ]
+--     ) [0, a, ""];
+
+let showStr2 : { Str -> Str } = a -> 
+    let y0 = "" : Str;
+    loop2 [0, a, y0] <| [pos, x, y] ->
+    if (pos >= strLen x)
+    [ ->
+        break (strCat ["\"", y, "\""])
+    , ->
+        let x1 = strCharAt x pos;
+        let pos2 = pos + 1;
+        match x1
+        [ "'"  |=> continue [ pos2, x, strCat [y, "\\"        ] ]
+        , "\"" |=> continue [ pos2, x, strCat [y, "\\", "\""  ] ]
+        , "\\" |=> continue [ pos2, x, strCat [y, "\\", "\\"  ] ]
+        , "\n" |=> continue [ pos2, x, strCat [y, "\\", "n"   ] ]
+        , "\r" |=> continue [ pos2, x, strCat [y, "\\", "r"   ] ]
+        , "\t" |=> continue [ pos2, x, strCat [y, "\\", "t"   ] ]
+        -- TODO ? use "\x??" / "\u{??????}" to output other control codes ?
+        , _    |=> continue [ pos2, x, strCat [y, x1          ] ]
+        ]
+    ];
+
+let showStr : { Str -> Str } = showStr2;
+
+
+let showDatum : { Datum -> Str } = data ->
+    ifNil data
+    [ data2 -> showNil data2
+    , data2 -> 
+        ifBool data2
+        [ data3 ->
+            showBool data3
+        , data3 -> 
+            ifInt data3
+            [ data4 -> showInt data4
+            , data4 -> showStr data4
+            ]
+        ]
+    ];
+
+-- let showPair = (sh: SH@{Void->Str}) -> (st : ST@{Void->Str}) -> [h: Domain SH,,t: Domain ST] ->
+--     "[" ^ sh h ^ ",," ^ st t ^ "]" ;
+
+-- let showList = (showAny: {Any->Str}) -> (value: {[Any,,Any]}) ->
+--     loop1 ([ [val1,,vals], parts: List Str ] ->
+--         let val1Str = showAny val1;
+--         ifNil vals
+--         [ _ -> break (strCat (reverseOnto parts [val1Str,"]"]))
+--         , _ -> 
+--             ifPair vals
+--             [ vals2 -> continue [ vals2, [",", val1Str,,parts]] 
+--             , valTl -> break (strCat (reverseOnto parts [val1Str, ",,", showAny valTl, "]"]))
+--             ]
+--         ]
+--     ) [ value, ["["] ];
+--         -- match vals
+--         -- [ vals2@[_,,_] |=> continue [ vals2, [",", val1Str,,parts]]
+--         -- , [] |=> break (strCat (reverseOnto parts [val1Str,"]"]))
+--         -- , valTl |=> break (strCat (reverseOnto parts [val1Str, ",,", showAny valTl, "]"]))
+
+
+let showList : { { Any -> Str } -> { [Any ,, Any] } -> Str } =
+    showAny -> value ->
+    let parts0 = ["["] : List Str;
+    loop2 [value, parts0] <| [ [val1 ,, vals], parts ] ->
+    let val1Str = showAny val1;
+    ifNil vals
+    [ _ -> break (strCat (reverseOnto parts [val1Str,"]"]))
+    , _ -> 
+        ifPair vals
+        [ vals2 -> continue [ vals2, [",", val1Str,,parts]] 
+        , valTl -> break (strCat (reverseOnto parts [val1Str, ",,", showAny valTl, "]"]))
+        ]
+    ];
+
+-- let showData : { Data -> Str } = 
+--     rec <| (sd : { Data -> Str }) -> 
+--     data ->  
+--     ifNil data
+--     [ data2 -> showNil data2
+--     , data2 -> 
+--         ifBool data2
+--         [ data3 ->
+--             showBool data3
+--         , data3 -> 
+--             ifInt data3
+--             [ data4 -> showInt data4
+--             , data4 -> 
+--                 ifStr data4
+--                 [ data5 -> showStr data5
+--                 , data5 -> showPair sd sd data5
+--                 ]
+--             ]
+--         ]
+--     ];
+
+let showAny : { Any -> Str } = 
+    rec <| (sd : { Any -> Str }) -> 
+    data ->  
+    ifNil data
+    [ data2 -> showNil data2
+    , data2 -> 
+        ifBool data2
+        [ data3 ->
+            showBool data3
+        , data3 -> 
+            ifInt data3
+            [ data4 -> showInt data4
+            , data4 -> 
+                ifStr data4
+                [ data5 -> showStr data5
+                , data5 -> 
+                    ifPair data5
+                    -- [ data6 ->  showPair sd sd data6
+                    [ data6 ->  showList sd data6
+                    , data6 -> "?"
+                    ]
+                ]
+            ]
+        ]
+    ];
+
+
+
+-- let dataEq : { Data -> Data -> Bool } =
+--     rec <| (dEq : { Data -> Data -> Bool }) -> 
+--     a -> b ->
+--     match a
+--     [ [aH ,, aT] |=>
+--         match b
+--         [ [bH ,, bT] |=>
+--             if (dEq aH bH)
+--             [ -> dEq aT bT
+--             , -> false
+--             ]
+--         , _ |=> false
+--         ]
+--     , a2 |=>
+--         match b
+--         [ [_ ,, _] |=> false
+--         , b2 |=> a2 == b2
+--         ]
+--     ];
+
+-- let dataEq2 : { Data -> Data -> Bool } =
+--     rec <| (dEq : { Data -> Data -> Bool }) -> 
+--     a -> b ->
+--     match [a, b]
+--     [ [ [aH ,, aT], [bH ,, bT] ]  |=>
+--         -- dEq aH bH && dEq aT bT
+--         -- dEq aH bH && (-> dEq aT bT)
+--         if (dEq aH bH) [ -> dEq aT bT, -> false]
+--     , [ [_ ,, _], _ ] |=> false
+--     , [ _, [_ ,, _] ] |=> false
+--     , [a2, b2]      |=>  a2==b2
+--     ];
+
+
+-- -- this will fail/assert at runtime is any of the arguments result in function-value or type-value comparison
+-- let anyEq : { Any -> Any -> Bool } =
+--     rec <| (dEq : { Any -> Any -> Bool }) -> 
+--     a -> b ->
+--     match [a, b]
+--     [ [ [aH ,, aT], [bH ,, bT] ]  |=>
+--         -- dEq aH bH && dEq aT bT
+--         -- dEq aH bH && (-> dEq aT bT)
+--         if (dEq aH bH) [ -> dEq aT bT, -> false]
+--     , [ [_ ,, _], _ ] |=> false
+--     , [ _, [_ ,, _] ] |=> false
+--     , [a2, b2]      |=>  a2==b2
+--     ];
+
+
+
+-- TODO use this version (Data, not Any), 
+-- let guardDataEq : { [Data, Data] -> F @ { [Data, Data] -> Any } -> { [] | F [Data, Data] } } =
+--     d @ [a, b] -> (f : F @ { [Data, Data] -> Any }) ->
+--     if (dataEq2 a b) [ -> f d, -> [] ];
+
+-- -- TODO for some reason, type-checking perfectly sensible AST algerbraic-types against Data seems too slow to be usable, so using Any for now.
+-- let guardDataEq : { [Any, Any] -> F @ { [Any, Any] -> Any } -> { [] | F [Any, Any] } } =
+--     d @ [a, b] -> (f : F @ { [Any, Any] -> Any }) ->
+--     if (anyEq a b) [ -> f d, -> [] ];
+
+
+
+
+
+
+
+
+
+
+-- let listEq : { (List Datum) -> (List Datum) -> Bool } =
+--     a -> b ->
+--     loop2 [a, b] <| [a1, b1] ->
+--     ifNil a1
+--     [ [] -> 
+--         ifNil b1
+--         [ [] -> break true
+--         , [bH ,, bT] -> break false
+--         ]
+--     , [ aH,,aT] ->
+--         ifNil b
+--         [ [] -> break false
+--         , [ bH ,, bT ] ->
+--             if (aH == bH)
+--             [ -> continue [aT, bT]
+--             , -> break false
+--             ]
+--         ]
+--     ];
+
+-- let listIndexMaybe = (l : L@(List Any)) -> (pos: Int) ->
+--     loop1 ( [ l: List (Elem L), pos: Int] ->
+--         matchList l
+--         [ [] -> break []
+--         , [l1,,ls] ->
+--             if (pos==0)
+--             [ -> break [l1]
+--             , -> continue [ls, pos-1]
+--             ]
+--         ]
+--     ) [l, pos];
+
+let listIndexMaybe = (l : L@(List Any)) -> (pos: Int) ->
+    let l0 = l : List (Elem L);
+    loop2 [l0, pos] <| [l2, pos2] ->
+    ifNil l2
+    [ [] -> break []
+    , [l1,,ls] ->
+        if (pos2 == 0)
+        [ -> break [l1]
+        , -> continue [ls, pos2 - 1]
+        ]
+    ];
+
+let listIndex = (l : L@(List Any)) -> (pos: Int) ->
+    ifNil (listIndexMaybe l pos)
+    [ [] -> error ["listIndex: pos out of range", pos, length l]
+    , [val] -> val
+    ];
+
+-- let listUpdate : { A@(List Any) -> Int -> (Elem A) -> (List (Elem A)) } 
+--     = (a: A@(List Any)) -> pos -> value ->
+--     loop1 ( [a: List (Elem A), b: List (Elem A), pos: Int] -> 
+--     matchList a
+--     [ [] -> error ["listUpdate out of range", pos]
+--     , [a1,,as] ->
+--         if (pos==0)
+--         [ -> break (reverseOnto b [value,,as])
+--         , -> continue [as, [a1,,b], pos-1]
+--         ]
+--     ]) [a, [], pos];
+
+let listUpdate : { A @ (List Any) -> Int -> (Elem A) -> (List (Elem A)) } =
+    (a : A @ (List Any)) -> pos -> value ->
+    let a0 = a : List (Elem A);
+    let b0 = [] : List (Elem A); 
+    loop2 [a0, b0, pos] <| [a2, b2, pos2] ->
+    ifNil a2
+    [ [] -> error ["listUpdate out of range", pos2]
+    , [a1 ,, as] ->
+        if (pos2 == 0)
+        [ -> break (reverseOnto b2 [value ,, as])
+        , -> continue [as, [a1 ,, b2], pos2 - 1]
+        ]
+    ];
+
+
+
+
+-- let AssocList : { Type -> Type -> Type } = A -> B -> List { [A, B] };
+-- let ListAssoc : { Type -> Type -> Type } = A -> B -> List { [A, B] };
+-- let ListKv : { Type -> Type -> Type } = A -> B -> List { [A, B] };
+
+
+
+let listKvAdd : { L @ (List { [Str, Any] }) -> (Hd (Elem L)) -> (Hd (Tl (Elem L))) -> (List { [(Hd (Elem L)), (Hd (Tl (Elem L)))] }) } =
+    (l: L @ (List { [Str, Any] })) -> 
+    (key: Hd (Elem L)) -> 
+    (val: Hd (Tl (Elem L))) ->
+    [ [key, val] ,, l ];
+
+-- This more precise version should be able to work with variant types, different keys may have different value types.
+-- might be useful for something, but not currently needed, (and doesn't currentlt type-check)
+-- let listKvAdd : { L@(List {[Datum, Any]}) -> K@(Hd (Elem L)) -> (Hd (Tl {(Elem L) & [K, Any]})) -> (List (Elem L)) }
+--     = (l: L@(List {[Datum, Any]})) -> (key: K@(Hd (Elem L))) -> (val: Hd (Tl {(Elem L) & [K, Any]})) ->
+--     let kv = [key, val]: Elem L;
+--     [ kv,,l ];
+
+
+-- let listKvUpdate : { L@(List {[Datum, Any]}) -> (Hd (Elem L)) -> (Hd (Tl (Elem L))) -> (List {[(Hd (Elem L)), (Hd (Tl (Elem L)))]}) }
+--     = (l: L@(List {[Datum, Any]})) -> key -> val ->
+--     loop1 ( [ l2: List {[(Hd (Elem L)), (Hd (Tl (Elem L)))]}, stack: List {[(Hd (Elem L)), (Hd (Tl (Elem L)))]} ] ->
+--         matchList l2
+--         [ [] -> error ["failed to update", key]
+--         , [elem,,ls] ->
+--             let [elemKey, elemVal] = elem;
+--             if (elemKey==key)
+--             [ _ -> break (reverseOnto stack [[elemKey, val],,ls])
+--             , _ -> continue [ls, [elem,,stack]]
+--             ]
+--         ]
+--     ) [l, []];
+
+let listKvUpdate : { L @ (List { [Str, Any] }) -> (Hd (Elem L)) -> (Hd (Tl (Elem L))) -> (List { [(Hd (Elem L)), (Hd (Tl (Elem L)))] }) } =
+    (l : L @ (List { [Str, Any] })) -> key -> val ->
+    let l0 = l : List { [(Hd (Elem L)), (Hd (Tl (Elem L)))] };
+    let stack0 = [] : List { [(Hd (Elem L)), (Hd (Tl (Elem L)))] };
+    loop2 [l0, stack0] <| 
+    [l2, stack] ->
+    ifNil l2
+    [ [] -> error ["failed to update", key]
+    , [elem,,ls] ->
+        let [elemKey, elemVal] = elem;
+        if (elemKey==key)
+        [ _ -> break (reverseOnto stack [[elemKey, val],,ls])
+        , _ -> continue [ls, [elem,,stack]]
+        ]
+    ];
+
+
+let listKvGet : { L@(List {[Str, Any]}) -> Str -> (Maybe (Hd (Tl (Elem L)))) } =
+    (l: L@(List {[Str, Any]})) -> k -> 
+    lookup k l;
+    
+let listKvSet : { L@(List { [Str, Any] }) -> (Hd (Elem L)) -> (Hd (Tl (Elem L))) -> (List { [(Hd (Elem L)), (Hd (Tl (Elem L)))] }) } =
+    (l : L @ (List { [Str, Any] })) -> key -> val ->
+    match (listKvGet l key)
+    [ [] |=>
+        listKvAdd l key val
+    , _ |=>
+        listKvUpdate l key val
+    ];
+
+let fieldGetOrDefault : { L @ (List { [Str, Any] }) -> K @ Str -> (Hd (Tl { (Elem L) & [K, Any] })) -> (Hd (Tl { (Elem L) & [K, Any] })) } =
+    (l : L @ (List { [Str, Any] })) -> (key : K @ Str) -> default ->
+    match (listKvGet l key) 
+    [ [val] |=> castT val -- TODO write a type-correct version of this function
+    , [] |=> default
+    ];
+
+
+
+-- TODO 
+-- the type that contains all subtypes of a given type.
+-- let SubType : { Type -> Type } = ty -> Type;
+
+-- let AssocObj : { (SubType Data)->Type->Type } = A -> B ->
+--     Rec ( (AO : Type) ->
+--         { { "get" -> A -> { [] | B } }
+--         & { "set" -> A -> B -> AO }
+--         -- & { "del" -> A -> AO }
+--         } 
+--     );
+
+-- let mkAssocObj : { A@Type -> B@Type -> AssocObj A B } = cast primMkAssocObj;
+
+-- let Array : { Type -> Type } = V -> 
+--     Rec ( (A : Type) ->
+--         { { "get" -> Int -> V }
+--         & { "set" -> Int -> V -> A }
+--         & { "length" -> Int }
+--         & { "extend" -> (List V) -> A }
+--         & { "slice" -> Int -> Int -> A }
+--         } 
+--     );
+-- 
+-- let Array2 : { Type -> Type } = V -> 
+--     Rec ( (A : Type) ->
+--         { { "get" -> Int -> [V, A] }
+--         & { "set" -> Int -> V -> [[], A] }
+--         & { "length" -> [Int, A] }
+--         & { "extend" -> (List V) -> [[],A] }
+--         & { "slice" -> Int -> Int -> [A,A] }
+--         } 
+--     );
+-- 
+-- let mkArray : { A@(List Any) -> (Array (Elem A)) }
+--     = elems ->
+--     error "TODO";
+-- 
+-- -- Linear Array : O(1) get/set accesses, O(n) slicing+duplication
+-- let mkLinearArray : { A@(List Any) -> (Array (Elem A)) } = elems -> error "TODO";
+-- 
+-- -- Persistent Array : O(log n) get/set accesses, O(log n) slicing, O(1) duplication
+-- let mkPersistentArray : { A@(List Any) -> (Array (Elem A)) } = elems -> error "TODO";
+-- 
+-- -- O(log n) get/set accesses, O(log n) slicing, O(1) duplication
+-- let mkArrayFastCopy : { A@(List Any) -> (Array (Elem A)) } = elems -> error "TODO";
+-- -- O(1) get/set accesses, O(n) slicing+duplication
+-- let mkArrayFastAccessSlowCopy : { A@(List Any) -> (Array (Elem A)) } = elems -> error "TODO";
+-- -- O(1) get/set accesses, O(n) slicing, type-error/runtime-error on access to old/stale references
+-- let mkArrayFastAccessNoCopy : { A@(List Any) -> (Array (Elem A)) } = elems -> error "TODO";
+
+
+
+-- let cast : { {From: Type} -> {To: Type} -> From -> To }
+--     = (From: Type) -> (To: Type) -> (a: From) -> 
+--     castT a: To;
+-- 
+-- let justTrustMeCast = cast;
+
+let readInt : { Str -> (Maybe Int) } =
+    text ->
+    let textLen = strLen text;
+    let zero = strOrd "0";
+    let idx0 = 0 : Int;
+    let num0 = 0 : Int;
+    loop2 [idx0, num0] <|
+    [idx, num] ->
+    if (idx == textLen)
+    [ -> break [num]
+    , -> 
+        let ch = strCharAt text idx;
+        let chNum = strOrd ch - zero;
+        if ((0 <= chNum) && (chNum <= 9))
+        [ -> continue [idx+1, chNum + (num * 10)]
+        , -> break []
+        ]    
+    ];
+
+let intFromToLt : { Int -> Int -> (List Int) } =
+    a -> b ->
+    loop2 [b - 1, [] : List Int] <| 
+    [x, xs] ->
+    if (x < a)
+    [ -> 
+        break xs
+    , -> continue [x - 1, [x ,, xs]]
+    ];
+
+-- let intFromToEq : { Int -> Int -> (List Int) } =
+--     a -> b ->
+--     loop2 [b, [] : List Int] <| 
+--     [x, xs] ->
+--     if (x < a)
+--     [ -> break xs
+--     , -> continue [x - 1, [x ,, xs]]
+--     ];
+
+-- let intFromToLt : { Int -> Int -> (List Int) } =
+--     a -> b ->
+--     intFromToEq a (b - 1);
+

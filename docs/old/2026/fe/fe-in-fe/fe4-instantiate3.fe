@@ -1,0 +1,826 @@
+language ferrum/0.1
+
+
+
+
+-- let PatGuard = 
+--     { [ "PgEq",   Depth, Addr, Datum ]
+--     | [ "PgPair", Depth, Addr        ]
+--     };
+-- let PatGuards = List PatGuard;
+
+
+let InstantiateTy = { TmTyCtx -> Depth -> HEnvTy -> Addr -> ExprLoc -> (HeapA ExprTy) };
+
+let instantiatePatTy : { InstantiateTy -> Depth -> Addr -> HEnvTy -> Addr -> ExprLoc -> (HeapA { [HEnvTy, ExprTy] }) } =
+    heapFunc6 <|
+    rec <| (instPat: { InstantiateTy -> Depth -> Addr -> HEnvTy -> Addr -> ExprLoc -> (HeapA { [HEnvTy, ExprTy] }) }) ->
+    inst -> depth -> addr -> env -> tyCtx0 -> [pat, loc] -> (k : K @ HeapK { [HEnvTy, ExprTy] }) ->
+    -- TODO use_ the correct types for_ ty1 and_ ty2, the synthesized type (ty1) needs to at least as wide as the context type (ty2)
+    heapNewNode2 depth ["TyOper", "TODO", []] <| todoTy ->
+    let tyCtx = tyCtx0;
+    -- let ty1 = todoTy;
+    let ty2 = tyCtx0;
+    -- heapNewNodeTi todoTy <| tc ->
+    let patEnv = [] : HEnvTy;
+    match pat
+    [ p @ ["EVar", name] |=> 
+        let ty1 = tyCtx;
+        let ty2 = tyCtx;
+        heapNewNode2 depth ["TyOper", "relComp", [ty2, ty1]] <| rcAddr ->
+        -- heapNewNode [[depth, "Weak", "None", []], ["TI", rcAddr, [], []]] <| tiAddr ->
+        heapNewNodeTi rcAddr <| tiAddr ->
+        let patTy : ExprTy = 
+            [ p, loc, addr, ty1, ty2, tiAddr];
+        let newEnv = [ [name, [addr, ty1]] ];
+        k [newEnv, patTy]
+    , p @ ["ELit", datum] |=> 
+        -- heapNewNode2 depth ["HValue", datum] <| valueAddr ->
+        -- heapNewNode2 depth ["TySingle", valueAddr] <| ty1 ->
+        heapNewNode2 depth ["TyDatum", datum] <| ty1 ->
+        heapNewNode2 depth ["TyOper", "relComp", [ty2, ty1]] <| rcAddr ->
+        heapNewNodeTi rcAddr <| tiAddr ->
+        let patTy : ExprTy = 
+            [p, loc, addr, ty1, ty2, tiAddr];
+        -- let newEnv = env;
+        let newEnv = [];
+        k [newEnv, patTy]
+
+    , ["EList", elems, tlMb] |=>
+        -- TODO handle tyCtx correctly, update it as_ we iterate through the elements
+        heapWhile [elems, addr, patEnv, tyCtx, [] : List ExprTy] (
+            [ [elem1 ,, elems], addr, patEnv, tyCtx, elemsTy] |=>
+            (k : K @ HeapK { [(List ExprLoc), Addr, HEnvTy, Addr, (List ExprTy)] }) ->
+            heapNewNode2 depth ["HOper", "hd", [addr]] <| hdAddr ->
+            heapNewNode2 depth ["HOper", "tl", [addr]] <| tlAddr ->
+            typeHd tyCtx <| tyCtxHd ->
+            typeTl tyCtx <| tyCtxTl ->
+            instPat inst depth hdAddr env tyCtxHd elem1 <| [patEnv2, elem1Ty] ->
+            let patEnv3 = append patEnv2 patEnv;
+            k [elems, tlAddr, patEnv3, tyCtxTl, [elem1Ty ,, elemsTy]]
+        ) <| [_, addr, patEnv, tyCtx, elemsTy] ->
+        heapWhile [tlMb, addr, patEnv, [] : (Maybe ExprTy)] (
+            [ [tlLoc], addr, patEnv, []] |=>
+            (k : K @ HeapK { [(Maybe ExprLoc), Addr, HEnvTy, (Maybe ExprTy)] }) ->
+            instPat inst depth addr env tyCtx tlLoc <| [patEnv2, tlTy] ->
+            let patEnv3 = append patEnv2 patEnv;
+            k [[], addr, patEnv3, [tlTy]]
+        ) <| [_, addr, patEnv, tlMbTy] ->
+        heapNewNode2 depth ["TyOper", "Nil", []] <| nilType ->
+        let tlTy = ifYes tlMbTy [ [_, _, t ,, _] -> t, -> nilType];
+        heapWhile [elemsTy, tlTy] (
+            [ [elemTy ,, elemsTy], listTy] |=>
+            (k : K @ HeapK { [(List ExprTy), Addr]}) ->
+            let [_, _, _, elemType ,, _] = elemTy;
+            heapNewNode2 depth ["TyPair", elemType, listTy] <| listTy ->
+            k [elemsTy, listTy]
+        ) <| [_, ty1] ->
+        heapNewNode2 depth ["TyOper", "relComp", [ty2, ty1]] <| rcAddr ->
+        heapNewNodeTi rcAddr <| tiAddr ->
+        let patTy : ExprTy = 
+            [ ["EList", elemsTy, tlMbTy], loc, addr, ty1, ty2, tiAddr];
+        let newEnv = patEnv;
+        k [newEnv, patTy]
+
+    , ["EAs", name, pat2] |=>
+        instPat inst depth addr env tyCtx pat2 <| [patEnv2, pat2TE] ->
+        let [_, _, _, ty1, _, _] = pat2TE;
+        heapNewNode2 depth ["TyOper", "relComp", [ty2, ty1]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let patTy : ExprTy = 
+            [ ["EAs", name, pat2TE], loc, addr, ty1, ty2, tc];
+        let newEnv = [ [name, [addr,ty1]] ,, patEnv2 ];
+        k [newEnv, patTy]
+
+    , ["ETermBrackets", pat2] |=>
+        instPat inst depth addr env tyCtx pat2 <| [patEnv2, pat2Ty] ->
+        let [_, _, _, ty1, ty2, tc] = pat2Ty;
+        heapNewNode2 depth ["TyOper", "relComp", [tyCtx, ty1]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let patTy : ExprTy = 
+            [ ["ETermBrackets", pat2Ty], loc, addr, ty1, tyCtx, tc];
+        let newEnv = patEnv2;
+        k [newEnv, patTy]
+
+    , ["EType", pat2, typ] |=>
+        -- TODO handle both Term and_ Type contexts
+        -- TODO handle as-type patterns
+        heapNewNode2 depth ["TyOper", "Type", []] <| opType ->
+        -- debug2 ["instantiatePatTy/EType/env", env] <| ->
+        -- debug2 ["instantiatePatTy/EType/typ", typ] <| ->
+        inst "Term" depth env opType typ <| typET @ [_, _, typTy1 ,, _]->
+        -- TODO pass the new type-context through to the pattern
+        -- instPat inst depth addr env tyCtx pat2 <| [patEnv2, pat2ET] ->
+        instPat inst depth addr env typTy1 pat2 <| [patEnv2, pat2ET] ->
+        -- let [_, _, _, ty1, ty2, tc] = pat2ET;
+        let ty1 = typTy1;
+        let ty2 = tyCtx;
+        heapNewNode2 depth ["TyOper", "relComp", [ty2, ty1]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let patTy : ExprTy = 
+            [ ["EType", pat2ET, typET], loc, addr, ty1, ty2, tc];
+        let newEnv = patEnv2;
+        k [newEnv, patTy]
+
+    , other |=> 
+        error ["instantiatePatTy", "invalid pattern", other]
+    ];
+
+let typeMaybePat : { Depth -> Expr -> (HeapA Addr) } =
+    rec <| (tyMbPat : { Depth -> Expr -> (HeapA Addr) }) -> 
+    depth -> expr -> (k : K @ (HeapK Addr)) ->
+    match expr
+    [ ["EVar", _] |=> 
+        heapNewNode2 depth ["TyOper", "Any", []] <| anyTy ->
+        k anyTy
+    , ["ELit", val] |=>
+        heapNewNode2 depth ["TyDatum", val] <| datumTy ->
+        k datumTy
+    , ["EList", elems, tlMb] |=>
+        ifNil tlMb
+        [ ->
+            (k : K @ HeapK Addr) ->
+            heapNewNode2 depth ["TyDatum", []] <| nilTy ->
+            k nilTy
+        , [tlExp] ->
+            (k : K @ HeapK Addr) ->
+            tyMbPat depth tlExp <| tlTy ->
+            k tlTy
+        ] <| tlTy ->
+        -- k tlTy
+        heapWhile [reverse elems, tlTy] (
+            [[elem ,, elems], tupleTy] |=>
+            (k : K @ HeapK { [(List Expr), Addr] }) ->
+            tyMbPat depth elem <| elemTy ->
+            heapNewNode2 depth ["TyPair", elemTy, tupleTy] <| tupleTy ->
+            k [elems, tupleTy]
+        ) <| [_, tupleTy] ->
+        k tupleTy
+    , ["ETermBrackets", expr] |=>
+        tyMbPat depth expr k
+    , ["EType", expr, _] |=>
+        tyMbPat depth expr k
+    , ["EAs", _, expr] |=>
+        tyMbPat depth expr k
+    , [tag ,, _] |=>
+        panic ["typeMaybePat", "unexpected expr tag", tag]
+    ];
+
+
+let instantiatePatGuardVarsTy : 
+    {  InstantiateTy -> Depth -> Addr
+    -> PatGuards -> HEnvTy -> Addr -> ExprLoc 
+    -> (HeapA { [Depth, PatGuards, HEnvTy, ExprTy] }) 
+    } =
+    heapFunc7 <|
+    rec <| (instPgv : { InstantiateTy -> Depth -> Addr -> PatGuards -> HEnvTy -> Addr -> ExprLoc -> (HeapA { [Depth, PatGuards, HEnvTy, ExprTy] }) }) ->
+    instTy -> depth -> addr -> pgs -> env -> tyCtx -> [pat, loc] -> (k : K @ HeapK { [Depth, PatGuards, HEnvTy, ExprTy] }) ->
+    heapNewNode2 depth ["TyOper", "TODO", []] <| todoTy ->
+    -- let ty1 = todoTy;
+    let ty2 = tyCtx;
+    heapNewNodeTi todoTy <| tc ->
+    match pat
+    [ ["EVar", name] |=>
+        let ty1 = tyCtx;
+        let env2 = [ [name, [addr, ty1]] ,, env ];
+        heapNewNode2 depth ["TyOper", "relComp", [ty2, ty1]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let exprTy : ExprTy = 
+            [["EVar", name], loc, addr, ty1, ty2, tc];
+        k [ depth, pgs, env2, exprTy]
+    , ["ELit", datum] |=>
+        let pgs2 = [ ["PgEq", depth, addr, datum] ,, pgs ];
+        heapNewNode2 depth ["TyDatum", datum]  <| ty1 ->
+        heapNewNode2 depth ["TyOper", "relComp", [ty2, ty1]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let exprTy : ExprTy = 
+            [["ELit", datum], loc, addr, ty1, ty2, tc];
+        k [ depth + 1, pgs2, env, exprTy]
+
+    , ["EList", elems, tlMb] |=>
+        heapWhile [elems, addr, depth, pgs, env, tyCtx, [] : List ExprTy] (
+            [ [elem ,, elems], addr, depth, pgs, env, tyCtx, elemsTy] |=>
+            (k : K @ HeapK { [(List ExprLoc), Addr, Depth, PatGuards, HEnvTy, Addr, (List ExprTy)] }) ->
+            let pg = ["PgPair", depth, addr];
+            -- debug2 ["instantiatePatGuardVarsTy/PgPair", depth, addr] <| ->
+            let pgs2 = [pg ,, pgs];
+            let dpge1 = [ depth, [ pg ,, pgs], env ];
+            heapNewNode2 (depth + 1) ["HVar"] <| varHdAddr ->
+            heapNewNode2 (depth + 2) ["HVar"] <| varTlAddr ->
+            heapNewNode2 depth ["HOper", "Hd", [tyCtx]] <| tyHdCtx ->
+            heapNewNode2 depth ["HOper", "Tl", [tyCtx]] <| tyTlCtx ->
+            instPgv instTy (depth + 2) varHdAddr pgs2 env tyHdCtx elem <| [depth2, pgs3, env2, elemTy] ->
+            k [elems, varTlAddr, depth2, pgs3, env2, tyTlCtx, [elemTy ,, elemsTy]]
+        ) <| [_, addr, depth, pgs, env, tyCtx, elemsTy] ->
+        ifNil tlMb
+        [ [] ->
+            (k : K @ HeapK { [Addr, Depth, PatGuards, HEnvTy, (Maybe ExprTy)] }) ->
+            heapNewNode2 depth ["HValue", []] <| nilAddr ->
+            let pgs2 = [ ["PgEq", depth, addr, []] ,, pgs ];
+            k [nilAddr, depth + 1, pgs2, env, []]
+        , [tlLoc] ->
+            (k : K @ HeapK { [Addr, Depth, PatGuards, HEnvTy, (Maybe ExprTy)] }) ->
+            instPgv instTy depth addr pgs env tyCtx tlLoc <| [depth2, pgs2, env2, tlTy] ->
+            k [addr, depth2, pgs2, env2, [tlTy]]
+        ] <| [tlAddr, depth, pgs, env, tlMbTy] ->
+        -- TODO rebuild ty1
+        heapNewNode2 depth ["TyDatum", []] <| nilType ->
+        let tlTy = ifYes tlMbTy [ [_, _, t ,, _] -> t, -> nilType];
+        heapWhile [elemsTy, tlTy] (
+            [ [elemTy ,, elemsTy], listTy] |=>
+            (k : K @ HeapK { [(List ExprTy), Addr]}) ->
+            let [_, _, _, elemType ,, _] = elemTy;
+            heapNewNode2 depth ["TyPair", elemType, listTy] <| listTy ->
+            k [elemsTy, listTy]
+        ) <| [_, ty1] ->
+
+        heapNewNode2 depth ["TyOper", "relComp", [ty2, ty1]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let patTy : ExprTy = 
+            [ ["EList", elemsTy, tlMbTy], loc, addr, ty1, ty2, tc];
+        let newEnv = env;
+        k [depth, pgs, env, patTy]
+
+    , ["EAs", name, pat2] |=>
+        instPgv instTy depth addr pgs env tyCtx pat2 <| [depth2, pgs2, patEnv, patTy] ->
+        let [_, _, _, ty1, _, _] = patTy;
+        let env2 = [ [name, [addr, ty1]] ,, patEnv ];
+        heapNewNode2 depth ["TyOper", "relComp", [ty2, ty1]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let exprTy : ExprTy = 
+            [["EAs", name, patTy], loc, addr, ty1, ty2, tc];
+        k [ depth2, pgs2, env2, exprTy]
+
+    , ["ETermBrackets", pat2] |=>
+        -- TODO rebuild the ETermBrackets
+        instPgv instTy depth addr pgs env tyCtx pat2 k
+
+    , ["EType", pat2, typ] |=>
+        -- TODO handle "typ", and rebuild the "EType"
+        -- instPgv instTy depth addr pgs env tyCtx pat2 k
+
+        -- TODO handle both Term and_ Type contexts
+        -- TODO handle as-type patterns
+        heapNewNode2 depth ["TyOper", "Type", []] <| opType ->
+        -- debug2 ["instantiatePatTy/EType/env", env] <| ->
+        -- debug2 ["instantiatePatTy/EType/typ", typ] <| ->
+        instTy "Term" depth env opType typ <| typET @ [_, _, typTy1 ,, _]->
+        -- TODO pass the new type-context through to the pattern
+        -- instPat inst depth addr env tyCtx pat2 <| [patEnv2, pat2ET] ->
+        instPgv instTy depth addr pgs env typTy1 pat2 <| [depth2, pgs2, patEnv2, pat2ET] ->
+        -- let [_, _, _, ty1, ty2, tc] = pat2ET;
+        let ty1 = typTy1;
+        let ty2 = tyCtx;
+        heapNewNode2 depth ["TyOper", "relComp", [ty2, ty1]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let patTy : ExprTy = 
+            [ ["EType", pat2ET, typET], loc, addr, ty1, ty2, tc];
+        let newEnv = patEnv2;
+        k [depth2, pgs2, newEnv, patTy]
+
+
+
+    , other |=> 
+        error ["instantiatePatGuardVarsTy", "invalid pattern", other]
+    ];
+
+let instantiatePatGuardCallsTy : { InstantiateTy -> { [ Depth, (List PatGuard), HEnvTy ] } -> Addr -> (HeapA Addr) } =
+    heapFunc3 <|
+    instTy -> ([depth0, pg, env] : { [ Depth, (List PatGuard), HEnvTy ] }) -> (addr : Addr) -> (k : K @ HeapK Addr) ->
+    -- debug2 ["instantiatePatGuardCallsTy/Pg", pg] <| ->
+    heapLoop2 [pg : List PatGuard, addr : Addr] ( 
+        [pg2 : List PatGuard, result: Addr] ->
+        (breakK: KB @ HeapK Addr) -> 
+        (continueK : KC @ HeapK {[(List PatGuard), Addr]}) ->
+        match pg2
+        [ [] |=>
+            breakK result
+        , [ ["PgEq", depth, addr1, datum] ,, pgs] |=>
+            heapNewNode2 depth ["HValue", datum] <| addr2 ->
+            heapNewNode2 depth ["HLambda", result] <| lambdaAddr ->
+            heapNewNode2 depth ["HOper", "pgEq", [addr1, addr2, lambdaAddr]] <| pgAddr ->
+            continueK [pgs, pgAddr]
+        , [ ["PgPair", depth, addr1] ,, pgs] |=>
+            -- debug2 ["instantiatePatGuardCallsTy/PgPair", depth, addr1] <| ->
+            heapNewNode2 (depth + 1) ["HLambda", result] <| tlAddr ->
+            heapNewNode2 depth       ["HLambda", tlAddr] <| hdAddr ->
+            heapNewNode2 depth       ["HOper", "pgPair", [addr1, hdAddr]] <| pgAddr ->
+
+            continueK [pgs, pgAddr]
+        ]
+    ) <| result ->
+    k result;
+
+
+let InstantiateDeclsTy = 
+    {  InstantiateTy 
+    -> Int 
+    -> HEnvTy 
+    -> HEnvTy 
+    -> DeclLocs 
+    -> (HeapA { [HEnvTy, HEnvTy, DeclTys] }) 
+    };
+
+
+let instantiateDeclsTy : InstantiateDeclsTy =
+    heapFunc5 <|
+    (inst : InstantiateTy) -> 
+    (depth : Depth) -> 
+    (env0 : HEnvTy) -> 
+    (declEnv0 : HEnvTy) -> 
+    (decls : List DeclLoc) -> 
+    (k : K @ HeapK { [HEnvTy, HEnvTy, DeclTys] }) ->
+    heapNewNode2 depth ["TyOper", "Any", []] <| anyType ->
+    heapWhile ([decls, env0, declEnv0, []] : { [ DeclLocs, HEnvTy, HEnvTy, DeclTys] }) (
+        [ [ [pat, defn] ,, decls2 ], env, declEnv, declTys ] |=>
+        (k2 : KW @ HeapK { [ DeclLocs, HEnvTy, HEnvTy, DeclTys] }) ->
+        -- TODO ? instantiate a hole, and then knot-tie the let-pat and let-defn types together, mutually dependent on each other.
+        -- TODO ?   currently the loop results in non-termination
+        -- TODO ?   a smarter findNextRedex function might fix things
+        -- TODO ?   sticking to a non-cyclic solution for now, similiar to that used in fe-in-ts
+        -- heapNewHole depth <| hole ->
+        -- inst "Term" depth env hole defn <| defnTE ->
+        -- inst "Term" depth env anyType defn <| defnTE ->
+        heapNewHole depth <| hole ->
+        heapNewNode2 depth ["TyOper", "Any", []] <| anyTy ->
+        -- instantiate the pat first-time with an Any type-context
+        -- TODO ? this uses "hole" as the value to project from, 
+        -- TODO ?    might be better to have a cut-down version of instantiatePatTy that doesn't pointlessly build the hd/tl projections
+        instantiatePatTy inst depth hole env anyTy pat <| [patEnv, patTE] ->
+        let [_, _, patAddr, patTy, _, _] = patTE;
+
+        inst "Term" depth env patTy defn <| defnTE ->
+
+        let [_, _, defnAddr, defnTy, _, _] = defnTE;
+        -- debug2 ["instDeclsTy/ty", defnTE] <| ->
+        -- debug2 ["instDeclsTy/pat", pat] <| ->
+        -- debug2 ["instDeclsTy/defn", defn] <| ->
+        -- debug2 ["instDeclsTy/ty1", defnTy1] <| ->
+        -- traceHeap defnTy <| ->
+
+        -- instantiate the pat a second-time with the defn type as context
+        instantiatePatTy inst depth defnAddr env defnTy pat <| [patEnv, patTE] ->
+        let [_, _, patAddr, patTy, _, _] = patTE;
+        -- heapLink hole patTy <| ->
+        -- traceHeap patTy1 <| ->
+        let declEnv2 = patEnv;
+        -- debug2 ["instantiateDeclsTy/declEnv2", declEnv2] <| ->
+        let declTy = [patTE, defnTE];
+        let env2 : HEnvTy = concat [declEnv2, env];
+        let declEnv3 = concat [declEnv2, declEnv];
+        k2 [decls2, env2, declEnv3, [declTy ,, declTys]]
+    ) <| [_, env2, declEnv2, declTys] ->
+    k [env2, reverse declEnv2, reverse declTys];
+
+
+
+
+
+
+
+
+-- let InstantiateTy = { TmTyCtx -> Depth -> HEnvTy -> Addr -> ExprLoc -> (HeapA ExprTy) };
+
+let InstantiateTyOp = { OpTypes -> InstantiateTy };
+
+let instantiateTy1 : InstantiateTyOp =
+    heapFunc6 <|
+    rec <| (instOp : InstantiateTyOp) ->
+    opTypes -> ctx -> depth -> env -> tyCtx -> exprLoc -> 
+    (k : K @ HeapK ExprTy) ->
+    let inst = instOp opTypes;
+    let [expr0, loc0] = exprLoc;
+    let [exprTag ,, _] = expr0;
+    -- TODO ty1, ty2, tc need to be handled correctly for each case
+    heapNewNode2 depth ["TyOper", "TODO", []] <| todoTy ->
+    -- heapNewNode [[depth, "Weak", "None", []], ["TI", todoTy, [], []]] <| todoTi ->
+    heapNewNodeTi todoTy <| todoTi ->
+    let ty1 = todoTy;
+    let ty2 = todoTy;
+    -- heapNewNode [[depth, "Weak", "None", []], ["TyOper", "relComp", [ty1, ty2]]] <| tc ->
+    let tc = todoTi;
+    match [ctx, expr0] 
+        -- term-context
+    [ ["Term", e @ ["ELit", a] ] |=> 
+        heapNewNode2 depth ["HValue", a] <| valueAddr ->
+        heapNewNode2 depth ["TySingle", valueAddr] <| ty1Addr ->
+        -- heapNewNode2 depth ["TyDatum", a] <| ty1Addr ->
+        heapNewNode2 depth ["TyOper", "relComp", [ty1Addr, tyCtx]] <| rcAddr ->
+        heapNewNodeTi rcAddr <| tiAddr ->
+        let exprTy : ExprTy =
+            [e, loc0, valueAddr, ty1Addr, tyCtx, tiAddr];
+        k exprTy
+    , ["Term", ["EApply", func, arg]] |=> 
+        -- TODO calc tyCtx appropriately the both the func + arg, can't just pass the same tyCtx down
+        -- TODO the context type of the arg depends on the func (as in fe-in-ts)
+        -- TODO   make the context type of the func depend on the arg ? (not currently done in fe-in-ts, it will potentially create cycles, but it might just work)
+        heapNewNode2 depth ["TyOper", "Void", []] <| tyVoid ->
+        heapNewNode2 depth ["TyOper", "Any", []] <| tyAny ->
+        heapNewNode2 depth ["TyFun", tyVoid, tyAny] <| tyFun ->
+        inst ctx depth env tyFun func <| funcTy @ [_, _, funcAddr, funTy1, _, _] ->
+        heapNewNode2 depth ["HOper", "Domain", [funTy1]] <| tyArgCtx ->
+        inst ctx depth env tyArgCtx arg <| argTy @ [_, _, argAddr, _, argTy1, _] ->
+        heapNewNode2 depth ["HApply", funcAddr, argAddr] <| applyAddr ->
+        applyTypes depth env funTy1 argAddr argTy1 <| applyTy1 ->
+        let ty1 = applyTy1;
+        let ty2 = tyCtx;
+        heapNewNode2 depth ["TyOper", "relComp", [ty1, ty2]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let exprTy : ExprTy =
+            [["EApply", funcTy, argTy], loc0, applyAddr, ty1, ty2, tc];
+        k exprTy
+
+    -- TODO strip redundant brackets from the AST ?
+    -- TODO or at least handle them in a more uniform / less adhoc manner
+    -- ( (pat : tyName @ ty) -> body )
+    , ["Term", ["ELambda", [ ["ETermBrackets", [ ["EType", pat, [ ["EAs", tyName, ty], asLoc]], tyLoc]], brLoc], body]] |=>
+        let depth1 = depth + 1;
+        heapNewNode2 depth1 ["TyVar"] <| tyVarAddr ->
+        heapNewNode2 depth1 ["HVar"] <| varAddr ->
+        -- TODO instantiate ty and handle self-reference as needed 
+        -- TODO (perhaps adding (Self <| tyName -> ty) should be done in a pass before instantiation?) 
+        -- TODO do we even need Self in the heap ?
+        -- let tyAddr = todoTy;
+        -- let tyTy = ["EVar", "TODO"];
+        let env2 = [ [tyName, [tyVarAddr, ty1]] ,, env];
+        -- debug2 ["instTy/lambda/type/env", env2] <| ->
+        instantiatePatTy inst depth1 varAddr env2 tyCtx pat <| [env3, patTy] ->
+        let env4 = append env3 env2;
+        inst ctx depth1 env4 tyCtx ty <| tyTy @ [_, _, tyAddr, _, _, _] ->
+        let [_, _, patAddr ,, _] = patTy;
+        inst ctx depth1 env4 tyCtx body <| bodyTy @ [_, _, bodyAddr, _, _, _] ->
+        heapNewNode2 depth ["HLambda", bodyAddr] <| lambdaAddr ->
+        let asTy    : ExprTy = [ ["EAs", tyName, tyTy], asLoc, tyAddr, ty1, ty2, tc];
+        let tyAnTy  : ExprTy = [ ["EType", patTy, asTy], tyLoc, patAddr, ty1, ty2, tc];
+        let brTy    : ExprTy = [ ["ETermBrackets", tyAnTy], brLoc, patAddr, ty1, ty2, tc];
+        let lamTy   : ExprTy = [ ["ELambda", brTy, bodyTy], loc0, lambdaAddr, ty1, ty2, tc];
+        k lamTy
+
+    , ["Term", ["ELambda", pat, body]] |=>
+        let depth1 = depth + 1;
+        heapNewNode2 depth1 ["HVar"] <| varAddr ->
+        let [tyDomain, _] = lookupOrError "Domain" env;
+        -- heapNewNode2 depth ["HApply", tyDomain, tyCtx] <| domCtx ->
+        heapNewNode2 depth ["HOper", "Domain", [tyCtx]] <| domCtx ->
+        instantiatePatTy inst depth1 varAddr env domCtx pat <| [patEnv, patET @ [_, _, _, patTy1 ,, _]] ->
+        let env2 = append patEnv env;
+        inst ctx depth1 env2 tyCtx body <| bodyET @ [_, _, bodyAddr, bodyTy1 ,, _] ->
+        heapNewNode2 depth ["TyFun", patTy1, bodyTy1] <| lambdaTy1 ->
+        heapNewNode2 depth ["HLambda", bodyAddr] <| lambdaAddr ->
+        let ty1 = lambdaTy1;
+        let ty2 = tyCtx;
+        heapNewNode2 depth ["TyOper", "relComp", [ty1, ty2]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let exprTy : ExprTy =
+            [ ["ELambda", patET, bodyET], loc0, lambdaAddr, ty1, ty2, tc ];
+        k exprTy
+
+    , ["Term", ["ELambdaYes", pat, body]] |=>
+        let depth1 = depth + 1;
+        heapNewNode2 depth1 ["HVar"] <| varAddr ->
+        instantiatePatTy inst depth1 varAddr env tyCtx pat <| [patEnv, patTy] ->
+        let env2 = append patEnv env;
+        inst ctx depth1 env2 tyCtx body <| bodyTy @ [_, _, bodyAddr ,, _] ->
+        heapNewNode2 depth1 ["HValue", []] <| nilAddr ->
+        heapNewNode2 depth1 ["HPair", bodyAddr, nilAddr] <| body2Addr ->
+        heapNewNode2 depth  ["HLambda", body2Addr] <| lambdaAddr ->
+        let exprTy : ExprTy =
+            [ ["ELambdaYes", patTy, bodyTy], loc0, lambdaAddr, ty1, ty2, tc ];
+        k exprTy
+
+    -- TODO decide how to instantiate lambda-maybes
+    -- TODO   currently this nests the body several layers deep (depending on the size of the pattern)
+    -- TODO   this works at the graph-level and reduces correctly
+    -- TODO   but doesn't make sense at the annotated expression-level
+    -- TODO   the depth appears to inexplicably make a big drop down in an illegal fashion 
+    -- TODO      (the intermediate lambdas are not present at the expression-level)
+    -- TODO 
+    -- TODO the big drop in depth isn't actually an impediment to type-checking
+    -- TODO   it's more of a surprise when looking at the depth of the nodes the types are readback from
+    , ["Term", ["ELambdaMaybe", pat, body]] |=>
+        let depth1 = depth + 1;
+        heapNewNode2 depth1 ["HVar"] <| varAddr ->
+        heapNewNode2 depth ["HOper", "Domain", [tyCtx]]              <| domTy ->
+        typeMaybePat depth (exprStripLoc pat)                        <| matTy ->
+        heapNewNode2 depth ["TyOper", "&", [domTy, matTy]]           <| dmIn ->
+        instantiatePatGuardVarsTy inst depth1 varAddr [] env dmIn pat  <| [depth2, pgs, env2, patTE] ->
+        -- debug2 ["instantiatePatGuardVarsTy/pat", pat] <| ->
+        -- debug2 ["instantiatePatGuardVarsTy/pgs", pgs] <| ->
+        heapNewNode2 depth1 ["HOper", "Codomain", [tyCtx]]           <| codTy ->
+        heapNewNode2 depth1 ["HOper", "Hd", [codTy]]                 <| tyHdBodyCtx ->
+        inst ctx depth2 env2 tyHdBodyCtx body <| bodyTE @ [_, _, bodyAddr, bodyTy ,, _] ->
+        heapNewNode2 depth2 ["HValue", []] <| nilAddr ->
+        heapNewNode2 depth2 ["HPair", bodyAddr, nilAddr] <| resultAddr ->
+        instantiatePatGuardCallsTy inst [depth2, pgs, env2] resultAddr <| guardAddr ->
+        heapNewNode2 depth ["HLambda", guardAddr] <| lambdaAddr ->
+        let resTy = bodyTy;
+        heapNewNode2 depth ["TyDatum", []]                           <| nilTy ->
+        heapNewNode2 depth ["TyPair", resTy, nilTy]                  <| yesResTy ->
+        heapNewNode2 depth ["TyFun", dmIn, yesResTy]                 <| yesFunTy ->
+        heapNewNode2 depth ["TyOper", "\\", [domTy, matTy]]          <| dmRc ->
+        heapNewNode2 depth ["TyFun", dmRc, nilTy]                    <| noFunTy ->
+        heapNewNode2 depth ["TyOper", "&", [yesFunTy, noFunTy]]      <| subFunTy ->
+        heapNewNode2 depth ["TyOper", "Any", []]                     <| anyTy ->
+        heapNewNode2 depth ["TyPair", anyTy, nilTy]                  <| yesAnyTy ->
+        heapNewNode2 depth ["TyOper", "|", [yesAnyTy, nilTy]]        <| maybeAnyTy ->
+        heapNewNode2 depth ["TyFun", domTy, maybeAnyTy]              <| superFunTy ->
+        heapNewNode2 depth ["TyOper", "<:", [subFunTy, superFunTy]]  <| funTy ->
+        let ty1 = funTy;
+        let ty2 = tyCtx;
+        heapNewNode2 depth ["TyOper", "relComp", [ty1, ty2]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let exprTy : ExprTy =
+            [ ["ELambdaMaybe", patTE, bodyTE], loc0, lambdaAddr, ty1, ty2, tc ];
+        k exprTy
+         
+    , ["Term", ["ELambdaNo", pat, body]] |=>
+        let depth1 = depth + 1;
+        heapNewNode2 depth1 ["HVar"] <| varAddr ->
+        heapNewNode2 depth ["HOper", "Domain", [tyCtx]]              <| domTy ->
+        instantiatePatGuardVarsTy inst depth1 varAddr [] env domTy pat  <| [depth2, pgs, env2, patTy] ->
+        inst ctx depth2 env2 tyCtx body <| bodyTy @ [_, _, bodyAddr ,, _] ->
+        instantiatePatGuardCallsTy inst [depth2, pgs, env2] bodyAddr <| guardAddr ->
+        heapNewNode2 depth ["HLambda", guardAddr] <| lambdaAddr ->
+        let exprTy : ExprTy =
+            [ ["ELambdaNo", patTy, bodyTy], loc0, lambdaAddr, ty1, ty2, tc ];
+        k exprTy
+
+   , ["Term", ["EVar", name]] |=>
+        match (lookup name env)
+        [ [] |=>             
+            error ["Term", "Unknown Variable", name, loc0, env]
+            -- let _ = debug ["ERROR: Instantiate: Unknown Variable: ", name, loc0];
+            -- heapNewNode [[depth, "Weak", "None", [exprLoc]], ["HValue", "ERROR: Instantiate: Unknown Variable: " ^ show2 name]] <| errorAddr ->
+            -- k errorAddr
+        , [[addr, ty1]] |=> 
+            -- debug2 ( strJoin "\n" ["inst/Term/Env" ,, map show env ] ) <| ->
+            -- debug2 ["inst/Term/Var", name, addr, ty1] <| ->
+            heapNewNode2 depth ["TyOper", "relComp", [ty1, tyCtx]] <| rcAddr ->
+            heapNewNodeTi rcAddr <| tiAddr ->
+            let exprTy : ExprTy =
+                [ ["EVar", name], loc0, addr, ty1, tyCtx, tiAddr ];
+            k exprTy
+        ]
+
+   , ["Term", ["ELets", decls, expr]] |=>
+        instantiateDeclsTy inst depth env [] decls <| [env2, declsEnv, declsTy] ->
+        inst ctx depth env2 tyCtx expr <| expTy @ [_, _, exprAddr ,, _] ->
+        let exprTy : ExprTy =
+            [ ["ELets", declsTy, expTy], loc0, exprAddr, ty1, ty2, tc ];
+        k exprTy
+
+   , ["Term", ["EOper", opName, args]] |=> 
+        -- TODO lookup the opName, and get arg context type from there
+        -- TODO lookup the opName, and calc result type using arg types
+
+        let [argTys, resultTy] = 
+            match (lookup opName opTypes)
+            [ [] |=>
+                -- error ["instTy/EOper", "unknown opName", opName, "expected one of", map hd opTypes]
+                [[todoTy,todoTy,todoTy],todoTy]
+            , [[argTys, resultTy]] |=>
+                [argTys, resultTy]
+            ];
+        -- debug2 ["instantiateTy1/term/oper", opName, argTys, resultTy] <| ->
+        heapNewNode2 depth ["TyOper", "Int", []] <| intType ->
+        -- let argCtx = intType;
+        -- let resultTy = intType;
+        -- let argAndCtx = (zip args argTypes);
+        heapMap ( [arg : ExprLoc, argCtxTy : Addr] -> 
+            -- debug2 ["instantiateTy1/term/oper/arg", opName, arg, argCtxTy] <| ->
+            inst ctx depth env argCtxTy arg
+        ) (zip args argTys) <| argETs ->
+        let argAddrs = forMap argETs <| [argE, argL, argAddr, _, _, _] -> argAddr;
+        heapNewNode2 depth ["HOper", opName, argAddrs] <| opAddr ->
+        heapNewNode2 depth ["TyOper", "relComp", [resultTy, tyCtx]] <| rcAddr ->
+        heapNewNodeTi rcAddr <| tiAddr ->
+        let ty1 = resultTy;
+        let ty2 = tyCtx;
+        let tc = tiAddr;
+        let exprTy : ExprTy =
+            [ ["EOper", opName, argETs], loc0, opAddr, ty1, ty2, tc ];
+        k exprTy
+
+    , ["Term", ["EList", elems, tlMb]] |=>
+        heapWhile [elems, tyCtx : Addr, [] : List Addr] (
+            [ [elem ,, elems], tyCtx, elemTyCtxs ] |=>
+            (k : K @ HeapK { [(List ExprLoc), Addr, (List Addr)]}) ->
+            heapNewNode2 depth ["HOper", "Hd", [tyCtx]] <| hTy ->
+            -- TODO use knowledge of the synthesized Hd type to modify expectation in the context Tl type
+            heapNewNode2 depth ["HOper", "Tl", [tyCtx]] <| tTy ->
+            k [elems, tTy, [hTy ,, elemTyCtxs]]
+        ) <| [_, tlTyCtx, elemTyCtxs] ->
+        ifNil tlMb
+        [ [] ->
+            (k : K @ HeapK { [Addr, (Maybe ExprTy), Addr] }) ->
+            heapNewNode2 depth ["HValue", []] <| nilAddr ->
+            heapNewNode2 depth ["TyOper", "Nil", []] <| nilType ->
+            k [nilAddr, [], nilType]
+        , [tlLoc] ->
+            (k : K @ HeapK { [Addr, (Maybe ExprTy), Addr] }) ->
+            inst ctx depth env tlTyCtx tlLoc <| tlTy @ [_, _, tlAddr, tlType ,, _] ->
+            k [tlAddr, [tlTy], tlType]
+        ] <| [tlAddr, tlTyMb, tlType] ->
+        heapWhile [reverse elems, elemTyCtxs, tlAddr, [] : List ExprTy, tlType] (
+            [ [elem ,, elems], [elemTyCtx ,, elemTyCtxs], addr, elemsTy, tlType] |=>
+            (k : K @ HeapK { [(List ExprLoc), (List Addr), Addr, (List ExprTy), Addr] }) ->
+            inst ctx depth env elemTyCtx elem <| elemTy @ [_, _, elemAddr, elemType ,, _] ->
+            heapNewNode2 depth ["HPair", elemAddr, addr] <| consAddr ->
+            heapNewNode2 depth ["TyPair", elemType, tlType] <| pairType ->
+            k [elems, elemTyCtxs, consAddr, [elemTy ,, elemsTy], pairType]
+        ) <| [_, _, addr, elemsTy, pairType] ->
+        let ty1 = pairType;
+        let ty2 = tyCtx;
+        heapNewNode2 depth ["TyOper", "relComp", [ty1, ty2]] <| rcAddr ->
+        heapNewNodeTi rcAddr <| tiAddr ->
+        let exprTy : ExprTy = 
+            [ ["EList", elemsTy, tlTyMb], loc0, addr, ty1, ty2, tiAddr];
+        k exprTy
+
+    , ["Term", ["ETermBrackets", expr]] |=>
+        inst "Term" depth env tyCtx expr <| expTy @ [_, _, exprAddr, exprType ,, _] ->
+        let ty1 = exprType;
+        let ty2 = tyCtx;
+        heapNewNode2 depth ["TyOper", "relComp", [ty1, ty2]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let exprTy : ExprTy =
+            [ ["ETermBrackets", expTy], loc0, exprAddr, ty1, ty2, tc ];
+        k exprTy
+
+    , ["Term", ["ETypeBrackets", expr]] |=>
+        -- debug2 ["ETypeBrackets/env", env] <| ->
+        heapNewNode2 depth ["TyOper", "Type", []] <| opType ->
+        inst "Type" depth env tyCtx expr <| expTy @ [_, _, exprAddr, exprType ,, _] ->
+        let ty1 = exprType;
+        let ty2 = opType;
+        heapNewNode2 depth ["TyOper", "relComp", [ty1, ty2]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let exprTy : ExprTy =
+            [ ["ETypeBrackets", expTy], loc0, exprAddr, ty1, ty2, tc ];
+        k exprTy
+
+    , ["Term", ["EType", term, ty]] |=>
+        -- TODO handle the "ty" and rebuild the "EType"
+        inst ctx depth env tyCtx term k
+
+    -- type-context
+    , ["Type", ["ELit", a] ] |=> 
+        heapNewNode2 depth  ["TyOper", "Type", []] <| typeType ->
+        -- heapNewNode2 depth  ["HValue", a] <| valueAddr ->
+        -- heapNewNode2 depth  ["TySingle", valueAddr] <| singleType ->
+        heapNewNode2 depth  ["TyDatum", a] <| singleType ->
+        heapNewNode2 depth  ["TyOper", "relComp", [typeType, tyCtx]] <| rcAddr ->
+        heapNewNodeTi rcAddr <| tiAddr ->
+        let exprTy : ExprTy =
+            [["ELit", a], loc0, singleType, typeType, tyCtx, tiAddr];
+        k exprTy
+    , ["Type", ["EApply", func, arg]] |=> 
+        inst ctx depth env tyCtx func <| funcTy @ [_, _, funcAddr ,, _] ->
+        inst ctx depth env tyCtx arg  <| argTy  @ [_, _, argAddr  ,, _] ->
+        heapNewNode2 depth ["TyApp", funcAddr, argAddr] <| appAddr ->
+        let exprTy : ExprTy =
+            [ ["EApply", funcTy, argTy], loc0, appAddr, ty1, ty2, tc ];
+        k exprTy
+
+
+
+    , ["Type", ["ELambda", [ ["EAs", name, pat], _], body]] |=>
+        let depth1 = depth + 1;
+        heapNewNode2 depth1 ["TyVar"] <| tyVarAddr ->
+        let env2 = [ [name, [tyVarAddr, todoTy]] ,, env];
+        inst ctx depth1 env2 tyCtx pat  <| patTy  @ [_, _, patAddr  ,, _] ->
+        inst ctx depth1 env2 tyCtx body <| bodyTy @ [_, _, bodyAddr ,, _] ->
+        heapNewNode2 depth ["TyFun", patAddr, bodyAddr] <| lamAddr ->
+        let exprTy : ExprTy =
+            [ ["ELambda", patTy, bodyTy], loc0, lamAddr, ty1, ty2, tc ];
+        k exprTy
+
+
+    -- { { termVarName : patType } -> body }
+    , ["Type", ["ELambda", [ [ "ETypeBrackets", [ ["EType", term @ [["EVar", termVarName], _], patType], _] ], _] , body]] |=>
+    -- , ["Type", ["ELambda", [ ["EType", term @ [["EVar", termVarName], _], patType], _], body]] |=>
+        -- TODO handle term-annotation patterns in function type
+        let depth1 = depth + 1;
+        heapNewNode2 depth1 ["HVar"] <| termVarAddr ->
+        let env2 = [ [termVarName, [termVarAddr, todoTy]] ,, env];
+        inst ctx depth1 env2 tyCtx patType <| patTy @ [_, _, patAddr ,, _] ->
+        inst ctx depth1 env2 tyCtx body <| bodyTy @ [_, _, bodyAddr ,, _] ->
+        heapNewNode2 depth ["TyFun", patAddr, bodyAddr] <| lamAddr ->
+        let exprTy : ExprTy =
+            [ ["ELambda", patTy, bodyTy], loc0, lamAddr, ty1, ty2, tc ];
+        k exprTy
+
+    , ["Type", ["ELambda", pat, body]] |=>
+        heapNewNode2 depth ["TyOper", "Type", []] <| tyType ->
+        let depth1 = depth + 1;
+        inst ctx depth1 env tyType pat  <| patTE  @ [_, _, patAddr  ,, _] ->
+        inst ctx depth1 env tyType body <| bodyTE @ [_, _, bodyAddr ,, _] ->
+        heapNewNode2 depth ["TyFun", patAddr, bodyAddr] <| lamAddr ->
+        let ty1 = lamAddr;
+        let ty2 = tyType;
+        heapNewNode2 depth ["TyOper", "relComp", [ty1, ty2]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let exprTy : ExprTy =
+            [ ["ELambda", patTE, bodyTE], loc0, lamAddr, ty1, ty2, tc ];
+        k exprTy
+
+
+   , ["Type", ["EVar", name]] |=>
+        match (lookup name env)
+        [ [] |=>             
+            error ["Type", "Unknown Variable", name, env]
+            -- let _ = debug ["ERROR: Instantiate: Unknown Variable: ", name, loc0];
+            -- heapNewNode [[depth, "Weak", "None", [exprLoc]], ["HValue", "ERROR: Instantiate: Unknown Variable: " ^ show2 name]] <| errorAddr ->
+            -- k errorAddr
+        , [[addr, ty1]] |=> 
+            let ty2 = tyCtx;
+            heapNewNode2 depth ["TyOper", "relComp", [ty1, ty2]] <| rc ->
+            heapNewNodeTi rc <| tc ->
+            let exprTy : ExprTy =
+                [ ["EVar", name], loc0, addr, ty1, ty2, tc ];
+            k exprTy
+        ]
+
+   , ["Type", ["EOper", opName, args]] |=> 
+        heapNewNode2 depth ["TyOper", "Type", []] <| typeType ->
+        let argCtx = typeType;
+        let resultTy = typeType;
+        heapMap (inst ctx depth env argCtx) args <| argTEs ->
+        let argAddrs = forMap argTEs <| [argE, argL, argAddr, _, _, _] -> argAddr;
+        heapNewNode2 depth ["TyOper", opName, argAddrs] <| opAddr ->
+        heapNewNode2 depth ["TyOper", "relComp", [resultTy, tyCtx]] <| rcAddr ->
+        heapNewNodeTi rcAddr <| tiAddr ->
+        let ty1 = resultTy;
+        let ty2 = tyCtx;
+        let tc = tiAddr;
+        let exprTy : ExprTy =
+            [ ["EOper", opName, argTEs], loc0, opAddr, ty1, ty2, tc ];
+        k exprTy
+
+    , ["Type", ["EList", elems, tlMb]] |=>
+        heapNewNode2 depth ["TyOper", "Type", []] <| opType ->
+        ifNil tlMb
+        [ [] ->
+            (k : K @ HeapK { [Addr, (Maybe ExprTy)] }) ->
+            heapNewNode2 depth ["TyDatum", []] <| nilType ->
+            k [nilType, []]
+        , [tlLoc] ->
+            (k : K @ HeapK { [Addr, (Maybe ExprTy)] }) ->
+            inst ctx depth env opType tlLoc <| tlTy @ [_, _, tlAddr ,, _] ->
+            k [tlAddr, [tlTy]]
+        ] <| [tlAddr, tlTyMb] ->
+        heapWhile [reverse elems, tlAddr, [] : List ExprTy] (
+            [ [elem ,, elems], addr, elemsTy] |=>
+            (k : K @ HeapK { [(List ExprLoc), Addr, (List ExprTy)] }) ->
+            inst ctx depth env opType elem <| elemTy @ [_, _, elemTerm, elemType ,, _] ->
+            -- heapNewNode2 depth ["TyPair", elemType, addr] <| consAddr ->
+            heapNewNode2 depth ["TyPair", elemTerm, addr] <| consAddr ->
+            k [elems, consAddr, [elemTy ,, elemsTy]]
+        ) <| [_, addr, elemsTy] ->
+        let ty1 = addr;
+        let ty2 = tyCtx;
+        heapNewNode2 depth ["TyOper", "relComp", [ty1, ty2]] <| rcAddr ->
+        heapNewNodeTi rcAddr <| tiAddr ->
+        let exprTy : ExprTy = 
+            [ ["EList", elemsTy, tlTyMb], loc0, addr, ty1, ty2, tiAddr];
+        k exprTy
+
+    , ["Type", ["ETermBrackets", expr]] |=>
+        heapNewNode2 depth ["TyOper", "Type", []] <| tyType ->    
+        inst "Term" depth env tyType expr <| expTy @ [_, _, exprAddr, exprTy ,, _] ->
+        let ty1 = exprTy;
+        let ty2 = tyType;
+        heapNewNode2 depth ["TyOper", "relComp", [ty1, ty2]] <| rc ->
+        heapNewNodeTi rc <| tc ->
+        let exprTy : ExprTy =
+            [ ["ETermBrackets", expTy], loc0, exprAddr, ty1, ty2, tc ];
+        k exprTy
+
+    , ["Type", ["ETypeBrackets", expr]] |=>
+        inst "Type" depth env tyCtx expr <| expTy @ [_, _, exprAddr ,, _] ->
+        let exprTy : ExprTy =
+            [ ["ETypeBrackets", expTy], loc0, exprAddr, ty1, ty2, tc ];
+        k exprTy
+
+
+    , ["Type", ["EType", term, ty]] |=>
+        error ["instantiateLocTy1", "TODO", ctx, exprTag]
+    , _ |=> 
+        error ["instantiateLocTy1", "missing case", ctx, loc0, exprTag]
+
+    ];
+
+let instantiateTy : { OpTypes -> TmTyCtx -> Depth -> HEnvTy -> Addr -> ExprLoc -> (HeapA ExprTy) } =
+    heapFunc6 <|
+    (opTypes : OpTypes) -> (ctx : TmTyCtx) -> (depth : Depth) -> (env : HEnvTy) -> (tyCtx : Addr) -> (exprLoc : ExprLoc) -> (k : K @ HeapK ExprTy) ->
+    instantiateTy1 opTypes ctx depth env tyCtx exprLoc <| exprTy ->
+    -- heapCheckValidity addr <| _ ->
+    k exprTy;
+
+
+-- let instantiateTermTy : { Depth -> HEnvTy -> Addr -> ExprLoc -> (HeapA ExprTy) } =
+--     instantiateTy "Term";
+
+
+
+

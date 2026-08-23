@@ -1,0 +1,369 @@
+language ferrum/0.1
+
+let HParseExpr = ParserA ExprLoc;
+
+let hParseDecls : { HParseExpr -> (ParserA (List { [ExprLoc, ExprLoc] })) } =
+    hFunc1 <|
+    ( hParseExpr : HParseExpr ) ->
+    ( k : K @ ParserK (List { [ExprLoc, ExprLoc] }) ) ->
+    let decls0 : List { [ExprLoc, ExprLoc] } = [];
+    -- hFunc k <| k2 -> -- TODO
+    hLoop2 decls0 ( decls -> 
+        (breakK : KB @ ParserK (List DeclLoc)) -> 
+        (continueK : KC @ ParserK (List {[ExprLoc, ExprLoc]})) ->
+        hTryParseToken ["KEYWORD", "let"] <| letOpt ->
+        match letOpt
+        [ [] |=> 
+            breakK (reverse decls)
+        , [_] |=>
+            hParseExpr                     <| (pat : ExprLoc) -> 
+            hParseToken ["KEYOPER", "="]   <| _ ->
+            hParseExpr                     <| (defn : ExprLoc) ->
+            hParseToken ["PUNCT", ";"]     <| (_ : Token) ->
+            continueK [ [pat, defn] ,, decls ]
+        ]
+    ) <| decls ->
+    k decls;
+
+let hTryParseExpr : { HParseExpr -> (ParserA (Maybe ExprLoc)) } =
+    hFunc1 <|
+    ( hParseExpr : HParseExpr ) ->
+    ( k : K @ ParserK (Maybe ExprLoc) ) ->
+    hPeekNextToken <| tokOpt ->
+    match tokOpt
+    [ [] |=> 
+        k []
+    , [tok] |=>
+        -- TODO ? combine succesfully matching a peeked token with taking that token ?
+        match tok
+        [ ["NUMBER", val, loc] |=> 
+            hTakeNextToken  <| _ ->
+            k [ [ ["ELit", val], loc ] ]
+        , ["STRING", val, loc] |=> 
+            hTakeNextToken  <| _ ->
+            k [ [ ["ELit", val], loc ] ]
+        , ["WORD", val, loc] |=> 
+            hTakeNextToken  <| _ ->
+            k [ [ ["EVar", val], loc ] ]
+        , ["KEYWORD", "let", loc1] |=> 
+            -- don't take the token, leave it to hParseDecls
+            hParseDecls hParseExpr <| decls ->
+            hParseExpr             <| expr @ [_, loc2] ->
+            let loc = mergeLoc loc1 loc2;
+            k [ [ ["ELets", decls, expr], loc ] ]
+        , ["PUNCT", "(", loc1] |=> 
+            hTakeNextToken  <| _ ->
+            hParseExpr <| expr ->
+            hParseToken ["PUNCT",")"] <| [_, _, loc2] ->
+            let loc = mergeLoc loc1 loc2;
+            let expr2 = [ ["ETermBrackets", expr], loc ];
+            k [ expr2 ]
+        , ["PUNCT", "{", loc1] |=> 
+            hTakeNextToken  <| _ ->
+            hParseExpr <| expr ->
+            hParseToken ["PUNCT","}"] <| [_, _, loc2] ->
+            let loc = mergeLoc loc1 loc2;
+            let expr2 = [ ["ETypeBrackets", expr], loc ];
+            k [ expr2 ]
+        , ["PUNCT", "[", loc1] |=> 
+            hTakeNextToken  <| _ ->
+            hTryParseToken ["PUNCT", "]"] <| closeOpt ->
+            match closeOpt
+            [ [[_,_,loc2]] |=> 
+                let loc = mergeLoc loc1 loc2;
+                k [ [ ["ELit", []], loc ] ]
+            , [] |=>
+                let list0 : List ExprLoc = [];
+                hLoop2 list0 (elems -> 
+                    (breakK : KB @ ParserK ExprLoc) ->
+                    (continueK : KC @ ParserK (List ExprLoc)) ->
+                    hParseExpr <| elem ->
+                    let elems2 = [elem ,, elems];
+                    hTryParseToken ["PUNCT", "]"] <| closeOpt2 ->
+                    match closeOpt2
+                    [ [[_,_,loc2]] |=>
+                        let loc = mergeLoc loc1 loc2;
+                        breakK [ ["EList", reverse elems2, []], loc ]
+                    , [] |=>
+                        hTryParseToken ["COMMA", ",,"] <| pairComma ->
+                        match pairComma
+                        [ [] |=> 
+                            hParseToken ["COMMA", ","] <| _ ->
+                            hTryParseToken ["KEYOPER", "..."] <| restOpt ->
+                            match restOpt
+                            [ [_] |=>
+                                hParseExpr <| restExpr ->
+                                hParseToken ["PUNCT", "]"] <| [_,_,loc2] ->
+                                let loc = mergeLoc loc1 loc2;
+                                breakK [ ["EList", reverse elems2, [restExpr]], loc ]
+                            , [] |=>
+                                continueK elems2
+                            ]
+                        , [_] |=>
+                            hParseExpr <| restExpr ->
+                            hParseToken ["PUNCT", "]"] <| [_,_,loc2] ->
+                            let loc = mergeLoc loc1 loc2;
+                            breakK [ ["EList", reverse elems2, [restExpr]], loc ]
+                        ]    
+                    ]
+                ) <| list1 ->
+                k [ list1 ]
+            ]
+        , ["OPER", val, loc] |=> 
+            hTakeNextToken  <| _ ->
+            k [ [ ["ESym", val], loc ] ]
+        , ["KEYOPER", val, loc] |=>
+            -- TODO change definitions of KEYOPER in the scanner
+            match val
+            [ "=" |=> 
+                k []
+            , _ |=>
+                hTakeNextToken  <| _ ->
+                k [ [ ["ESym", val], loc ] ]
+            ]
+        , ["WILD", val, loc] |=> 
+            hTakeNextToken  <| _ ->
+            -- TODO ? do we want an explicit wildcard expression type ?
+            k [ [ ["EVar", "_"], loc ] ]
+
+        -- parse failing cases, don't take the token
+        , ["EOF", _, _] |=> 
+            k []
+        , ["PUNCT", _, _] |=> 
+            k []
+        , ["COMMA", _, _] |=> 
+            k []
+        , _ |=> 
+            error "missing case 2"
+        ]
+    ];
+
+
+
+let hParseExpr : HParseExpr =
+    hFunc0 <|
+    rec <| (hParseExpr: HParseExpr) -> 
+    (k : K @ ParserK ExprLoc) ->
+    let parts0 = [] : List ExprLoc; 
+    hLoop2 parts0 ( parts -> 
+        (breakK : KB @ ParserK (List ExprLoc)) -> 
+        (continueK : KC @ ParserK (List ExprLoc)) ->
+        hTryParseExpr hParseExpr <| exprOpt ->
+        match exprOpt
+        [ [] |=>
+            breakK parts
+        , [part] |=>
+            continueK [part ,, parts]
+        ]
+    ) <| parts ->
+    match parts
+    [ [] |=>
+        error "failed to parse expression"
+        -- let expr = [["ELit", "failed to parse expression"], nilLoc];
+        -- k expr
+    , _ |=>
+        let expr = foldOpArgs (reverse parts);
+        k expr
+    ];
+
+
+-- This is/was an experiment in implementing all the parsing functions in
+-- a single function with an intersected function type.
+-- The type-checking fails when applying an intersected function type to a subtype of the domain of that function,
+-- this should be possible, but might best be done in fe-in-fe not fe-in-ts
+-- but making fe-in-fe usably fast requires good codegen,
+-- unfortunately the C-codegen doesn't currently handle the higher-order function solution to mutaully recursive functions in hTryParseExpr+hParseExpr
+-- this approach was meant to make things easier for the C-codegen
+-- it's a cyclic dependency knot, the knot can be cut by one or more of:
+--   - making fe-in-ts handle more advanced types by using the term/type-graphs, currently only available in fe-in-fe, 
+--   - writing the initial version of fe-in-fe in a simpler style
+--   - finding a simpler way to make the codegen generate faster code
+--   - make the term/type-graph available in fe-in-ts to help with inlining and generating synchronous target-code from asynchronous source-code
+--   - remove the fe-in-fe milestone/hurdle that is  
+--       - standing between me and the test of the world, and
+--       - standing between the present and release-date
+--       focus on fe-in-ts instead, rather than planning to throw it away.
+-- might be best to switch to a synchronous approach until fe-in-fe is a more viable platform
+--  let ParseAsync = 
+--      { { "parseExpr"       -> [] -> K @ { ExprLoc    -> Any } -> K ExprLoc   }
+--      & { "tryParseExpr"    -> [] -> K @ { ExprLocMb  -> Any } -> K ExprLocMb }
+--      & { "parseDecls"      -> [] -> K @ { DeclLocs   -> Any } -> K DeclLocs  }
+--      & { "parseDeclsToEof" -> [] -> K @ { DeclLocs   -> Any } -> K DeclLocs  }
+--      & { "parseExprToEof"  -> [] -> K @ { ExprLoc    -> Any } -> K ExprLoc   }
+--      };
+--  
+--  let ParseMethod = Domain ParseAsync;
+--  -- let ParseMethodDomain : { M @ ParseMethod -> (SuperType (Domain { ParseAsync M })) } =
+--  --     (method : M @ ParseMethod) -> (Domain { ParseAsync M });
+--  -- let ParseMethodCodomain : { ParseMethod -> Type } =
+--  --     (method : M @ ParseMethod) -> (Domain (Domain { ParseAsync M (ParseMethodDomain M) }));
+--  -- let ParseMethodDomain : { M @ ParseMethod -> (SuperType Nil) } =
+--  --     (method : M @ ParseMethod) -> Nil);
+--  -- let ParseMethodCodomain : { ParseMethod -> Type } =
+--  --     (method : M @ (SubType ParseMethod)) -> (Domain (Domain { ParseAsync M Nil }));
+--  let ParseMethodCodomain : { ParseMethod -> Type } =
+--      (method : M @ ParseMethod) -> (Domain (Domain { ParseAsync M Nil }));
+--  let ParseMethodCodomain : { ParseMethod -> Type } =
+--      (method : M @ ParseMethod) -> (Domain (Domain { ParseAsync M Nil }));
+--  
+--  let ParseSync = 
+--      Rec <| PS ->
+--      { { "parseExpr"       -> [] -> [ PS, ExprLoc   ] }
+--      & { "tryParseExpr"    -> [] -> [ PS, ExprLocMb ] }
+--      & { "parseDecls"      -> [] -> [ PS, DeclLocs  ] }
+--      & { "parseDeclsToEof" -> [] -> [ PS, DeclLocs  ] }
+--      & { "parseExprToEof"  -> [] -> [ PS, ExprLoc   ] }
+--      };
+--  
+--  let parseAsync : ParseAsync = 
+--      rec <| (pa : ParseAsync) ->
+--      (method : M @ ParseMethod) -> 
+--      match method
+--      [ "parseExpr" |=> a -> error "TODO"
+--      -- [ "parseExpr" |=> [] -> error "TODO"
+--          -- (k : K @ { ExprLoc -> PA @ ParseAsync -> Any }) ->
+--          -- hPeekNextToken <| tok ->
+--          -- let exp : ExprLoc = [["EVar", "TODO"], nilLoc];
+--          -- k (error 1)
+--          -- error "TODO"
+--      -- , "tryParseExpr" |=> [] -> error "TODO"
+--      -- , "parseDecls" |=> [] -> error "TODO"
+--      -- , "parseDeclsToEof" |=> [] -> error "TODO"
+--      -- , "parseExprToEof" |=> [] -> error "TODO"
+--      ];
+--  
+--  
+
+
+
+
+
+
+let parseExprLoc : { (List Token) -> ExprLoc } =
+    tokens ->
+
+    -- debug2 ["parseExprLoc/toks", tokens] <| ->
+
+    let action : ParserA ExprLoc =
+        hFunc0 <|
+        (k : K @ ParserK ExprLoc) ->
+        hParseExpr <| expr ->
+        hParseToken ["EOF",""] <| _ -> 
+        k expr;
+
+    -- hpsDo generates calls to imperative-style code, if both the action and handler (parserMk) have been annotated appropriately
+
+    let handler = hpsHandlerMk ParserHandler parserMk tokens;
+    let [handler2, expr] = hpsDo ParserHandler action handler;
+
+    -- let handler = parserMk tokens;
+    -- let [handler2, expr] = action (result -> handler -> [handler, result]) handler;
+
+    -- debug2 ["parseExprLoc/expr", expr] <| ->
+
+    expr;
+
+let parseExpr : { (List Token) -> Expr } =
+    tokens ->
+    let exprLoc = parseExprLoc tokens;
+    -- debug2 ["parseExpr", exprLoc] <| ->
+    let expr = stripExprLoc exprLoc;
+    -- let varErrs = varCheck expr vcInitEnv;
+    -- let varErrs = varCheckLoc exprLoc vcInitEnv;
+    -- let varErrMsgs = forMap varErrs <| [tag, loc, val] -> strCat ["    ", showLoc loc, " ", tag, " ", val];
+    -- let varErrMsg = strJoin "\n" ["VarErrors" ,, varErrMsgs];
+    -- let _ = ifNil varErrs [-> [], _ -> debug varErrMsg];
+    expr;
+
+
+let parseExprLocStr : { Str -> ExprLoc } =
+    input -> 
+    parseExprLoc (scan input);
+
+let parseExprStr : { Str -> Expr } =
+    input ->
+    let exprLoc = parseExprLocStr input;
+    let expr = stripExprLoc exprLoc;
+    expr;
+
+let parseDeclsLoc : { (List Token) -> (List {[ExprLoc,ExprLoc]}) } =
+    tokens ->
+    let action : ParserA ExprLoc = 
+        hFunc0 <|
+        (k : K @ ParserK ExprLoc) ->
+        hParseDecls hParseExpr <| decls ->
+        hParseToken ["EOF",""] <| _ -> 
+        k ([ ["ELets", decls, [ ["ELit", []], nilLoc] ], nilLoc] : ExprLoc);
+    let expr = parserDo action (parserMk tokens);
+    match expr
+    [ [ ["ELets", decls, _], _ ] |=>
+        decls
+    , _ |=>
+        error "impossible"
+    ];
+
+let parseDecls : { (List Token) -> (List {[Expr,Expr]}) } =
+    tokens ->
+    let declLocs = parseDeclsLoc tokens;
+    let decls = forMap declLocs <| [pat, defn] -> [stripExprLoc pat, stripExprLoc defn];
+    decls;
+
+
+-- let parseDeclsLocStr : { Str -> (List {[ExprLoc, ExprLoc]}) } =
+--     input -> 
+--     parseDeclsLoc (scan input);
+
+let parseDeclsStr : { Str -> (List {[Expr, Expr]}) } =
+    input -> 
+    parseDecls (scan input);
+
+
+let testParseExpr : { (List Token) -> Any } =
+    tokens ->
+    let expr = parseExpr tokens;
+    "Test PASSED";
+
+let testParseDecls : { (List Token) -> Any } =
+    tokens ->
+    let decls = parseDecls tokens;
+    "Test PASSED";
+
+let testParseFile : { Str -> Str -> Str }
+    = filename -> contents -> 
+    let tokens = scanFile filename contents;
+    let _ = parseDecls tokens;
+    "Test PASSED";
+
+let dataListToData : { (List Data) -> Data } =
+    a ->
+    -- TODO improve the type-system
+    --   (alternatively, could write a loop to demonstrate that this is correct, but this should be simple for the type-system to handle)
+    justTrustMeCast (List Data) Data a;
+
+let exprToData : { Expr -> (Maybe Data) } =
+    rec <| (exprToData : { Expr -> (Maybe Data) }) ->
+    expr ->
+    match expr
+    [ ["ELit", datum] |=> 
+        yes datum
+    , ["EList", elems, []] |=>
+        let elemDataMbs = map exprToData elems;
+        let elemData = forFlatMap elemDataMbs <| [data] |=> data;
+        -- let elemData = concat elemDataMbs;
+        debug2 ["flatMap/data", elemData, elemDataMbs] <| ->
+        if (length elemData == length elemDataMbs)
+        [ ->
+            let elemData = dataListToData elemData; 
+            yes elemData
+        , -> no
+        ]
+    , _ |=>
+        no
+    ];
+
+let tryParseData : { Str -> (Maybe Data) } =
+    input ->
+    let tokens = scan input;
+    let expr = parseExpr tokens;
+    let dataMb = exprToData expr;
+    dataMb;

@@ -1,0 +1,384 @@
+language ferrum/0.1
+
+
+let Value = Datum;
+let PrimitiveName = Str;
+let PtsSort = { "Term" | "Type" };
+
+let Form = { "Weak" | "Strong" };
+-- let Form = { ["None"] | ["Weak", Int] | ["Strong"] };
+let ReducedForm = { "None" | "Weak" | "Strong" };
+let TargetForm = { "Weak" | "Strong" };
+let ContextForm = { "Weak" | "Strong" };
+
+let Addr = Int;
+let Addrs = List Addr;
+let Depth = Int;
+
+let TiVal = 
+    { [ Bool -- known-uninhabited/void
+      , Bool -- known-inhabited/non-void
+      ] }; 
+
+let tiUnknown       : TiVal = [ false  , false  ];
+let tiFalse         : TiVal = [ true   , false  ];
+let tiTrue          : TiVal = [ false  , true   ];
+let tiContradiction : TiVal = [ true   , true   ];
+
+let tiValFromBool : { Bool -> TiVal } =
+    a -> 
+    if a [ -> tiTrue, -> tiFalse];
+
+let tiAnd : { TiVal -> TiVal -> TiVal } =
+    [aF, aT] -> [bF, bT] -> [aF || bF, aT && bT];
+
+let tiOr : { TiVal -> TiVal -> TiVal } =
+    [aF, aT] -> [bF, bT] -> [aF && bF, aT || bT];
+
+let tiNot : { TiVal -> TiVal } =
+    [aF, aT] -> [aT, aF];
+
+let errorTypeInhabitationContradictionDetected : { Any -> Void } =
+    msg ->
+    error ["Type Inhabitation Contradiction Detected", msg];
+
+let tiCheckContradiction : { TiVal -> Nil } =
+    [ku, ki] ->
+    if (ku && ki)
+    [ ->
+        errorTypeInhabitationContradictionDetected ["tiCheckContradiction"]
+    , ->
+        []
+    ];
+
+let tiIsContradiction : { TiVal -> Bool } =
+    tiVal @ [f, t] ->
+    f && t;
+
+let tiIsFalse : { TiVal -> Bool } =
+    tiVal @ [f, t] ->
+    let _ = tiCheckContradiction tiVal;
+    f;
+
+let tiIsTrue : { TiVal -> Bool } =
+    tiVal @ [f, t] ->
+    let _ = tiCheckContradiction tiVal;
+    t;
+
+let tiIsUnknown : { TiVal -> Bool } =
+    tiVal @ [f, t] ->
+    let _ = tiCheckContradiction tiVal;
+    not f && not t;
+
+let tiIsKnown : { TiVal -> Bool } =
+    tiVal @ [f, t] ->
+    let _ = tiCheckContradiction tiVal;
+    f || t;
+
+let boolToInt : { Bool -> Int } =
+    b ->
+    if b [ -> 1, -> 0];
+
+-- TODO ? let Bit = { 0 | 1 };
+-- TODO ? let boolToBit : { Bool -> Bit } = b -> if b [ -> 1, -> 0];
+
+-- 4-valued logic
+let showTiVal : { TiVal -> Str } =
+    [isFalse, isTrue] ->
+    -- match [boolToInt isFalse, boolToInt isTrue]
+    match (map boolToInt [isFalse, isTrue])
+    [ [0, 0] |=> "?"  -- unknown
+    , [0, 1] |=> "1"  -- true
+ -- , [0, 1] |=> "1+"  -- true -- TODO ? we might want to distinguish Type Occupancy levels of "exactly one (==1)" from "at least one (>=1)" in the future ?
+ -- , [0, 1, 0] |=> "==1"  -- uniquely inhabited
+ -- , [0, 1, 1] |=> ">=1"  -- inhabited
+ -- , [0, 0, 1] |=>  ">1"  -- multiply inhabited
+    , [1, 0] |=> "0"  -- false
+    , [1, 1] |=> "X"  -- contradiction
+    ];
+
+-- -- 8-valued logic
+-- let showTiVal : { TiVal -> Str } =
+--     [isPossiblyFalse, isPossiblyTrue, isPossiblyUnknowable] ->
+--     -- match [boolToInt isPossiblyFalse, boolToInt isPossiblyTrue, boolToInt isPossiblyUnknowable]
+--     match (map boolToInt [isPossiblyFalse, isPossiblyTrue, isPossiblyUnknowable])
+--     [ [0, 0, 0] |=> "X"       -- contradiction (if it cannot possibly be true, and cannot possibly be false, then it must be unknowable, or a contradiction has happened, and the world must be stopped)
+--     , [0, 0, 1] |=> "U"       -- unknowable  (can't know)
+--     , [0, 1, 0] |=> "1"       -- true
+--     , [1, 0, 0] |=> "0"       -- false
+--     , [1, 1, 0] |=> "?-01-?"  -- unknown     (don't know)
+--     , [0, 1, 1] |=> "?-1U-?"  -- unknown     (don't know)
+--     , [1, 0, 1] |=> "?-0U-?"  -- unknown     (don't know)
+--     , [1, 1, 1] |=> "?-01U-?" -- unknown     (don't know)
+--     ];
+
+
+-- -- 16-valued logic
+-- let showTiVal : { TiVal -> Str } =
+--     [isPossiblyFalse, isPossiblyTrueUniquely, isPossiblyTrueMultiply, isPossiblyUnknowable] ->
+
+-- -- infinitely-valued logic (oo-valued)
+-- -- isPossibly in range [a..(maybe b)], isPossibly unknowable ([])
+-- let TiVal = { { [Int, (Maybe Int)] | [] } -> Bool }; 
+-- let showTiVal : { TiVal -> Str } =
+--     isPossibly ->
+--     -- unfortunately, a bit difficult to show in full
+--     -- but can show a sample
+--     -- tests for:
+--     --   void, unique, multiple, unknowable
+--     show [isPoosibly [0,0], isPossibly [1,1], isPossibly [1,[]], isPosibly []]
+
+    
+
+
+let TiExpr = 
+    Rec <| TIE ->
+    { ["TiConst",  TiVal]
+    | ["TiRef",    Addr]
+    | ["TiAnd",    TIE, TIE]
+    | ["TiAndImp", TIE, TIE]
+    | ["TiOr",     TIE, TIE]
+    | ["TiOrImp",  TIE, TIE]
+    | ["TiNot",    TIE]
+    };
+
+let TiExprVal = { [TiExpr, TiVal] };
+
+let TiEdge = { [Str, TiExpr, TiVal] };
+let TiEdges = List TiEdge;
+
+
+let tieConst   : { TiVal  ->           TiExpr } = val ->    ["TiConst", val]    ;
+let tieRef     : { Addr   ->           TiExpr } = addr ->   ["TiRef", addr]     ;
+let tieAnd     : { TiExpr -> TiExpr -> TiExpr } = a -> b -> ["TiAnd", a, b]     ;
+let tieAndImp  : { TiExpr -> TiExpr -> TiExpr } = a -> b -> ["TiAndImp", a, b]  ;
+let tieOr      : { TiExpr -> TiExpr -> TiExpr } = a -> b -> ["TiOr", a, b]      ;
+let tieOrImp   : { TiExpr -> TiExpr -> TiExpr } = a -> b -> ["TiOrImp", a, b]   ;
+let tieNot     : { TiExpr ->           TiExpr } = a ->      ["TiNot", a]        ;
+
+let tieFalse    = tieConst tiFalse;
+let tieTrue     = tieConst tiTrue;
+let tieUnknown  = tieConst tiUnknown;
+
+let tieAddrs : { TiExpr -> Addrs } =
+    rec <| (tieAddrs : { TiExpr -> Addrs }) ->
+    tie ->
+    match tie
+    [ ["TiConst",  _] |=> []
+    , ["TiRef",    addr] |=> [addr]
+    , ["TiAnd",    a, b] |=> append (tieAddrs a) (tieAddrs b)
+    , ["TiAndImp", a, b] |=> append (tieAddrs a) (tieAddrs b)
+    , ["TiOr",     a, b] |=> append (tieAddrs a) (tieAddrs b)
+    , ["TiOrImp",  a, b] |=> append (tieAddrs a) (tieAddrs b)
+    , ["TiNot",    a] |=> tieAddrs a
+    ];
+
+let tieShow : { TiExpr -> Str } =
+    rec <| (tieShow : { TiExpr -> Str }) ->
+    tie ->
+    match tie
+    [ ["TiConst",  tiVal] |=> showTiVal tiVal
+    , ["TiRef",    addr] |=> strCat ["#", show addr]
+    , ["TiAnd",    a, b] |=> strCat ["(", tieShow a, " && "    , tieShow b, ")"]
+    , ["TiAndImp", a, b] |=> strCat ["(", tieShow a, " &&-> "  , tieShow b, ")"]
+    , ["TiOr",     a, b] |=> strCat ["(", tieShow a, " || "    , tieShow b, ")"]
+    , ["TiOrImp",  a, b] |=> strCat ["(", tieShow a, " ||-> "  , tieShow b, ")"]
+    , ["TiNot",    a   ] |=> strCat ["(not", tieShow a,                     ")"]
+    ];
+
+let edgesAddrs : { TiEdges -> Addrs } =
+    edges ->
+    concat <| forMap edges <| [name, expr, val] -> tieAddrs expr;
+
+let NodeCommonExtra = { [] };
+let nodeCommonExtra = [];
+-- let NodeCommonExtra = { [[]] };
+-- let nodeCommonExtra = [[]];
+
+let NodeCommon = 
+    { [ Depth -- depth
+      , TargetForm -- what form does this node want to be reduced to
+      , ReducedForm -- how far has this node been reduced
+      ,, NodeCommonExtra
+    ] };
+
+let ncDefault : NodeCommon = [0, "Weak", "None" ,, nodeCommonExtra];
+
+-- let ncDepth       : { NodeCommon -> Depth }       = [depth, target, reduced ,, _] -> depth;
+-- let ncTargetForm  : { NodeCommon -> TargetForm }  = [depth, target, reduced ,, _] -> target;
+-- let ncReducedForm : { NodeCommon -> ReducedForm } = [depth, target, reduced ,, _] -> reduced;
+-- 
+-- let ncSetDepth       : { Depth       -> NodeCommon -> NodeCommon } = depth ->   [_    , target, reduced ,, nce] -> [depth, target, reduced ,, nce];
+-- let ncSetTargetForm  : { TargetForm  -> NodeCommon -> NodeCommon } = target ->  [depth, _     , reduced ,, nce] -> [depth, target, reduced ,, nce];
+-- let ncSetReducedForm : { ReducedForm -> NodeCommon -> NodeCommon } = reduced -> [depth, target, _       ,, nce] -> [depth, target, reduced ,, nce];
+
+let ncDepth       : { NodeCommon -> Depth }       = [depth, target, reduced] -> depth;
+let ncTargetForm  : { NodeCommon -> TargetForm }  = [depth, target, reduced] -> target;
+let ncReducedForm : { NodeCommon -> ReducedForm } = [depth, target, reduced] -> reduced;
+
+let ncSetDepth       : { Depth       -> NodeCommon -> NodeCommon } = depth ->   [_    , target, reduced] -> [depth, target, reduced];
+let ncSetTargetForm  : { TargetForm  -> NodeCommon -> NodeCommon } = target ->  [depth, _     , reduced] -> [depth, target, reduced];
+let ncSetReducedForm : { ReducedForm -> NodeCommon -> NodeCommon } = reduced -> [depth, target, _      ] -> [depth, target, reduced];
+
+
+
+let Node = 
+    { [ "HHole" ]
+    | [ "HVar" ]
+    | [ "HLambda", Addr ] -- TODO ? include an instantiation of the argument pattern / references to all the bound variables / ?
+    | [ "HApply", Addr, Addr ] -- TODO ? add func+arg reduction strategies ?
+    | [ "HValue", Value ]
+    | [ "HPair", Addr, Addr ]
+    | [ "HOper", PrimitiveName, (List Addr) ]
+    | [ "HTypeAnnot", Addr, Addr ] -- type-annotation within a term-context
+    | [ "HAs", Str, Addr ] -- TODO ? for instantiating patterns ?
+
+    | [ "TyFun", Addr, Addr ]
+    | [ "TyVar" ] 
+    | [ "TyPair", Addr, Addr ]
+    | [ "TyApp", Addr, Addr ]
+    | [ "TyDatum", Datum ]
+    | [ "TyOper", Str, (List Addr) ]
+    | [ "TySingle", Addr ]
+    | [ "TyTermAnnot", Addr, Addr ] -- term-annotation within a type-context
+
+    | [ "TI", Addr, TiVal, (List TiEdge)]
+
+    -- TODO ? use (Maybe TiVal) to distinguish between unevaluated and unknown
+    -- TODO ? this would help prevent revisiting expressions which can be seen to never become known, and help short-circuit other unneeded evaluations
+    -- TODO ? or, even better, upgrade from 3-valued logic to 7-valued logic
+    -- TODO ?   3 "known" values: true, false, unknowable; 
+    -- TODO ?   4 "unknown" values: tfu, tf, tu, fu, (combinations of: could be true, could be false, could be unknownable)
+    -- TODO ?   (and 1 contradiction value, a value that is known to not be unknowable, 
+    -- TODO ?                               but is also known to not be true, and known to not be false)
+    -- | [ "TI", Addr, (Maybe TiVal), (List TiEdge)]
+
+    };
+
+let NcNode = { [NodeCommon, Node] };
+
+let Indirect = 
+    {[ (Maybe Addr) -- indirect
+     , NodeCommon
+     , Node         -- node
+     -- , (Maybe Expr)   -- src annotation
+     -- , List Addr  -- obligations 
+     -- , (Maybe {[Addr, Int]}) -- reducedTo, reducedAt
+    ]};
+
+-- let AddrInd = { [Addr ,, Indirect] };
+let AddrInd = { [Addr, Indirect] };
+
+-- TODO ? rather than representing a heap as a map from Addr to Indirect (which contains a Node)
+-- TODO ?   map from an Addr to { [(Maybe Addr), (Maybe { [NodeCommon, Node] })] }
+-- TODO ? each addr can contain either an indirection, or a node, (or both, for debug/diagnostic purposes), but never neither.
+-- TODO ?   alternatively, use neither to represent a HHole ?
+
+let Stack = List { [Addr, ContextForm] };
+
+
+
+
+
+
+let nodeChildren : { Node -> (List Addr) }
+    = node ->
+    match node
+    [ ["HHole"]               |=> []
+    , ["HVar"]                |=> []
+    , ["HLambda", a ]         |=> [a]
+    , ["HApply", a, b ]       |=> [a,b]
+    , ["HValue", value ]      |=> []
+    , ["HPair", a, b ]        |=> [a,b]
+    , ["HOper", name, addrs ] |=> addrs
+    , ["HTypeAnnot", term, ty] |=> [term, ty]
+
+    , [ "TyFun", a, b ]       |=> [a, b]
+    , [ "TyVar" ]             |=> []
+    , [ "TyPair", a, b ]      |=> [a, b]
+    , [ "TyApp", a, b ]       |=> [a, b]
+    , [ "TyDatum", _ ]        |=> []
+    , [ "TyOper", _, args ]   |=> args
+    , [ "TySingle", a ]       |=> [a]
+    , [ "TyTermAnnot", a, b ] |=> [a,b]
+
+    -- , [ "TI", ty, tiVal, tiEdges] |=> [ty]
+    , [ "TI", ty, tiVal, tiEdges] |=> [ty ,, edgesAddrs tiEdges] -- extract the address from TiExprs in the tiEdges
+
+    , _ |=> error ["missing case", "nodeChildren", node]
+    ];
+
+let nodeRebuild : { Node -> (List Addr) -> Node }
+    = node -> children ->
+    match [node, children]
+    [ [ ["HHole"], [] ] |=> node
+    , [ ["HVar"], [] ] |=> node
+    , [ ["HLambda", _ ], [a] ] |=> ["HLambda", a]
+    , [ ["HApply", _, _ ], [a,b] ] |=> ["HApply", a, b]
+    , [ ["HValue", value ], [] ] |=> node
+    , [ ["HPair", _, _ ], [a,b] ] |=> ["HPair", a,b]
+    , [ ["HOper", name, _ ], addrs] |=> ["HOper", name, addrs]
+    , [ ["HTypeAnnot", _, _], [a, b] ] |=> [ "HTypeAnnot", a, b ]
+
+    , [ [ "TyFun", _, _], [a, b] ]       |=> [ "TyFun", a, b ]      
+    , [ [ "TyVar" ], [] ]                |=> [ "TyVar" ]            
+    , [ [ "TyPair", _, _], [a, b] ]      |=> [ "TyPair", a, b ]     
+    , [ [ "TyApp", _, _], [a, b] ]       |=> [ "TyApp", a, b ]      
+    , [ [ "TyDatum", datum], [] ]        |=> [ "TyDatum", datum ]   
+    , [ [ "TyOper", name, _], args ]     |=> [ "TyOper", name, args ]
+    , [ [ "TySingle", _], [a] ]          |=> [ "TySingle", a ]      
+    , [ [ "TyTermAnnot", _, _], [a, b] ] |=> [ "TyTermAnnot", a, b ]
+
+    , _ |=> error ["missing case", "nodeRebuild", [node, children]]
+    ];
+
+
+
+-- let showReduced : { Reduced -> Str }
+--     = redu ->
+--     match redu
+--     [ "Reduced" |=> " * "
+--     , "NotReduced" |=> " . "
+--     ];
+
+let showReduced2 : { TargetForm -> ReducedForm -> Str } =
+    form -> redu ->
+    match [form, redu]
+    [ ["Weak"   , "None"  ] |=> " . "
+    , ["Weak"   , "Weak"  ] |=> " * "
+    , ["Weak"   , "Strong"] |=> " ERROR "
+    , ["Strong" , "None"  ] |=> " . "
+    , ["Strong" , "Weak"  ] |=> " o "
+    , ["Strong" , "Strong"] |=> " * "
+    ];
+
+let showForm : { Form -> Str } =
+    redu ->
+    match redu
+    [ "Strong" |=> " S "
+    , "Weak" |=> " W "
+    ];
+
+let showIndirect0 : { Int -> AddrInd -> Str } =
+    indent -> [addr, ind] -> 
+    match ind
+    [ [[i], _, _] |=> -- a ^ ": " ^ i
+        strCat [strPadEnd 4 (showInt addr), ": ", showAny i]
+    , [[], nc, n] |=> 
+        let depth = ncDepth nc;
+        let form = ncTargetForm nc;
+        let redu = ncReducedForm nc;
+        strCat 
+        [ strPadEnd 4 (showInt addr)
+        , ": "
+        , showInt depth
+        , showForm form
+        , showReduced2 form redu
+        , strCat (repeat (indent * depth) " ")
+        , " "
+        , showAny n
+        ]
+    ];
+
+let showIndirect : { AddrInd -> Str } =
+    showIndirect0 4;

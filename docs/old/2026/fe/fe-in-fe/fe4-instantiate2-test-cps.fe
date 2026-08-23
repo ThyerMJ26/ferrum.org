@@ -1,0 +1,176 @@
+language ferrum/0.1
+
+-- let tcDebug = debug;
+let tcDebug = _ -> [];
+
+-- ----
+-- Test Code for Instantiation
+-- ----
+
+let instantiateStrToNodes : { Str -> (List Node) } =
+    input ->
+    let instTmp1 = (expr : Expr) ->
+        -- instantiate 0 [] expr
+        instantiate "Term" 0 [] expr
+        ( addr -> (heap: Heap) -> 
+            let _ = tcDebug [addr];
+            let _ = tcDebug [heap];
+            -- addr
+            let [_, h] = heap;
+
+            let [h2, len] = h ["length"]; 
+            let t1 = loop ([h: Array Indirect, addr: Addr, nodes: List Node] ->
+              let _ = tcDebug ["instNodes", addr, nodes];
+              if (addr==len)
+              [ -> break (reverse nodes)
+              , ->
+                let [h2, ind] = h ["get", addr];
+                let [_, _, _, node] = ind;
+                continue [h2, addr+1, [node,,nodes]]
+              ]
+            ) [h2,0,[]];
+            t1 
+        )
+        (heapMk []);
+    
+    -- let t2 = inst_tmp1 ["ELit", 77];
+    let instTmp2 = instTmp1 ["EApply", ["EApply", ["ELit", "+"], ["ELit", 33]], ["ELit", 44]];
+    -- let instTmp3 = instTmp1 (testParse3 "EXP" (scan "1 + 2"));
+    let instTmp3 = instTmp1 (parseExpr (scan input));
+    instTmp3;
+
+
+-- ----
+-- Test Code for Graph Reduction
+-- ----
+
+let graphReduceExpr : { InstantiateBuiltins -> Expr -> Expr } =
+    instBuiltins -> expr ->
+
+    let henv = [];
+    let instGrRb : HeapA Expr = 
+        (k : K @ HeapK Expr) ->
+        instBuiltins <| _ ->
+        instantiate "Term" 0 henv expr <| addr1 ->
+        reduceAll addr1 <| _ ->
+        readbackAddr [] "Term" addr1 <| expr -> 
+        k expr;
+
+    let heapEmpty = heapMk [];
+    let expr2 = instGrRb (expr -> heap -> expr) heapEmpty;
+
+    expr2;
+
+let graphReduceDeclsLoc : { Bool -> [Heap, HEnv, (List DeclLoc)] -> [Heap, HEnv, (List DeclLoc)] } =
+    doGr -> [heap, henv, decls] ->
+
+    -- let _ = tcDebug ["graphReduceDeclsLoc", henv];
+
+    let heapOperations : HeapA { [HEnv, (List DeclLoc)] } = 
+        (k : K @ HeapK { [HEnv, (List DeclLoc)] }) ->
+        instantiateDecls instantiateTermLoc 0 henv [] decls <| [env, declsEnv] ->
+        -- let _ = tcDebug ["graphReduceDeclsLoc/env", env];
+        -- let _ = tcDebug ["graphReduceDeclsLoc/declsEnv", declsEnv];
+        heapMap ( [name: Str, addr: Addr] -> (k : KM @ HeapK { DeclLoc }) -> 
+            let _ = tcDebug ["graphReduceDeclsLoc/addr", name, addr];
+            if doGr
+            [ -> reduceAll addr
+            -- , -> (k : HeapK Nil) -> k []
+            , -> (k : K @ HeapK Nil) -> k []
+            ] <| _ ->
+            -- TODO pass a growing environment into readback, so that newer read-back decls can reference older ones
+            -- TODO using the full henv is causing problems with readback, need to pass in only already readback vars
+            let rbEnv = filter ([name: Str, addr2: Addr] -> not (addr == addr2)) env;
+            -- rbTraceHeap addr <| ->
+            readbackAddr rbEnv "Term" addr <| expr -> 
+            let decl = [["EVar", name], expr];
+            let _ = tcDebug ["graphReduceDeclsLoc/expr", name, expr];
+            let declLoc = declAddNilLoc decl;
+            k declLoc
+        ) declsEnv <| decls2 ->
+        k [env, decls2];
+
+    let [heap2, envDecls] = heapOperations ( envDecls -> heap -> [heap, envDecls] ) heap;
+    let [env, decls2] = envDecls;
+    -- let _ = tcDebug ["graphReduceDeclsLoc2", env];
+    [heap2, env, decls2];
+
+    -- error ["TODO", "graphReduceDecls"]; -- maybe?
+    -- [heap, henv, decls];
+
+let graphReduceDecls : { Bool -> [Heap, HEnv, (List Decl)] -> [Heap, HEnv, (List Decl)] } =
+    doGr -> [heap, henv, decls] ->
+    let decls1 = declsAddNilLoc decls;
+    let [heap2, henv2, decls2] = graphReduceDeclsLoc doGr [heap, henv, decls1];
+    let decls3 = declsStripLoc decls2;
+    [heap2, henv2, decls3];
+
+
+let graphReduceInit : { InstantiateBuiltins -> [Heap, HEnv] } =
+    instBuiltins -> 
+    let newHeap = heapMk [];
+    instBuiltins (henv -> heap -> [heap, henv]) newHeap;
+
+
+let graphReduceStr : { Str -> Str } =
+    input ->
+    let grs : { Str -> (HeapA Str) } =
+        input ->
+        (k : K @ (HeapK Str)) ->
+        let expr = parseExpr (scan input);
+        -- instantiate 0 [] expr <| addr ->
+        instantiate "Term" 0 [] expr <| addr ->
+        traceHeap addr <| _ ->
+        reduceAll addr <| _ ->
+        traceHeap addr <| _ ->
+        readbackAddr [] "Term" addr <| expr ->
+        let result = showExpr expr;
+        k result;
+   
+    let heapEmpty = heapMk [];
+    let result = grs input (result -> heap2 -> result) heapEmpty;
+    result;
+
+
+let graphReduceStrToExpr : { Str -> Expr } =
+    input ->
+    let grse : { Str -> (HeapA Expr) } =
+        input ->
+        (k : K @ (HeapK Expr)) ->
+        let expr = parseExprStr input;
+        let heapEmpty = heapMk [];
+        -- instantiate 0 [] expr <| addr ->
+        instantiate "Term" 0 [] expr <| addr ->
+        traceHeap addr <| ->
+        reduceAll addr <| ->
+        traceHeap addr <| ->
+        readbackAddr [] "Term" addr <| expr2 -> 
+        k expr2;
+
+    let heapEmpty = heapMk [];
+    let result = grse input (result -> heap2 -> result) heapEmpty;
+    result;
+
+
+
+-- ----
+-- Test Code for Readback
+-- ----
+
+let instantiateReadBack : { Str -> Expr } =
+    input ->
+    let instTmp1 = (expr : Expr) ->
+        -- instantiate 0 [] expr
+        instantiate "Term" 0 [] expr
+        ( addr -> heap -> 
+            let _ = tcDebug [addr];
+            let _ = tcDebug [heap];
+            [addr, heap]
+        )
+        (heapMk []);
+    
+    let [addr1, heap2] = instTmp1 (parseExpr (scan input));
+    let expr2 = readbackAddr [] "Term" addr1 ( expr -> heap -> expr ) heap2;
+    expr2;
+
+

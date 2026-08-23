@@ -1,0 +1,103 @@
+language ferrum/0.1
+
+let Pos = {[Int, Int, Int]}; -- line, col, idx
+-- let Range = {[Pos, Pos]};
+let Loc = {[Str, Pos, Pos]};
+
+let nilPos = [0,0,0];
+-- let nilRange = [nilPos, nilPos];
+let nilLoc : Loc = ["",nilPos,nilPos];
+
+let showLoc : { Loc -> Str } = 
+    [file, [aLn, aCol, _], [bLn, bCol, _]] ->
+    strCat ["[", showStr file, " (", showInt aLn, ":", showInt aCol, ") - (", showInt bLn, ":", showInt bCol, ")", "]"];
+
+let mergeLoc : { Loc -> Loc -> Loc } =
+    aLoc @ [aFile, aPos1 @ [_,_,aIdx1], aPos2 @ [_,_,aIdx2]] -> 
+    bLoc @ [bFile, bPos1 @ [_,_,bIdx1], bPos2 @ [_,_,bIdx2]] -> 
+    if (aFile == bFile)
+    -- if true
+    [ ->
+        let pos1 = if (aIdx1 <= bIdx1) [ -> aPos1, -> bPos1 ];
+        let pos2 = if (aIdx2 >= bIdx2) [ -> aPos2, -> bPos2 ];
+        [aFile, pos1, pos2]
+    , ->
+        -- if aLoc is nilLoc, just return bLoc
+        if ((aFile == "") && (aIdx2 == 0))
+        [ -> bLoc
+        , ->
+            error ["mergeLoc", "cannot merge token locations from different files", aLoc, bLoc ]
+        ]
+    ];
+
+let locAdd : { Loc -> Loc -> Loc } =
+    absLoc -> relLoc ->
+    let [absFilename, [absLine, absCol, absPos], _] = absLoc;
+    let [relFilename, [relLine, relCol, relPos], [relLineEnd, relColEnd, relPosEnd]] = relLoc;
+    if (relFilename == "")
+    [ ->
+        let line = absLine + relLine;
+        let col = absCol + relCol;
+        let pos = absPos + relPos + (relLine * absCol); 
+        -- TODO the above calculation doesn't account for any whitespace after the opening (""") quotes
+        -- TODO   or any blank lines which may contain no leading indentation spaces (the above calc assumes spaces up to the margin column)
+        -- TODO perhaps string tokens need both internal and external locations
+        -- TODO   or a list of positions, one for each line
+        -- TODO or maybe positions shouldn't be stored with the line+col, but should be calculated as needed
+        let lineEnd = absLine + relLineEnd;
+        let colEnd = absCol + relColEnd;
+        let posEnd = absPos + relPosEnd + (relLine * absCol); -- this doesn't account for any whitespace after the opening (""") quotes
+        [absFilename, [line, col, pos], [lineEnd, colEnd, posEnd]]
+    , ->
+        panic ["locAdd", "relative filename must be empty", absLoc, relLoc]
+    ];
+
+-- TODO tags for key words and key operators
+
+let Token = 
+    { ["NUMBER", Int, Loc] 
+    | ["OPER", Str, Loc]
+    | ["KEYOPER", Str, Loc]
+    | ["PUNCT", Str, Loc]
+    | ["COMMA", Str, Loc]
+    | ["WORD", Str, Loc]
+    | ["KEYWORD", Str, Loc]
+    | ["STRING", Str, Loc]
+    | ["WILD", Str, Loc]
+    | ["EOF", Str, Loc]
+    };
+
+let TokenTag = Hd Token;
+
+let Tokens = List Token;
+
+let TokenMb = Maybe Token;
+
+-- let nilToken: Token = ["EOF", "", nilLoc];
+
+let RawToken = { [TokenTag, Str, Loc] };
+
+let posIdx = ([line, col, idx] : Pos) -> idx;
+
+let posAdv = (input: Str) -> ([line, col, idx] : Pos) ->
+    let ch = strCharAt input idx;
+    if (ch == "\n")
+    [ -> [line+1, 1, idx+1]
+    , ->
+        if (ch == "\r")
+        [ -> 
+            let ch2 = strCharAt input (idx+1);
+            if (ch2 == "\n")
+            [ -> [line+1, 1, idx+2]
+            , -> [line+1, 1, idx+1]
+            ]
+        , -> [line, col+1, idx+1]
+      ]
+    ];
+
+
+
+
+
+
+

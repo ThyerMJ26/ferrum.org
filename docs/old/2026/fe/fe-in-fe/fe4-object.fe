@@ -1,0 +1,243 @@
+language ferrum/0.1
+
+
+let ObjMethodApprox = { [ Str, Any->Any ] };
+
+let ObjDispatchApprox = { C@(List ObjMethodApprox) -> [Str,,Any] -> (Codomain (Hd (Tl (Elem C)))) };
+
+let objDispatchApprox : ObjDispatchApprox
+    = ( cases: C@(List ObjMethodApprox) ) -> ( [name:Str,,args] ) ->
+    loop1 ( (cases: List (Elem C)) ->
+        match cases
+        [ [] |=> 
+            error ["no match", name]
+        , [ case1@[name1, fun1],,cases2] |=>
+            if (name == name1)
+            [ ->
+                break (fun1 args)
+            , ->
+                continue cases2
+            ]
+        ]
+    ) cases;
+
+let ObjMethod = Self ( H -> { [ Str, Void->Any] } );
+
+let ObjDispatch = { C@(List ObjMethod) -> N@[Str,,(Domain (Hd (Tl { (Elem C) & [N, Any] } )))] -> (Codomain (Hd (Tl { (Elem C) & [N, Any] } ))) };
+
+-- TODO improve the types/primitives/language so that the dispatch function can be implemented and type-checked directly, with no cast.
+
+let objDispatch: ObjDispatch = cast ObjDispatchApprox ObjDispatch objDispatchApprox;
+
+
+
+-- let ObjectType = Self ( ObjType -> { Void -> [ObjType, Any] } ); -- this is too precise, the returned object has the same value as the original, preventing any change.
+-- let ObjectType = Rec ( ObjType -> { Void -> [ObjType, Any] } ); -- this is too approximate, each ObjType could have a completely different domain
+-- let ObjectType = Rec ( (_: ObjType@Type) -> { Void -> [ObjType, Any] } ); -- perhaps this is just right ?
+
+-- let ObjectType = Self ( ObjType -> { (Domain ObjType) -> [ObjType, Any] } ); -- this is too precise, the returned object has the same value as the original, preventing any change.
+-- let ObjectType = Rec ( ObjType -> { (Domain ObjType) -> [ObjType, Any] } ); -- this is too approximate, each ObjType could have a completely different domain
+-- let ObjectType = Rec ( (_: ObjType@Type) -> { (Domain ObjType) -> [ObjType, Any] } ); -- perhaps this is just right ?
+
+-- let ObjectType = Type
+-- let Object = Self ( T -> [ObjectType, (Hd T)] );
+
+let ReqRespHandler : { Type -> Type -> Type } 
+    = (Obj: Type) -> (Result: Type) -> 
+        (Rec ( RRH -> 
+            { ["done",,Result] 
+            | ["do",, (Self (RQ -> { [ {(Inverse Obj) [Obj, Any] },, { { (Hd (Tl {Obj (Hd RQ)})) } -> RRH } ] })) ] 
+            } ) );
+
+let ReqRespHandlerApprox : { Type -> Type -> Type } 
+    = (Obj: Type) -> (Result: Type) -> 
+        (Rec ( RRH -> 
+            { ["done",,Result] 
+            | ["do",, [ {(Inverse Obj) [Obj, (Codomain Obj)] },, { { (Hd (Tl (Codomain Obj))) } -> RRH } ] ] 
+            } ) );
+
+let ReqRespHandler1 : { Type -> Type -> Type }
+    = (Obj: Type) -> (Result: Type) -> 
+    Self (RQ2 -> { [ { (Inverse Obj) [Obj, Any] },, { (Hd (Tl { Obj (Hd RQ2)})) -> (ReqRespHandler Obj Result) } ] } );
+
+let ReqRespHandler1Approx : { Type -> Type -> Type }
+    = (Obj: Type) -> (Result: Type) -> 
+    { [ { (Inverse Obj) [Obj, (Codomain Obj)] },, { (Hd (Tl (Codomain Obj) )) -> (ReqRespHandler Obj Result) } ] };
+
+let RhDone : { Type -> Type -> Type } =
+    (respH : Type) -> (resp : Type) ->
+    Tl { {respH resp} & ["done",,Any] };
+
+
+let Object = Self ( O -> { (Domain O) -> [O, Any] } );
+
+let ObjDo = { {OBJ:Type} -> Obj@OBJ -> (ReqRespHandler OBJ Any) -> [OBJ, Any] }; 
+-- let ObjDo2 = { OBJ@Object -> (ReqRespHandler OBJ Any) -> [OBJ, Any] }; 
+let ObjDoApprox = { {OBJ:Type} -> Obj@OBJ -> (ReqRespHandlerApprox OBJ Any) -> [OBJ, Any] }; 
+-- let ObjDoApprox2 = { OBJ@Type -> (ReqRespHandlerApprox OBJ Any) -> [OBJ, Any] }; 
+
+let objDoApprox : { {OBJ:Type} -> Obj@OBJ -> (ReqRespHandlerApprox OBJ Any) -> [OBJ, Any] } 
+    = (OBJ:Type) -> (obj1: OBJ) -> (rr1: ReqRespHandlerApprox OBJ Any) ->
+  loop1 ( [obj2: OBJ, rr2: ReqRespHandlerApprox OBJ Any] -> 
+      -- let _ = debug ["objDo", rr2];
+      match rr2
+      [ ["done",, result] |=> 
+          -- let _ = debug ["done", result];
+          break [obj2, result]
+      , ["do",,[req,,respH]] |=> 
+          -- let _ = debug ["do", req];
+          let [obj3, resp] = obj2 req;
+          continue [obj3, respH resp]
+      ]
+  ) [obj1, rr1];
+
+-- let objDoApprox2 : { OBJ@Type -> (ReqRespHandlerApprox OBJ Any) -> [OBJ, Any] } 
+--     = (obj1: OBJ@Type) -> (rr1: ReqRespHandlerApprox OBJ Any) ->
+--   loop1 ( [obj2: OBJ, rr2: ReqRespHandlerApprox OBJ Any] -> 
+--       -- let _ = debug ["objDo", rr2];
+--       match rr2
+--       [ ["done",, result] |=> 
+--           -- let _ = debug ["done", result];
+--           break [obj2, result]
+--       , ["do",,[req,,respH]] |=> 
+--           -- let _ = debug ["do", req];
+--           let [obj3, resp] = obj2 req;
+--           continue [obj3, respH resp]
+--       ]
+--   ) [obj1, rr1];
+
+let objDo = cast ObjDoApprox ObjDo objDoApprox;
+-- let objDo2 = cast ObjDoApprox2 ObjDo2 objDoApprox2;
+
+let ReqResp = ReqRespHandler;
+let ReqRespApprox = ReqRespHandlerApprox;
+
+-- let ObjLoopBody = (OBJ: Type) -> (R: Type) -> Self ( B -> { Void -> (ReqResp { ["break", R] | ["continue", (Domain B) ] } R ) } );
+let ObjLoopBody = (OBJ: Type) -> (R: Type) -> Self ( B -> { Void -> (ReqResp OBJ { ["break", Any] | ["continue", (Domain B) ] } ) } );
+ 
+
+
+let ObjLoopBodyApprox = (OBJ: Type) -> (R: Type) -> { Any -> (ReqRespApprox OBJ { ["break", Any] | ["continue", Any ] } ) };
+
+let ObjLoopApprox = 
+    {  {OBJ:Type} 
+    -> (ObjLoopBodyApprox OBJ Any) 
+    -> (Any) 
+    -> RH@{ Any -> (ReqRespApprox OBJ Any) } 
+    -> (ReqRespApprox OBJ Any) 
+    };
+
+let ObjLoopApprox2 = 
+    {  {OBJ:Type} 
+    -> {Result:Type} 
+    -> (ObjLoopBodyApprox OBJ Any) 
+    -> (Any) 
+    -> RH@{ Any -> (ReqRespApprox OBJ Any) } 
+    -> (ReqRespApprox OBJ Any) 
+    };
+
+
+let objLoopApprox : 
+    {  {OBJ:Type} 
+    -> (ObjLoopBodyApprox OBJ Any) 
+    -> Any
+    -> RH@{ Any -> (ReqRespApprox OBJ Any) } 
+    -> (ReqRespApprox OBJ Any) 
+    }
+    = (OBJ: Type) -> (body: (ObjLoopBodyApprox OBJ Any)) -> (value: Any) -> (resultH: { Any -> (ReqRespApprox OBJ Any) }) ->
+
+    let step : { (ReqRespApprox OBJ Any) -> (ReqRespApprox OBJ Any) }
+        = rec ( (step: { (ReqRespApprox OBJ Any) -> (ReqRespApprox OBJ Any) } ) ->
+                (rrh: ReqRespApprox OBJ Any) ->
+
+            match rrh
+            [ ["do",,[req2,,respH2]] |=>
+                  "do" :: req2 :: (resp2: Hd (Tl (Codomain OBJ))) ->
+                  step (respH2 resp2)
+            , ["done",,["break", result]] |=>
+                resultH result
+            , ["done",,["continue", value2]] |=>
+                step (body value2)
+            ] );
+
+    step (body value);
+
+let objLoopApprox2 : 
+    {  {OBJ:Type} 
+    -> {Result:Type} 
+    -> (ObjLoopBodyApprox OBJ Any) 
+    -> Any
+    -> RH@{ Any -> (ReqRespApprox OBJ Any) } 
+    -> (ReqRespApprox OBJ Any) 
+    }
+    = (OBJ: Type) -> (Result:Type) -> (body: (ObjLoopBodyApprox OBJ Any)) -> (value: Any) -> (resultH: { Any -> (ReqRespApprox OBJ Any) }) ->
+
+    let step : { (ReqRespApprox OBJ Any) -> (ReqRespApprox OBJ Any) }
+        = rec ( (step: { (ReqRespApprox OBJ Any) -> (ReqRespApprox OBJ Any) } ) ->
+                (rrh: ReqRespApprox OBJ Any) ->
+
+            match rrh
+            [ ["do",,[req2,,respH2]] |=>
+                  "do" :: req2 :: (resp2: Hd (Tl (Codomain OBJ))) ->
+                  step (respH2 resp2)
+            , ["done",,["break", result]] |=>
+                resultH result
+            , ["done",,["continue", value2]] |=>
+                step (body value2)
+            ] );
+
+    step (body value);
+
+
+-- let ObjLoop = 
+--     {  {OBJ:Type} 
+--     -> B@(ObjLoopBody OBJ Any) 
+--     -> (Domain B) 
+--     -> RH@{ Any -> (ReqResp OBJ Any) } 
+--     -- -> (ReqResp OBJ (Hd (Tl { (Codomain B) & ["break", (Tl { (Codomain RH) & ["done",,Any]}) ] }))) 
+--     -> (ReqResp OBJ Any) 
+--     };
+
+let ObjLoop = 
+    {  {OBJ:Type} 
+    -> B@(ObjLoopBody OBJ Any) 
+    -> (Domain B) 
+    -> RH @ { (Hd (Tl (Tl {(Codomain B) & ["done",,["break", Any]]}))) -> (ReqResp OBJ Any) } 
+    -- -> (ReqResp OBJ Any) 
+    -> (Codomain RH)
+    };
+
+let ObjLoop2 = 
+    {  {OBJ:Type} 
+    -> {Result:Type} 
+    -> B@(ObjLoopBody OBJ Any) 
+    -> (Domain B) 
+    -> RH @ { (Hd (Tl (Tl {(Codomain B) & ["done",,["break", Any]]}))) -> (ReqResp OBJ Result) } 
+    -> (ReqResp OBJ Result)
+    };
+
+
+
+
+let objLoop = cast ObjLoopApprox ObjLoop objLoopApprox;
+let objLoop2 = cast ObjLoopApprox2 ObjLoop2 objLoopApprox2;
+
+let oDispatch = objDispatch;
+
+let oDo = objDo;
+-- let oDo2 = objDo2;
+let oLoop = objLoop;
+let oLoop2 = objLoop2;
+let objDone = (a: A@Any) -> "done" :: a;
+-- let oDone = (a: A@Any) -> [] :: a;
+let oDone = (a: A@Any) -> "done" :: a;
+
+let oReq = 
+    (req: A@{[Str,,Any]}) -> (respH: H@{ Void -> Any }) -> 
+    "do" :: req :: respH;
+
+let objBreak = (a: A@Any) -> "done" :: ["break", a];
+let objContinue = (a: A@Any) -> "done" :: ["continue", a];
+
+let oBreak = (a: A@Any) -> oDone ["break", a];
+let oContinue = (a: A@Any) -> oDone ["continue", a];

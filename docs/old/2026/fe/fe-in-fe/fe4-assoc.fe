@@ -1,0 +1,173 @@
+language ferrum/0.1
+
+-- TODO K should be constrained to be a subtype of Datum or Data
+let Assoc1 : { Type -> Type -> Type } = 
+    K -> V -> 
+    Rec ( (A : Type) ->
+        { { "get"        -> [K]              -> [ A, (Maybe V)  ] }
+        & { "set"        -> [K, (Maybe V)]   -> [ A, []         ] }
+        -- & { "snapshot"   -> []               -> [ A, [] -> A    ] }
+        & { "persistent" -> []               -> [ A,  A         ] }
+        & { "ephemeral"  -> []               -> [ A,  A         ] }
+        -- TODO ? Separate changing transient state from copying ?
+        -- TODO ?  A common usage-pattern is to first build an assoc, and then repeatedly query it, with no further modifications.
+        -- TODO ?  This way, transitioning from ephemeral to persistent doesn't need to involve a copy.
+        -- TODO ?  Transitioning from persistent to ephemeral may need a copy depending on implementations technique and ref-counts.
+        -- & { "persistent" -> []               -> [ A,  []        ] }
+        -- & { "ephemeral"  -> []               -> [ A,  []        ] }
+        & { "copy"       -> []               -> [ A,  A         ] }
+        -- TODO ? add a means to get or iterate over the keys, or some subset of the keys ?
+        -- TODO ? provide a means to merge assocs, or split assocs by some criteria ?
+        }         
+    );
+
+-- TODO generalize Datum to Data, however, Datum is sufficient for current purposes
+-- let Assoc1Mk = { L @ (List { [Datum, Any] }) -> (Assoc1 (Hd (Elem L)) (Hd (Tl (Elem L))) ) };
+-- let Assoc1Mk = { L @ (List { [Data, Any] }) -> (Assoc1 (Hd (Elem L)) (Hd (Tl (Elem L))) ) };
+let Assoc1Mk = { L @ (List { [Any, Any] }) -> (Assoc1 (Hd (Elem L)) (Hd (Tl (Elem L))) ) };
+
+-- let assoc1MkCopyOnWrite : Assoc1Mk =
+--     justTrustMeCast { Void -> Any } Assoc1Mk primAssoc1MkCopyOnWrite;
+-- 
+-- let assoc1MkCopyOnSnapshot : Assoc1Mk =
+--     justTrustMeCast { Void -> Any } Assoc1Mk primAssoc1MkCopyOnSnapshot;
+
+let assoc1MkPersistent : Assoc1Mk =
+    justTrustMeCast { Void -> Any } Assoc1Mk primAssoc1MkPersistent;
+
+let assoc1MkEphemeral : Assoc1Mk =
+    justTrustMeCast { Void -> Any } Assoc1Mk primAssoc1MkEphemeral;
+
+
+
+
+
+-- ----
+-- TODO ? ReadOnly / ReadWrite ?
+-- ----
+
+-- flip between read-only and read-write modes ?
+--   so as to not have to thread state through all the "get" calls ?
+
+
+-- let AssocReadOnly : { Type -> Type -> Type } = 
+--     K -> V -> 
+--     Rec ( (A : Type) ->
+--         { { "get"       -> [K]              -> (Maybe V)  }
+--         -- "readwrite" could best be implemented with a persistent data-structure, or access to the reference counts
+--         -- & { "readwrite" -> []               -> [ A, (AssocReadWrite K V) ] }
+--         }         
+--     );
+
+-- let AssocReadWrite : { Type -> Type -> Type } = 
+--     K -> V -> 
+--     Rec ( (A : Type) ->
+--         { { "get"      -> [K]              -> [ A, (Maybe V)           ] }
+--         & { "set"      -> [K, (Maybe V)]   -> [ A, []                  ] }
+--         & { "snapshot" -> []               -> [ A, [] -> A             ] }
+--         & { "readonly" -> []               -> [ A, (AssocReadOnly K V) ] }
+--         }         
+--     );
+
+
+-- ----
+-- TODO ? Persistent / Ephemeral ?
+-- ----
+
+-- flip between persistent and ephemeral modes ?
+--   so as to not have to thread state through all the "get" calls ?
+
+
+-- -- This is a pure-interface, suitable for a persistent implementation
+-- -- The interface doesn't provide any guarantees about the implementation, beyond what the types say.
+-- let AssocPersistent : { Type -> Type -> Type } = 
+--     K -> V -> 
+--     Rec ( (A : Type) ->
+--         { { "get"        -> [K]                        -> (Maybe V)             }
+--         & { "set"        -> [K, (Maybe V)]             -> A                     }
+--         & { "update"     -> (List { [K, (Maybe V)] })  -> A                     }
+--      -- & { "ephemeral"  -> []                         -> (AssocEphemeral K V)  }
+--         }
+--         -- "ephemeral" makes an ephemeral implementation out of a persistent one.
+--         --   perhaps this should take a constructor (of type AssocEphemeralMk) to determine the underlying implementation ?
+--     );
+
+-- -- This is a pure-interface, suitable for an ephemeral implementation
+-- -- The interface doesn't provide any guarantees about the implementation, beyond what the types say.
+-- let AssocEphemeral : { Type -> Type -> Type } = 
+--     K -> V -> 
+--     Rec ( (A : Type) ->
+--         { { "get"         -> [K]                        -> [ A, (Maybe V)              ] }
+--         & { "set"         -> [K, (Maybe V)]             -> [ A, []                     ] }
+--         & { "update"      -> (List { [K, (Maybe V)] })  -> [ A, []                     ] }
+--         & { "snapshot"    -> []                         -> [ A, [] -> A                ] }
+--         & { "persistent"  -> []                         -> [ A, (AssocPersistent K V)  ] }
+--         }         
+--     );
+
+-- -- TODO ? track reference counts ?
+-- -- TODO ? enforce the expectation that implementations don't make copies of (or delete) the data ?
+-- let AssocEphemeral : { Type -> Type -> Type } = 
+--     K -> V -> 
+--     Rec ( ((a # RefCount : A) : Type) ->
+--         let A2 = { _ # (refCount a) : A }; 
+--         -- elements of A2 have the same type, and the same reference count as A, 
+--         -- but may differ in value
+--         { { "get"         -> [K]                        -> [ A2, (Maybe V)              ] }
+--         & { "set"         -> [K, (Maybe V)]             -> [ A2, []                     ] }
+--         & { "update"      -> (List { [K, (Maybe V)] })  -> [ A2, []                     ] }
+--         & { "snapshot"    -> []                         -> [ A2, [] -> A                ] }
+--         & { "persistent"  -> []                         -> [ A2, (AssocPersistent K V)  ] }
+--         }         
+--     );
+
+-- let AssocEphemeral : { Type -> Type -> Type } = 
+--     K -> V -> 
+--     Rec ( ((a: A) : Type # RefCount ) ->
+--         let A2 = { _ : A # (refCount a) }; 
+--         -- elements of A2 have the same type, and the same reference count as A, 
+--         -- but may differ in value
+--         { { "get"         -> [K]                        -> [ A2, (Maybe V)              ] }
+--         & { "set"         -> [K, (Maybe V)]             -> [ A2, []                     ] }
+--         & { "update"      -> (List { [K, (Maybe V)] })  -> [ A2, []                     ] }
+--         & { "snapshot"    -> []                         -> [ A2, [] -> A                ] }
+--         & { "persistent"  -> []                         -> [ A2, (AssocPersistent K V)  ] }
+--         }         
+--     );
+
+
+
+
+
+
+
+
+
+-- TODO ? deprecate this old Assoc interface, and the rest of this file
+-- TODO   it doesn't maintain the data-dependence needed for copy-on-snapshot to be viable
+
+-- TODO ? or provide this as a separate interface only suitable for a persistent data-structure implementation ?
+
+-- TODONT maybe don't deprecate this, maybe just never call (or implement) "set"
+
+-- let Assoc : { Type -> Type -> Type } = 
+--     K -> V -> 
+--     Rec ( (A : Type) ->
+--         { { "get"      -> K                -> (Maybe V)   }
+--         & { "set"      -> K -> (Maybe V)   -> A           }
+--         & { "snapshot" ->                  -> [] -> A     }
+--         -- TODO ? add a means to get or iterate over the keys, or some subset of the keys ?
+--         -- TODO ? provide a means to merge assocs, or split assocs by some criteria ?
+--         }         
+--     );
+
+-- TODO generalize Datum to Data, however, Datum is sufficient for current purposes
+-- let AssocMk = { L @ (List { [Datum, Any] }) -> (Assoc (Hd (Elem L)) (Hd (Tl (Elem L))) ) };
+
+
+-- let assocMkCopyOnWrite : AssocMk =
+--     justTrustMeCast { Void -> Any } AssocMk primAssocMkCopyOnWrite;
+-- 
+-- let assocMkCopyOnSnapshot : AssocMk =
+--     justTrustMeCast { Void -> Any } AssocMk primAssocMkCopyOnSnapshot;
+

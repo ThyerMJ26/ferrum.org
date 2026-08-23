@@ -1,0 +1,425 @@
+language ferrum/0.1
+
+let HeapStyle = { "CPS" | "Step" };
+let heapStyle : HeapStyle = "CPS";
+
+-- let Value = { [] | Bool | Int | Str };
+-- let Value = Any;
+let Value = Datum;
+let Strict = { "Strict" | "NonStrict" }; 
+let PrimitiveDefn = { [ Str, (List Strict) ] };
+let PrimitiveName = Str;
+let Strategy = { "NF" | "WNF" };
+let PtsSort = { "Term" | "Type" };
+
+-- let Form = { "None" | "Reduced" | "Specialized" };
+-- let Form = { "WNF" | "NF" }; -- TODO ? perhaps { "Weak" | "Strong" } ?
+let Form = { "Weak" | "Strong" };
+let Reduced = { "NotReduced" | "Reduced" };
+
+-- let Form = { ["None"] | ["Weak", Int] | ["Strong"] };
+let ReducedForm = { "None" | "Weak" | "Strong" };
+let TargetForm = { "Weak" | "Strong" };
+let ContextForm = { "Weak" | "Strong" };
+
+let Addr = Int;
+let Depth = Int;
+
+let NodeCommon = 
+    { [ Int -- depth
+      -- , PtsSort -- is this a Term or a Type
+      -- , Bool -- is this fully reduced / free of all variables / not blocked
+      , TargetForm -- what form does this node want to be reduced to
+      , ReducedForm -- how far has this node been reduced
+      , (Maybe ExprLoc) -- source annotation
+    ] };
+
+let Node = 
+    { [ "HHole" ]
+    | [ "HVar" ]
+    | [ "HLambda", Addr ] -- TODO ? include an instantiation of the argument pattern / references to all the bound variables / ?
+    | [ "HApply", Addr, Addr ] -- TODO ? add func+arg reduction strategies ?
+    | [ "HValue", Value ]
+    | [ "HPair", Addr, Addr ]
+    | [ "HOper", PrimitiveName, (List Addr) ]
+    -- | [ "HType", Addr ]
+    -- | [ "HTerm", Addr ]
+    | [ "HTypeAnnot", Addr, Addr ] -- type-annotation within a term-context
+    | [ "HAs", Str, Addr ] -- TODO ? for instantiating patterns ?
+
+    | [ "TyFun", Addr, Addr ]
+    | [ "TyVar" ] 
+    | [ "TyPair", Addr, Addr ]
+    | [ "TyApp", Addr, Addr ]
+    | [ "TyDatum", Datum ]
+    | [ "TyOper", Str, (List Addr) ]
+    | [ "TySingle", Addr ]
+    -- | [ "TyTerm", Addr ] -- term-brackets within a type-context
+    | [ "TyTermAnnot", Addr, Addr ] -- term-annotation within a type-context
+
+    };
+
+let NcNode = {[NodeCommon, Node]};
+
+let Indirect = 
+    {[ Addr         -- addr
+     , (Maybe Addr) -- indirect
+     , NodeCommon
+     , Node         -- node
+     -- , (Maybe Expr)   -- src annotation
+     -- , List Addr  -- obligations 
+     -- , (Maybe {[Addr, Int]}) -- reducedTo, reducedAt
+    ]};
+
+
+
+let Heap = 
+    {[ "Heap"
+    -- ,  (List Indirect)
+    ,  (Array Indirect)
+    ]};
+
+let heapWhile = cpsWhile Heap;
+let heapLoop1 = cpsLoop1 Heap; -- function then value
+let heapLoop2 = cpsLoop2 Heap; -- value then function
+-- let heapLoop = cpsLoop2 Heap;
+let heapSkip = cpsSkip Heap;
+
+
+-- ? TODO ?
+-- heapMatch
+-- heapGuard
+-- heapAs
+
+
+let HeapSnapshot = { [] -> Heap };
+
+let snapshotHeap : { Heap -> [Heap, HeapSnapshot] } =
+    -- heap ->
+    -- [heap, -> heap];
+    ["Heap", heapArray] -> 
+    let [heapArray2, arraySnapshot] = heapArray ["snapshot"];
+    [ ["Heap", heapArray2], -> ["Heap", arraySnapshot[]]];
+
+let heapSnapshot = snapshotHeap;
+
+
+
+let Stack = List {[Addr, ContextForm]};
+
+
+
+-- let heapEmpty = ["Heap", []];
+-- let heapMk = -> ["Heap", []];
+-- let heapMk : { [] -> Heap } = -> [ "Heap", mkArrayList Indirect [] ];
+-- let heapMk : { [] -> Heap } = -> [ "Heap", mkArrayFastAccessSlowCopy Indirect [] ];
+let heapMk : { [] -> Heap } = -> [ "Heap", mkArrayFastAccessNoCopy Indirect [] ];
+
+
+let HeapK : { Type -> Type } = 
+    A -> { A -> Heap -> Any };
+let HeapAction : { Type -> Type } = 
+    A -> { K @ (HeapK A) -> Heap -> K A Heap };
+let HeapA = HeapAction;
+
+let heapGet : { Addr -> K @ (HeapK Indirect) -> Heap -> K Indirect Heap } =
+    addr -> (k: K @ (HeapK Indirect)) -> ["Heap", heapArray] ->
+    let [heapArray2, indirect] = heapArray ["get", addr];
+    k indirect ["Heap", heapArray2];
+
+-- let heapSet : { Addr -> Indirect -> (HeapA Nil) } =
+let heapSet : { Addr -> Indirect -> K @ (HeapK Nil) -> Heap -> K Nil Heap } =
+    addr -> indirect -> (k : K @ (HeapK Nil)) -> ["Heap", heapArray] ->
+    let [heapArray2,[]] = heapArray ["set",addr,indirect];
+    k [] ["Heap", heapArray2];
+
+let heapNewNode : { [NodeCommon, Node] -> (HeapA Addr) } =
+    [nc, node] -> (k: K @ (HeapK Addr)) -> heap @ ["Heap", heapArray] ->
+    let [heapArray2,addr] = heapArray ["length"];
+    let indirect = [addr, [], nc, node];
+    let [heapArray3,[]] = heapArray2 ["extend",[indirect]];
+    k addr ["Heap", heapArray3];
+
+let heapNew =
+    (k: K @ (HeapK Addr)) ->
+    heapNewNode [[0, "Weak", "None", []], ["HHole"]] k;
+
+let heapDeref : { Addr -> (HeapA {[NodeCommon,Node]}) } =
+    (addr : Addr) -> (k : K @ (HeapK { [NodeCommon,Node] })) -> 
+    heapWhile [addr, []: Maybe NcNode] (
+        [addr, []] |=>
+        (k : K @ (HeapK { [Addr, (Maybe NcNode)] })) ->
+        heapGet addr <| indirect ->
+        let [addr2, indirect2, nc, node] = indirect;
+        match indirect2
+        [ [] |=> k [addr2, [ [nc, node] ] ]
+        , [addr3] |=> k [addr3, []]
+        ]
+    ) <| [_, ncNodeMb] ->
+    match ncNodeMb
+    [ [] |=> error "impossible" -- TODO use heapLoop instead of heapWhile so as not to need this
+    , [ncNode] |=> k ncNode
+    ];
+
+let heapDerefInd : { Addr -> (HeapA Indirect) } =
+    (addr : Addr) -> (k : K @ (HeapK Indirect)) ->
+    heapWhile [addr, []: Maybe Indirect] (
+        [addr, []] |=>
+        (k : K @ (HeapK { [Addr, (Maybe Indirect)] })) ->
+        heapGet addr <| indirect ->
+        let [addr2, indirect2, nc, node] = indirect;
+        match indirect2
+        [ [] |=> k [addr2, [ indirect ] ]
+        , [addr3] |=> k [addr3, []]
+        ]
+    ) <| [_, indMb] ->
+    match indMb
+    [ [] |=> error "impossible" -- TODO use cpsLoop / heapLoop instead of cpsWhile so as not to need this
+    , [ind] |=> k ind
+    ];
+
+let heapRef : { Addr -> (HeapA Addr) } =
+    (addr : Addr) -> (k : K @ (HeapK Addr)) ->
+    heapDerefInd addr <| [addr2, _, _, _] ->
+    k addr2;
+
+
+
+let heapLink : { Addr -> Addr -> (HeapA Nil)  } =
+    from -> to -> (k : K @ (HeapK Nil)) -> heap ->
+    let heapArrayResult = 
+        loop2 [from, heap] <| 
+        [addr : Addr, ["Heap", heapArray]: Heap] ->
+        let [ heapArray2, [ addr1, addrInd, nc, node] ] = heapArray ["get", addr];
+        let [ heapArray3, [] ] = heapArray2 ["set", addr, [addr1, [to], nc, node] ]; -- TODO conditionally drop old nodes
+        match addrInd
+        [ [] |=> break heapArray3 
+        , [addr2] |=>
+            continue [addr2, ["Heap", heapArray3]]
+        ];
+    k [] ["Heap", heapArrayResult];
+
+-- let heapSetReduced : { Addr -> ReducedForm -> K@(HeapK {[]}) -> Heap -> K {[]} Heap }
+--     = addr -> newForm -> (k: K@(HeapK {[]})) ->
+--     error "use one the new versions of this function";
+
+
+let heapSetReducedForm : { ReducedForm -> Addr -> K@(HeapK {[]}) -> Heap -> K {[]} Heap }
+    = newForm -> addr -> (k: K@(HeapK {[]})) ->
+    heapDerefInd addr <| [addr2, ind, [depth, form, redu, sa], node] ->
+    heapSet addr2 [addr2, ind, [depth, form, newForm, sa], node] <| _ ->
+    k [];
+
+let heapSetReducedWeak : { Addr -> K@(HeapK {[]}) -> Heap -> K {[]} Heap }
+    = addr ->
+    heapSetReducedForm "Weak" addr;
+
+let heapSetReducedStrong : { Addr -> K@(HeapK {[]}) -> Heap -> K {[]} Heap }
+    = addr ->
+    heapSetReducedForm "Strong" addr;
+
+    
+let heapMap : { F@{Void -> K@(HeapK Any) -> Heap -> {(Codomain K) Heap} } -> (List (Domain F)) -> K2@(HeapK (List (Domain (Domain (Codomain F))))) -> Heap -> {K2 (List (Domain (Domain (Codomain F)))) Heap} }
+    = (f:F@{Void -> K@(HeapK Any) -> Heap -> {(Codomain K) Heap} }) -> args -> (k: K2@(HeapK (List (Domain (Domain (Codomain F)))))) -> heap ->
+    let [result, heap2] =
+        loop ( [input: List (Domain F), output: List (Domain (Domain (Codomain F))), heap: Heap] ->
+        match input
+        [ [] |=> break [reverse output, heap]
+        , [in1,,ins] |=>
+            f in1 (out1 -> heap -> continue [ ins, [out1,,output], heap] ) heap
+        ]
+        ) [args, [], heap];
+    k result heap2;
+
+
+let nodeChildren : { Node -> (List Addr) }
+    = node ->
+    match node
+    [ ["HHole"]               |=> []
+    , ["HVar"]                |=> []
+    , ["HLambda", a ]         |=> [a]
+    , ["HApply", a, b ]       |=> [a,b]
+    , ["HValue", value ]      |=> []
+    , ["HPair", a, b ]        |=> [a,b]
+    , ["HOper", name, addrs ] |=> addrs
+    , ["HTypeAnnot", term, ty] |=> [term, ty]
+
+    , [ "TyFun", a, b ]       |=> [a, b]
+    , [ "TyVar" ]             |=> []
+    , [ "TyPair", a, b ]      |=> [a, b]
+    , [ "TyApp", a, b ]       |=> [a, b]
+    , [ "TyDatum", _ ]        |=> []
+    , [ "TyOper", _, args ]   |=> args
+    , [ "TySingle", a ]       |=> [a]
+    , [ "TyTermAnnot", a, b ] |=> [a,b]
+
+    ];
+
+let nodeRebuild : { Node -> (List Addr) -> Node }
+    = node -> children ->
+    match [node, children]
+    [ [ ["HHole"], [] ] |=> node
+    , [ ["HVar"], [] ] |=> node
+    , [ ["HLambda", _ ], [a] ] |=> ["HLambda", a]
+    , [ ["HApply", _, _ ], [a,b] ] |=> ["HApply", a, b]
+    , [ ["HValue", value ], [] ] |=> node
+    , [ ["HPair", _, _ ], [a,b] ] |=> ["HPair", a,b]
+    , [ ["HOper", name, _ ], addrs] |=> ["HOper", name, addrs]
+    , [ ["HTypeAnnot", _, _], [a, b] ] |=> [ "HTypeAnnot", a, b ]
+
+    , [ [ "TyFun", _, _], [a, b] ]       |=> [ "TyFun", a, b ]      
+    , [ [ "TyVar" ], [] ]                |=> [ "TyVar" ]            
+    , [ [ "TyPair", _, _], [a, b] ]      |=> [ "TyPair", a, b ]     
+    , [ [ "TyApp", _, _], [a, b] ]       |=> [ "TyApp", a, b ]      
+    , [ [ "TyDatum", datum], [] ]        |=> [ "TyDatum", datum ]   
+    , [ [ "TyOper", name, _], args ]     |=> [ "TyOper", name, args ]
+    , [ [ "TySingle", _], [a] ]          |=> [ "TySingle", a ]      
+    , [ [ "TyTermAnnot", _, _], [a, b] ] |=> [ "TyTermAnnot", a, b ]
+
+    , _ |=> error ["missing case", "nodeRebuild", [node, children]]
+    ];
+
+
+
+let heapDumpIsDone : { Addr -> (List Addr) -> Bool }
+    = addr -> done ->
+    listExists ((a: Addr) -> a==addr) done;
+
+-- TODO improve the order in which nodes are dumped, 
+--   so as to avoid node depths jumping around so much
+--   i.e. finish outputing the inside of a lambda body, 
+--   before eagerly depth-first traversing through anything referenced from that lambda body.
+
+-- TODO move more of this code to somewhere common, 
+--   into a file independent of heap implementation technique
+
+let heapDumpAll : { (List Addr) -> (HeapA (List Indirect)) } =
+    roots -> (k : K @ (HeapK (List Indirect))) ->
+    heapLoop2 [roots, []: List Addr, []: List Indirect] (
+        [todo, done, result] ->
+        (kBreak : KB @ (HeapK (List Indirect))) ->
+        (kContinue : KC @ (HeapK { [(List Addr), (List Addr), (List Indirect)] })) ->
+        -- let _ = debug ["DumpLoop1", todo];
+        -- let _ = debug ["DumpLoop2", map hd result];
+        match todo
+        [ [] |=> kBreak result
+        , [todo1 ,, todos] |=> 
+            if (heapDumpIsDone todo1 done)
+            [ -> kContinue [todos, done, result]
+            , -> 
+                heapGet todo1 <| ind @ [addr, ind2, nc, node] ->
+                let _ = if (addr == todo1) [ -> [], -> error ["addr mismatch", addr, todo1]];
+                let done2 = [todo1 ,, done];
+                match ind2
+                [ [] |=> 
+                    let children = nodeChildren node;
+                    let todo2 = append children todos;
+                    kContinue [todo2, done2, [ind,,result]]
+                , [addr2] |=> 
+                    kContinue [ [addr2,,todos], done2, [ind,,result]]
+                ]
+            ]
+        ]
+    ) <| indirects ->
+    k indirects;
+
+let heapDump : { Addr -> (HeapA (List Indirect)) } =
+    root ->
+    heapDumpAll [root];
+
+let showReduced : { Reduced -> Str }
+    = redu ->
+    match redu
+    [ "Reduced" |=> " * "
+    , "NotReduced" |=> " . "
+    ];
+
+let showReduced2 : { TargetForm -> ReducedForm -> Str }
+    = form -> redu ->
+    match [form, redu]
+    [ ["Weak"   , "None"  ] |=> " . "
+    , ["Weak"   , "Weak"  ] |=> " * "
+    , ["Weak"   , "Strong"] |=> " ERROR "
+    , ["Strong" , "None"  ] |=> " . "
+    , ["Strong" , "Weak"  ] |=> " o "
+    , ["Strong" , "Strong"] |=> " * "
+    ];
+
+let showForm : { Form -> Str }
+    = redu ->
+    match redu
+    [ "Strong" |=> " S "
+    , "Weak" |=> " W "
+    ];
+
+let showIndirect : { Indirect -> Str }
+    = ind -> 
+    match ind
+    [ [a, [i], _, _] |=> -- a ^ ": " ^ i
+        strCat [strPadEnd 4 (showInt a), ": ", showAny i]
+    , [a, [], nc@[depth, form, redu, _], n] |=> 
+        strCat [strPadEnd 4 (showInt a), ": ", showInt depth, showForm form, showReduced2 form redu, strCat (repeat depth "    "), " ", showAny n]
+    ];
+
+
+let heapDumpAllShow : { (List Addr) -> Heap -> [Heap, Str] } = 
+    roots -> heap -> 
+    let [heap2, indirects] = heapDumpAll roots (inds -> heap2 -> [heap2, inds]) heap;
+    let heapStr = strCat <| forMap (reverse indirects) <| a -> strCat [showIndirect a, "\n"];
+    [heap2, heapStr];
+
+
+let traceHeap : { Addr -> K @ (HeapK Nil) -> Heap -> K Nil Heap } =
+    addr -> (k: K @ (HeapK Nil)) ->
+    -- let [heap2, snapshot] = heapSnapshot heap;
+    -- let heap3 = snapshot [];
+    -- let dump = heapDump addr heap3;
+    heapDump addr <| dump ->
+    let dump2 = map ((a: Indirect) -> showIndirect a ^ "\n") (reverse dump);
+    -- let _ = debug ["Dump", dump];
+    -- let _ = debug ["Root", addr];
+    let _ = debug (strCat ["Dump2\n",,dump2]);
+    k [];   
+    
+
+-- let heapCheckValidity : { Addr -> (HeapA Bool) } =
+--     addr ->
+--     (k : K @ HeapK Bool) ->
+--     -- let _ = debug ["heapCheckValidity", "started"];
+--     heapDeref addr <| [ [depth, _, _, _], node ] ->
+--     heapWhile [ [[depth,addr]] : List { [Int, Addr] }, true : Bool ] (
+--         [ [ [expectedDepth, addr] ,, todo], ok ] |=>
+--         (k : K @ HeapK { [ (List { [Int, Addr] }) , Bool ] }) ->
+--         -- let _ = debug ["heapCheckValidity", "loop", addr, length todo];
+--         heapDeref addr <| [ [depth, _, _, _], node ] ->
+--         let ok2 = 
+--             if (depth > expectedDepth)
+--             [ ->
+--                 let _ = debug ["heapCheckValidity", "depth error", addr, depth, expectedDepth];
+--                 false
+--             , -> 
+--                 ok    
+--             ];
+--         let more = 
+--             match node
+--             [ ["HLambda", body] |=>
+--                 [ [addr + 1, body] ]
+--             , ["TyFun", pat, body] |=>
+--                 [ [addr + 1, pat], [addr + 1, body] ]
+--             , _ |=>
+--                 forMap (nodeChildren node) <| childAddr -> [depth, childAddr]
+--             ];
+--         -- let _ = debug ["heapCheckValidity", "more", more];
+-- 
+--         k [ append more todo, ok2 ]
+--     ) <| [_, ok] ->
+--     -- let _ = debug ["heapCheckValidity", "finished"];
+--     if (not ok)
+--     [ ->
+--         traceHeap addr <| _ ->
+--         k ok
+--     , ->
+--         k ok
+--     ];
+
+    

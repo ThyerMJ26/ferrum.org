@@ -1,0 +1,457 @@
+language ferrum/0.1
+
+
+let htmlSelfClosingTags : (List HtmlTag) =
+    ["meta", "input"];
+
+let htmlVerbatimCDataTags : (List HtmlTag) =
+    ["script", "style"];
+
+let htmlIsSelfClosingTag : { HtmlTag -> Bool } =
+    tag ->
+    -- listExists (t -> t == tag) htmlSelfClosingTags;
+    listAnyTrue htmlSelfClosingTags (t -> t == tag);
+    -- htmlSelfClosingTags |>> listAnyTrue <$ t -> t == tag;
+
+let htmlCDataTranslation : List {[Str, Str]} =
+    [ [">", "&gt;"]
+    , ["<", "&lt;"]
+    , ["&", "&amp;"]
+    -- , ["\"", "&quot;"]
+    ];
+
+let htmlAttrTranslation : List {[Str, Str]} =
+    [ ["\"", "&quot;"]
+    , ["\\", "&Backslash;"] 
+    , ["\n", "&NewLine;"]
+    ];
+
+let htmlEscape : { (List {[Str,Str]}) -> Str -> Str } =
+    table -> x ->
+    let xLen = strLen x;
+    let [_, result] =
+        while [0 : Int, "" : Str] <| 
+        [pos, y] ->
+        if (pos == xLen)
+        [ -> 
+            []
+        , ->
+            let x1 = strCharAt x pos;
+            let x2 =
+                match (lookup x1 table)
+                [ [] |=> x1
+                , [x2] |=> x2
+                ];
+            [ [pos+1, strAdd y x2] ]
+        ];
+    result;
+
+let htmlEscapeCData : { Str -> Str } =
+    htmlEscape htmlCDataTranslation;
+
+-- let htmlEscapeCData2 : { Str -> Str } =
+--     htmlEscape htmlCDataTranslation2;
+
+let htmlEscapeAttr : { Str -> Str } =
+    htmlEscape htmlAttrTranslation;
+
+let htmlToStr : { Html -> Str } =
+    rec <| (htmlToStr : { Html -> Str }) ->
+    html @ [tag, attrs ,, elems] ->
+    let elemToStr : { { Str | Html } -> Str } =
+        elem -> 
+        ifStr elem 
+        [ elem2 -> 
+            if (isElem tag htmlVerbatimCDataTags)
+            [ -> elem2
+            , -> htmlEscapeCData elem2
+            ]
+        , elem2 -> htmlToStr elem2 
+        ];
+    let attrToStr : { [Str, Str] -> Str } =
+        [key, val] ->
+        -- strCat [" ", key, "=", show2 val]; -- rely on "show" to do the escaping
+        strCat [" ", key, "=\"", htmlEscapeAttr val, "\""]; 
+    let attrStr = strJoin "" <| map attrToStr attrs;
+    if (htmlIsSelfClosingTag tag)
+    [ ->
+        -- TODO assert there are no children ? or do this at the type-level ?
+        strCat ["<", tag, attrStr, ">"]
+    , ->
+        let open = strCat ["<", tag, attrStr, ">"];
+        let elemStr = strJoin "\n" <| map elemToStr elems;
+        let close = strCat ["</", tag, ">"];
+        strJoin "\n" [open, elemStr, close]
+    ];
+
+
+let htmlToStr2 : { Html -> Str } =
+    html ->
+    strAdd "<!DOCTYPE html>\n" <| htmlToStr html;
+
+
+
+
+
+let htmlRuntime2 : { -> HtmlScript } =
+    ->
+    -- ["script", [["type","module"], ["src","my-runtime.js"]],
+    -- ["script", [["type","module"]],
+    ["script", [],
+      strJoin "\n"
+      [ ""
+      -- , "let exports = {}"
+      -- this use of strFrom is a very crude way of removing the "export" line from the start of "runtime2.js"
+      -- the "export" keyword is only permitted in modules
+      -- it would make more sense to load the "runtime2.js" as a module, rather than in inline <script> tags
+      -- but the webide-server currently always returns a fixed payload for a "GET" request.
+      -- , strFrom 30 js_runtime_text 
+      , js_runtime_text 
+      -- , strCat ["let js_runtime_text = ", show js_runtime_text, ";"]
+      -- , "let rt = exports;"
+      -- , "let _ = rt.primitives;"
+      -- , "export var _ = rt.primitives;"
+      -- , "window.ferrum_runtime = rt;"
+      -- , "window.ferrum_underscore = _;"
+      , "window._ = _;"
+      ,
+       """
+
+        let dataJsToFe = data0 => {
+            let data = data0
+            if (data instanceof Array) {
+                let result = null
+                let data2 = [...data].reverse()
+                data2.forEach(datumJs => {
+                    let datumFe = dataJsToFe(datumJs)
+                    result = [datumFe, result]
+                })
+                return result
+            }
+            else {
+                return data
+            }
+        }
+        let dataFeToJs = data0 => {
+            let data = data0
+            if (data === null) {
+                return []
+            }
+            else if (data instanceof Array) {
+                let result = []
+                while (data instanceof Array) {
+                    let datumJs = dataFeToJs(data[0])
+                    result.push(datumJs)
+                    data = data[1]
+                }
+                if (data !== null) {
+                    throw new Error("expected null at the end of a list")
+                }
+                return result
+            }
+            else {
+                return data
+            }
+        }
+
+        let refTable = {};
+        let maxRefId = 16; // inclusive
+        let nextRefId = 0;
+
+        function refIdAlloc (obj) {
+            let refId = nextRefId;
+            while (Object.hasOwn(refTable, refId)) {
+                refId = (refId === maxRefId) ? 0 : (refId + 1);
+                if (refId === nextRefId) {
+                    throw new Error("all HtmlRef Ids are allocated");
+                }
+            }
+            refTable[refId] = obj;
+            nextRefId = (refId === maxRefId) ? 0 : (refId + 1);
+            return refId;
+        }
+        function refIdGet (refId) {
+            let entry = refTable[refId];
+            if (entry===undefined) {
+                throw new Error (`invalid refId ${refId}`);
+            }
+            return entry;
+        }
+        function refIdSet (refId, obj) {
+            let entry = refTable[refId];
+            if (entry===undefined) {
+                throw new Error (`invalid refId ${refId}`);
+            }
+            refTable[refId] = obj
+        }
+        function refIdFree (refId) {
+            let entry = refIdGet(refId)
+            delete refTable[refId]
+        }
+        function getDomObj(ref) {
+            let [tag, val] = ref;
+            switch (tag) {
+                case "Id":
+                    // TODO raise error if null
+                    return document.getElementById(val);
+                case "Ref":
+                    return refIdGet(val)
+                default:
+                    throw new Error(`invalid ref tag (${ref}), expected Ref or Id`)
+            }
+        }
+
+
+        let createHtml = html => {
+            if (typeof html === "string") {
+                return document.createTextNode(html);
+            }
+            else {
+                let [tag, attrs, ...children] = html;
+                let obj = document.createElement(tag);
+                attrs.forEach(([name, val]) => {
+                    obj.setAttribute(name, val);
+                })
+                children.forEach(child => {
+                    obj.appendChild(createHtml(child));
+                })
+                return obj;
+            }
+        }
+
+
+        let htmlDo = func => htmlDo2 (func (() => null))
+
+        let htmlDo2 = action0 => {
+            if (action0 === null) {
+                return
+            }
+            console.log("htmlDoFe", JSON.stringify(action0))
+            let action = dataFeToJs(action0);
+            console.log("htmlDoJs", JSON.stringify(action))
+            let [req, respK] = action
+            switch (req[0]) {
+                case "printLn": {
+                    console.log(req[1]);
+                    queueMicrotask (() => {
+                        htmlDo2(respK(null))
+                    })
+                    return
+                }
+                // case "getElemValue": {
+                //     let value = document.getElementById(req[1]).value
+                //     queueMicrotask (() => {
+                //         htmlDo2(respK(value))
+                //     })
+                //     return
+                // }
+                // case "setElemValue": {
+                //     document.getElementById(req[1]).value = req[2]
+                //     queueMicrotask (() => {
+                //         htmlDo2(respK(null))
+                //     })
+                //     return
+                // }
+                case "getElemProperty": {
+                    let elemId = req[1]
+                    let path = (req[2])
+                    let obj = document.getElementById(elemId)
+                    while (path.length > 1) {
+                        obj = obj[path[0]]
+                        path.shift()
+                    }
+                    let value = obj[path[0]]
+                    let value2 = dataJsToFe(value)
+                    queueMicrotask (() => {
+                        htmlDo2(respK(value2))
+                    })
+                    return
+                }
+                case "setElemProperty": {
+                    let elemId = req[1]
+                    let path = (req[2])
+                    let value = (req[3])
+                    let obj = document.getElementById(elemId)
+                    if (obj === null) {
+                        throw new Error(`setElemProperty: invalid element id (${JSON.stringify(elemId)})`)
+                    }
+                    while (path.length > 1) {
+                        if (obj === null) {
+                            throw new Error(`setElemProperty: invalid property path (${[elemId, ...path].join(".")})`)
+                        }
+                        obj = obj[path[0]]
+                        path.shift()
+                    }
+                    obj[path[0]] = value
+                    queueMicrotask (() => {
+                        htmlDo2(respK(null))
+                    })
+                    return
+                }
+                case "fetch": {
+                    let method = req[1]
+                    let url = req[2]
+                    let headers = {"Content-Type" : "application/json"}
+                    // let headers = dataFeToJsObj (req[3]) // TODO
+                    // let body = dataFeToJs (req[4])
+                    let body = req[4]
+                    fetch(url, { method: method, headers: headers, body: body }).then(httpResp => {
+                        httpResp.json().then(respDataJs => {
+                            let respDataFe = dataJsToFe(respDataJs)
+                            htmlDo2(respK(respDataFe))
+                        })
+                    })
+                    return
+                }
+                case "serverCall":
+                case "serverCall2": {
+                    let method = "POST";
+                    let url = window.location.href;
+                    let headers = {"Content-Type" : "application/json"}
+                    let body = JSON.stringify(req[1])
+                    fetch(url, { method: method, headers: headers, body: body }).then(httpResp => {
+                        httpResp.json().then(respDataJs => {
+                            let respDataFe = dataJsToFe(respDataJs)
+                            htmlDo2(respK(respDataFe))
+                        })
+                    })
+                    return
+                }
+                case "createHtml": {
+                    let html = req[1];
+                    let obj = createHtml(html);
+                    let ref = refIdAlloc(obj);
+                    let ref2 = dataJsToFe(["Ref", ref])
+                    queueMicrotask (() => {
+                        htmlDo2(respK(ref2))
+                    })
+                    return
+                }
+                case "updateHtml": {
+                    let [refTag, refVal] = req[1]
+                    let html = req[2]
+                    let obj = createHtml(html);
+                    switch (refTag) {
+                    case "Ref":
+                        refIdSet(refVal, obj)
+                        break;
+                    case "Id":
+                        let old = document.getElementById(refVal)
+                        if (old !== null) {
+                            old.replaceWith(obj)
+                        }
+                        break
+                    default:
+                        throw new Error(`invalid tag (${refTag}`)
+                    }
+
+
+                }
+                case "dropRef": {
+                    let [tag, val] = req[1];
+                    switch (tag) {
+                    case "Ref":
+                        refIdFree(val);
+                        break;
+                    case "Id":
+                        // nothing to do
+                        break
+                    default:
+                        throw new Error(`invalid tag (${tag}`)
+                    }
+                    queueMicrotask (() => {
+                        htmlDo2(respK(null));
+                    })
+                    return;
+                }
+                case "appendChild": {
+                    let parentRef = req[1];
+                    let childRef = req[2];
+                    let parentObj = getDomObj(parentRef);
+                    let childObj = getDomObj(childRef);
+                    parentObj.appendChild(childObj);
+                    queueMicrotask (() => {
+                        htmlDo2(respK(null));
+                    })
+                    return;
+                }
+                case "elemObjCall": {
+                    // let htmlRef = req[1];
+                    // let method = req[2];
+                    // let args = reg[3];
+                    let [,htmlRef,method,args] = req;
+                    let obj = getDomObj(htmlRef);
+                    let result = obj[method](...args);
+                    // let result = obj.setSelectionRange(...args);
+                    let result2 = dataJsToFe(result);
+                    queueMicrotask (() => {
+                        htmlDo2(respK(result2));
+                    })
+                    return;
+                }
+                case "replaceChildren": {
+                    let parentId = req[1];
+                    let newChildrenHtml = req[2];
+                    let parentNode = document.getElementById(parentId);
+                    let newChildrenNodes = newChildrenHtml.map(h => createHtml(h));
+                    parentNode.replaceChildren(...newChildrenNodes);
+                    queueMicrotask (() => {
+                        htmlDo2(respK(null));
+                    })
+                    return;
+                }
+                case "getData": {
+                }
+                default: {
+                    console.log("Unknown HTML Action Request", req[0])
+                    return
+                }
+            }
+        }
+       """
+      ]
+    ];
+
+
+let htmlCodegenFuncAdapter1 : { [Str, (List Str)] -> Str } =
+    [funcName, argNames] ->
+    let funcNameFe = strCat ["v_", funcName];
+    let funcNameJs = strCat [funcName];
+    let argVars = forMap argNames <| argName -> jsVar (strCat ["v_", argName]);
+    let [curriedCall, _] = forEach (jsVar funcNameFe : JsExpr) argVars <| func -> arg -> [jsCall func [arg], []]; -- TODO use forFoldL
+    let bodyJs = jsLambdaExpr [jsVar "k"] (jsCall curriedCall [jsLambdaExpr [] (jsCall (jsVar "k") [jsNil])] );
+    -- let bodyJs = cgExprJs expr;
+    let bodyJs2 = jsCall (jsVar "htmlDo") [bodyJs];
+    let funcJs = jsLambdaExpr argVars bodyJs2;
+    let defnJs = jsLet (jsVar funcNameJs) funcJs;
+    let windowAssign = jsAssign (jsMethod (jsVar "window") funcNameJs) (jsVar funcNameJs);
+    let defnJsStr = dtShowJoin <| jsDisplayStmts [defnJs, windowAssign];
+    defnJsStr;
+
+let htmlCodegenFuncAdapters : { (List { [Str, (List Str)] }) -> HtmlScript } =
+    funcInterfaces ->
+    let jsCode = strJoin "\n" <| forMap funcInterfaces htmlCodegenFuncAdapter1;
+    -- let jsCode = strJoin "\n" ["let _ = window.ferrum_underscore;", jsCode];
+    -- ["script", [], jsCode];
+    ["script", [ ], jsCode];
+
+
+let htmlCodegenDecls : { Str -> Str -> HtmlScript } =
+    filename -> src ->
+    -- let _ = debug ["htmlCodegenDecls", src];
+    let decls = parseDecls <| scanFile filename src;
+    
+    -- -- let declsJsStr = dtShowJoin (jsDisplayStmt (cgDeclsJs cgExprJs decls));
+    -- let declsJsStr = strJoin "\n" <| for (cgDeclsJs cgExprJs decls) <| jsDecl -> dtShowJoin (jsDisplayStmt jsDecl);
+
+    -- this is the very simplest codegen implementation
+    let declsJsStr = cgDeclsJsStr decls;
+    -- let declsJsStr = strJoin "\n" ["let _ = window.ferrum_underscore;", declsJsStr];
+
+    -- TODO switch to using the most current and more advanced codegen cgExprJs_HPS
+    -- TODO   this generates uniquified names though,
+    -- TODO   so will need to plumb the resulting environment through to the htmlCodegenFuncAdapters function above
+
+    ["script", [ ], declsJsStr];
+
+

@@ -1,0 +1,640 @@
+language ferrum/0.1
+
+-- let WiTsTestFile = {
+--     [ "TestFile"
+--     , (List Str)  -- list of known test file names
+--     , Str         -- currently selected test file
+--     , Str         -- test file contents
+--     , (List Token)
+--     ] };
+-- 
+-- let WiTsProject = {
+--     [ "Project"
+--     , (List Str)  -- list of known project file names
+--     , Str         -- currently selected file
+--     , Str         -- file contents
+--     ] };
+-- 
+-- let SourceTag = { "Code" | "Text" };
+-- let SourceTag2 = { "Filename" | "Contents" };
+-- 
+-- let WiSourceEntry = {
+--     [ Int -- id 
+--     , Str -- label to display
+--     , SourceTag2
+--     , Str -- expr / decls source
+--     , (Maybe Heap) -- the heap, once the expr/decls have been instantiated
+--     -- TODO add decl binding name/addrs
+--     , (Maybe Addr) -- root address of expression / nil for decls
+--     ] };
+-- 
+-- let WiTsSource = {
+--     [ "Source"
+--     -- , (List {[SourceTag, Str]})  -- list of known source file names together with import-type ("Code", "Text")
+--     -- , [SourceTag, Str]  -- currently selected file, with import-type. (source "Code" will be parsed, source "Text" will not, the same file can be imported both ways)
+--     , (List WiSourceEntry) 
+--     ] };
+-- 
+-- let WiTsTokens = {
+--     [ "Tokens"
+--     , (List Token)
+--     ] };
+-- 
+-- let WiTsExprs = {
+--     [ "Exprs"
+--     , (List Expr)
+--     ] };
+-- 
+-- 
+-- let WiBindingEntry = {
+--     [ Int -- id 
+--     , Str -- label to display
+--     , TestDefn3
+--     , (Maybe Heap) -- the heap, once the expr/decls have been instantiated
+--     , (List {[Str, Addr]})
+--     ] };
+-- 
+-- let WiTsBinding = {
+--     [ "Binding"
+--     , (List WiBindingEntry) 
+--     ] };
+-- 
+-- 
+-- 
+-- -- TODO WiTs: Types Synthesized, Types Context, Type Inhabitation Proof, Heap, Reductions, Indirections, ReadBackFe, ReadBackJs, Repl, 
+-- 
+-- let WiTabState = Self <| WiTs -> {
+--     [ Str
+--     , Type
+--     , { (Hd (Tl WiTs)) -> Html } -- render
+--     ] };
+-- 
+-- let wiTsTestFileRender : { WiTsTestFile -> Html } =
+--     state ->
+--     error ["TODO", "wiTsTestFileRender"];
+-- 
+-- let wiTsTestFile = [ "TestFile", WiTsTestFile, wiTsTestFileRender ];
+-- 
+-- 
+-- let WebIdeState = {
+--     [ WiTsTestFile
+--     , WiTsProject
+--     , WiTsSource
+--     , WiTsBinding
+--     -- , WiTsTokens
+--     -- , WiTsExprs
+--     ] };
+-- 
+-- 
+-- let htmlPrelude : { -> Html } = ->
+--     htmlCodegenDecls "fe4-prelude.fe" fe4_prelude_text;
+-- 
+-- -- let htmlFerrumSource : { Str -> Str -> Html } = 
+-- --     filename -> fileContents ->
+-- --     htmlCodegenDecls filename fileContents;
+-- 
+-- -- let toggleTab : Html =
+-- --     htmlCodegen "toggleTab" ["tabId", "buttonId"]
+-- --     """
+-- --      k ->
+-- --      -- let buttonId = "buttonTest";
+-- --      let _ = debug ["toggleTab", tabId, buttonId];
+-- --      -- printLn "toggleTab printLn" <| ->
+-- --      getElemProperty tabId ["style", "display"] <| tabDisplay ->
+-- --      let tabDisplay2 = if (tabDisplay == "none") [ -> "block", -> "none"];
+-- --      let buttonStyle = if (tabDisplay2 == "none") [ -> "outset", -> "inset"];
+-- --      let buttonColor = if (tabDisplay2 == "none") [ -> "lightgray", -> "darkgray"];
+-- --      setElemProperty tabId ["style", "display"] tabDisplay2 <| ->
+-- --      -- setElemProperty buttonId ["style", "borderStyle"] buttonStyle <| ->
+-- --      setElemProperty buttonId ["style", "background"] buttonColor <| ->
+-- --      printLn (show ["toggleTab", tabId, tabDisplay, tabDisplay2, buttonId, buttonStyle, buttonColor]) <| ->
+-- --      k []
+-- --     """
+-- --     ;
+-- 
+-- let toggleTab : Html =
+--     htmlCodegen "toggleTab" ["tabId", "buttonId"]
+--     """
+--      k ->
+--      toggleTab2 tabId buttonId <| ->
+--      k []
+--     """
+--     ;
+-- 
+-- 
+-- 
+-- let setToggleState : Html =
+--     htmlCodegen2 "setToggleState" ["tabId", "buttonId"]
+--     """
+--      k ->
+--      getElemProperty tabId ["style", "display"] <| tabDisplay ->
+--      let buttonStyle = if (tabDisplay == "none") [ -> "outset", -> "inset"];
+--      let buttonColor = if (tabDisplay == "none") [ -> "lightgray", -> "darkgray"];
+--      -- setElemProperty buttonId ["style", "borderStyle"] buttonStyle <| ->
+--      setElemProperty buttonId ["style", "background"] buttonColor <| ->
+--      -- printLn (show ["toggleTab", tabId, tabDisplay, tabDisplay2, buttonId, buttonStyle, buttonColor]) <| ->
+--      k []
+--     """
+--     ;
+-- 
+-- let setDisplay : Html =
+--     htmlCodegen2 "setDisplay" ["tabId", "display"]
+--     """
+--      k ->
+--      setElemProperty tabId ["style", "display"] display <| ->
+--      k []
+--     """
+--     ;
+-- 
+-- let textClick : Html =
+--     htmlCodegen "textClick" ["tabId"]
+--     """
+--      k ->
+--      let _ = debug ["textClick"];
+--      printLn "textClick printLn" <| ->
+--      getElemProperty "text1" ["selectionDirection"] <| dir ->
+--      getElemProperty "text1" ["selectionStart"] <| start ->
+--      getElemProperty "text1" ["selectionEnd"] <| end ->
+--      printLn (show ["textClick", dir, start, end]) <| ->
+--      serverCall (show ["textClick", tabId, start, end]) <| response ->
+--      printLn (show ["textClick", response]) <| ->
+--      setElemProperty "text2" ["value"] response <| ->
+-- 
+--      match response
+--      [ ["ok", data, tokens] |=>
+--          let lines = strJoin "\n" (map show [data,,tokens]);
+--          setElemProperty "text2" ["value"] lines <| ->
+--          k []
+--      , _ |=>
+--          setElemProperty "text2" ["value"] response <| ->
+--          k []
+--      ]
+-- 
+--      -- let ["ok", tab, contents] = response;
+--      -- setElemProperty "text2" ["value"] contents <| ->
+--      -- k []
+--     """
+--     ;
+-- 
+-- let projSelect : Html =
+--     htmlCodegen2 "projSelect" ["projVal"]
+--     """
+--      k ->
+--      let _ = debug ["projSelect", projVal];
+--      setElemProperty "textProj" ["value"] "Loading..." <| ->
+--      serverCall (show ["projSelect", projVal]) <| response ->
+--      handleResponse response <| ->
+--      k []
+--      -- match response
+--      -- [ ["ok", projText] |=>
+--      --     setElemProperty "textProj" ["value"] projText <| ->
+--      --     k []
+--      -- , _ |=> 
+--      --     setElemProperty "textProj" ["value"] (strCat ["ERROR", response]) <| ->
+--      --     k []
+--      -- ]
+--     """
+--     ;
+-- 
+-- let handleResponse : Html =
+--     htmlCodegen2 "handleResponse" ["response"]
+--     """
+--      k ->
+--      match response
+--      [ ["ok", "src", srcText] |=>
+--          setElemProperty "textSrc" ["value"] srcText <| ->
+--          k []
+--      , ["ok", "proj", projText, heapEnv, jsCode] |=>
+--          setElemProperty "textProj" ["value"] projText <| ->
+--          setElemProperty "textHeap" ["value"] heapEnv <| ->
+--          setElemProperty "textRbJs" ["value"] jsCode <| ->
+--          k []
+--      , ["ok", "binding", bindingText, heapText, rbJsText] |=>
+--          setElemProperty "textBinding" ["value"] bindingText <| ->
+--          setElemProperty "textHeap" ["value"] heapText <| ->
+--          setElemProperty "textRbJs" ["value"] rbJsText <| ->
+--          k []
+--      , _ |=> 
+--          let _ = debug ["UNHANDLED Response", response];
+--          -- setElemProperty "textProj" ["value"] (strCat ["ERROR", response]) <| ->
+--          k []
+--      ]
+--     """
+--     ;
+-- 
+-- let choiceChange : Html =
+--     htmlCodegen "choiceChange" ["choiceId"]
+--     """
+--      k ->
+--      match choiceId
+--      [ "projChoiceId" |=>
+--         getElemProperty "projChoiceId" ["value"] <| projChoiceVal ->
+--         projSelect projChoiceVal <| ->
+--         k []
+--      , "srcChoiceId" |=>
+--         getElemProperty "srcChoiceId" ["value"] <| srcChoiceVal ->
+--         setElemProperty "textSrc" ["value"] (strCat ["CHOICE ", srcChoiceVal]) <| ->
+--         match (readInt srcChoiceVal)
+--         [ [srcChoiceNum] |=>
+--             serverCall2 ["srcSelect", srcChoiceNum] <| response ->
+--             handleResponse response <| ->
+--             k []
+--         , _ |=>
+--             let _ = debug ["CHOICE CHANGE", "failed to readInt", srcChoiceVal];
+--             k []
+--         ]
+--      , "bindingChoiceId" |=>
+--         getElemProperty "bindingChoiceId" ["value"] <| bindingChoiceVal ->
+--         setElemProperty "textBinding" ["value"] (strCat ["CHOICE ", bindingChoiceVal]) <| ->
+--         match (readInt bindingChoiceVal)
+--         [ [bindingChoiceNum] |=>
+--             serverCall2 ["bindingSelect", bindingChoiceNum] <| response ->
+--             handleResponse response <| ->
+--             k []
+--         , _ |=>
+--             let _ = debug ["CHOICE CHANGE", "failed to readInt", bindingChoiceVal];
+--             k []
+--         ]
+--      , _ |=>
+--         let _ = debug ["choiceChange", "unknown choiceId", choiceId];
+--         k []
+--      ]
+--     """
+--     ;
+-- 
+-- let rangeOverlap : { [Int, Int] -> [Int, Int] -> Bool } =
+--     [a, b] -> [x, y] ->
+--     ( (a <= x) && (x <= b) ) ||
+--     ( (a <= y) && (y <= b) ) ||
+--     ( (x <= a) && (a <= y) ) ||
+--     ( (x <= b) && (b <= y) );
+-- 
+-- 
+-- let htmlMkCombo : { [(List Str)] -> Html } =
+--     [choices] -> 
+--     [ "select", [["onchange", "projSelect(this.value)"]] ,, for choices (c -> ["option", [], c]) ];
+-- 
+-- let htmlMkCombo2 : { Str -> (List Str) -> Html } =
+--     choiceId -> choices -> 
+--     [ "select", [["id", choiceId], ["onchange", strCat ["choiceChange('", choiceId, "')"]]] ,, for choices (c -> ["option", [], c]) ];
+-- 
+-- let htmlMkCombo3 : { Str -> (List {[Int,Str]}) -> Html } =
+--     choiceId -> choices -> 
+--     [ "select", [["id", choiceId], ["onchange", strCat ["choiceChange('", choiceId, "')"]]] ,, for choices ([cId, cLabel] -> ["option", [["value", show cId]], cLabel]) ];
+-- 
+-- let webIde : { WebIdeState -> IoId -> { WebIdeState -> Io } -> Io } =
+--     state -> request -> k ->
+--     let [testFileState, projectState, sourceState, bindingState] = state;
+--     let [_, tfNames, tfName, tfContents, tfTokens] = testFileState;
+--     let [_, projNames, projCurrent, projContent] = projectState;
+--     let [_, srcEntries] = sourceState;
+--     let [_, bindingEntries] = bindingState;
+--     let _ = debug ["STATE", tfName];
+-- 
+--     let allTabs = ["Test", "Proj", "Src", "Token", "Expr", "Bind", "Heap", "Reduc", "Indir", "RbJs", "RbFe", "Misc1"];
+--     let initialVisibleTabs = ["Bind", "Heap", "RbJs"];
+-- 
+--     io2HttpReqMethod request <| [method] ->
+--     match method
+--     [ "GET" |=>
+--         let response = htmlToStr2 
+--             ["html", []
+--             , ["meta", [["charset","utf-8"]]]
+--             , ["style", [],
+--                 """
+--                   body {
+--                       margin: 0;
+--                       width: 100vw;
+--                       height: 100vh;
+--                       box-sizing: border-box;
+--                       font-family: sans-serif;
+--                   }
+--                   #page {
+--                       display: grid;
+--                       grid-template-areas:
+--                           "toggles tabs";
+--                       grid-template-columns: auto 1fr;
+--                       grid-template-rows: auto;
+--                       // border: 5px solid gray;
+--                       border: 1px solid gray;
+--                       padding: 0px;
+--                       width: 100%;
+--                       height: 100%;
+--                       box-sizing: border-box;
+--                   }
+--                   #toggles {
+--                        grid-area: toggles;
+--                        // padding: 5px;
+--                        padding: 1px;
+--                        background-color: darkgray;
+--                        display: grid;
+--                        grid-auto-columns: auto;
+--                        grid-auto-rows: auto;
+--                        place-content: start;
+--                    }
+--                   #tabs {
+--                        grid-area: tabs;
+--                        // padding: 5px;
+--                        padding: 1px;
+--                        background-color: lightgray;
+--                        display: grid;
+--                        // grid-template-columns: auto;
+--                        grid-auto-columns: 1fr;
+--                        grid-auto-rows: auto;
+--                        grid-auto-flow: column;
+--                        justify-content: stretch;
+--                        align-content: stretch;
+--                    }
+--                     div.tab1 {
+--                       // border: 5px solid red;
+--                       border: 1px solid black;
+--                       // overflow: none;
+--                       box-sizing: border-box;
+--                       width: 100%;
+--                       height: 100%;
+--                       position: relative;
+--                      }
+--                     div.tab2 {
+--                       // border: 5px solid green;
+--                       border: 1px solid black;
+--                       overflow: auto;
+--                       box-sizing: border-box;
+--                       width: 100%;
+--                       height: 100%;
+--                       position: absolute;
+--                      }
+--                     textarea.tab2 {
+--                       // border: 5px solid blue;
+--                       border: 1px solid black;
+--                       overflow: auto;
+--                       box-sizing: border-box;
+--                       width: 100%;
+--                       height: 100%;
+--                       position: absolute;
+--                       resize: none;
+--                      }
+--                 """
+--               ]
+--             , ["body", []
+--               , ["div", [["id", "page"]]
+--                 , ["div", [["id", "toggles"]]
+--                   , ["input", [["id", "buttonTest"],  ["type", "submit"], ["value", "TestFile"],      ["onclick", "toggleTab('tabTest', 'buttonTest')"]]]
+--                   , ["input", [["id", "buttonProj"],  ["type", "submit"], ["value", "Project"],       ["onclick", "toggleTab('tabProj', 'buttonProj')"]]]
+--                   , ["input", [["id", "buttonSrc"],   ["type", "submit"], ["value", "Source"],        ["onclick", "toggleTab('tabSrc', 'buttonSrc')"]]]
+--                   , ["input", [["id", "buttonToken"], ["type", "submit"], ["value", "Tokens"],        ["onclick", "toggleTab('tabToken', 'buttonToken')"]]]
+--                   , ["input", [["id", "buttonExpr"],  ["type", "submit"], ["value", "Expressions"],   ["onclick", "toggleTab('tabExpr', 'buttonExpr')"]]]
+--                   , ["input", [["id", "buttonBind"],  ["type", "submit"], ["value", "Bindings"],      ["onclick", "toggleTab('tabBind', 'buttonBind')"]]]
+--                   , ["input", [["id", "buttonHeap"],  ["type", "submit"], ["value", "Heap"],          ["onclick", "toggleTab('tabHeap', 'buttonHeap')"]]]
+--                   , ["input", [["id", "buttonReduc"], ["type", "submit"], ["value", "Reductions"],    ["onclick", "toggleTab('tabReduc', 'buttonReduc')"]]]
+--                   , ["input", [["id", "buttonIndir"], ["type", "submit"], ["value", "Indirections"],  ["onclick", "toggleTab('tabIndir', 'buttonIndir')"]]]
+--                   , ["input", [["id", "buttonRbJs"],  ["type", "submit"], ["value", "Read Back Js"],  ["onclick", "toggleTab('tabRbJs', 'buttonRbJs')"]]]
+--                   , ["input", [["id", "buttonRbFe"],  ["type", "submit"], ["value", "Read Back Fe"],  ["onclick", "toggleTab('tabRbFe', 'buttonRbFe')"]]]
+--                   , ["input", [["id", "buttonMisc1"], ["type", "submit"], ["value", "Misc 1"],        ["onclick", "toggleTab('tabMisc1', 'buttonMisc1')"]]]
+--                   ]
+--                 , ["div", [["id", "tabs"]]
+--                   , ["div", [ ["id", "tabTest"],  ["class", "tab1"] ], ["textarea", [ ["id", "text1"], ["class", "tab2"], ["wrap", "off"], ["readonly", ""], ["onclick", "textClick('tabTest')"] ], tfContents] ]
+--                   , ["div", [ ["id", "tabProj"],  ["class", "tab1"] ]
+--                     , ["div", [ ["class", "tab2"], ["style", "display: grid; grid-template-columns: auto; grid-template-rows: auto 1fr;"] ] 
+--                       , htmlMkCombo2 "projChoiceId" projNames
+--                       , ["textarea", [ ["id", "textProj"], ["wrap", "off"], ["readonly", ""], ["style", "resize: none;"] ] ]
+--                       ]
+--                     ]
+--                   , ["div", [ ["id", "tabSrc"],  ["class", "tab1"] ]
+--                     , ["div", [ ["class", "tab2"], ["style", "display: grid; grid-template-columns: auto; grid-template-rows: auto 1fr;"] ] 
+--                       , htmlMkCombo3 "srcChoiceId" (for srcEntries <| [id, label, _, contents, heapMb, addrMb] -> [id, label])
+--                       , ["textarea", [ ["id", "textSrc"], ["wrap", "off"], ["readonly", ""], ["style", "resize: none;"] ] ]
+--                       ]
+--                     ]
+--                   , ["div", [ ["id", "tabToken"], ["class", "tab1"], ["style", "display: none"] ], ["div", [ ["class", "tab2"] ], "Tokens"] ]
+--                   , ["div", [ ["id", "tabExpr"],  ["class", "tab1"], ["style", "display: none"] ], ["div", [ ["class", "tab2"] ], "Expressions"] ]
+--                   , ["div", [ ["id", "tabBind"],  ["class", "tab1"], ["style", "display: none"] ]
+--                     , ["div", [ ["class", "tab2"], ["style", "display: grid; grid-template-columns: auto; grid-template-rows: auto 1fr;"] ] 
+--                       , htmlMkCombo3 "bindingChoiceId" (for bindingEntries <| [id, label, td, heapMb, env] -> [id, label])
+--                       , ["textarea", [ ["id", "textBinding"], ["wrap", "off"], ["readonly", ""], ["style", "resize: none;"] ] ]
+--                       ]
+--                     ]
+--                   , ["div", [ ["id", "tabHeap"],  ["class", "tab1"], ["style", "display: none"] ]
+--                     , ["div", [ ["class", "tab2"], ["style", "display: grid; grid-template-columns: auto; grid-template-rows: 1fr;"] ] 
+--                       , ["textarea", [ ["id", "textHeap"], ["wrap", "off"], ["readonly", ""], ["style", "resize: none;"] ] ]
+--                       ]
+--                     ]
+--                   , ["div", [ ["id", "tabReduc"], ["class", "tab1"], ["style", "display: none"] ], ["div", [ ["class", "tab2"] ], "Reductions"] ]
+--                   , ["div", [ ["id", "tabIndir"], ["class", "tab1"], ["style", "display: none"] ], ["div", [ ["class", "tab2"] ], "Indirections"] ]
+--                   , ["div", [ ["id", "tabRbJs"],  ["class", "tab1"], ["style", "display: none"] ]
+--                     , ["div", [ ["class", "tab2"], ["style", "display: grid; grid-template-columns: auto; grid-template-rows: 1fr;"] ] 
+--                       , ["textarea", [ ["id", "textRbJs"], ["wrap", "off"], ["readonly", ""], ["style", "resize: none;"] ] ]
+--                       ]
+--                     ]
+--                   , ["div", [ ["id", "tabRbFe"],  ["class", "tab1"], ["style", "display: none"] ], ["div", [ ["class", "tab2"] ], "Read Back Fe"] ]
+--                   , ["div", [ ["id", "tabMisc1"], ["class", "tab1"] ], ["textarea", [ ["id", "text2"], ["class", "tab2"], ["wrap", "off"], ["readonly", ""] ] ] ]
+--                   ]  
+--                 ]
+--               , htmlRuntime2
+--               , htmlPrelude[] -- TODO don't parse and translate the prelude on every page get
+--               , htmlCodegenDecls "fe4-webide-client.fe" fe4_webide_client_text
+--               , toggleTab
+--               , textClick
+--               , projSelect
+--               , handleResponse
+--               , choiceChange
+--               , setToggleState
+--               , setDisplay
+--               -- TODO? add an onload function to initialize initial contents?
+--               , ["script", [],
+--                   strJoin "\n" <|
+--                   for allTabs <| id ->
+--                   let display = if (isElem id initialVisibleTabs) [ -> "block", -> "none"];
+--                   strCat ["htmlDo(v_setDisplay('tab", id, "', ", show display, "));"]
+--                 ]  
+--               , ["script", [],
+--                   strJoin "\n" <|
+--                   for allTabs <| id ->
+--                   strCat ["htmlDo(v_setToggleState('tab", id, "', 'button", id, "'));"]
+--                 ]  
+--               ]
+--             ];
+--         io2HttpRespond request [["content-type", "text/html"]] response <| ->
+--         k state
+--     , "POST" |=>
+--         -- let _ = debug ["State", state];
+--         io2HttpReqData request <| [data] ->
+--         let _ = debug ["POST", "Request", data];
+--         match data
+--         [ ["textClick", tabId, start, end] |->
+--             guardInt start <| cStart ->
+--             guardInt end <| cEnd =>
+--             (k : { [Any, WebIdeState] -> Io }) ->
+--             let tokens = filter (([tag, val, [_,[_,_,tStart],[_,_,tEnd]]]: Token) -> rangeOverlap [cStart, cEnd] [tStart, tEnd]) tfTokens;
+--             let outputTabId = "tab2";
+--             let output = strJoin "" <| map (a -> strAdd (show a) "\n") tokens;
+--             k [ ["ok", outputTabId, output], state ]
+--         , ["projSelect", projVal] |->
+--             guardStr projVal <| projVal2 =>
+--             (k : { [Any, WebIdeState] -> Io }) ->
+--             io2ReadFile projVal2 <| projContents ->
+--             let cache1 = []; -- TODO read the cache from the app-state
+--             let evalMode = "Direct";
+--             -- let evalMode = "InstRb";
+--             loadProjectViaCache2 evalMode projVal2 cache1 <| [cacheEntry,cache2] ->
+--             -- TODO store the cache in the app-state
+--             let [_, [heapSnapshot, heapEnv, jsCode]] = cacheEntry;
+--             -- k [ ["ok", strJoin "\n" ["READ ", projVal2, projContents] ] , state ]
+--             -- k [ ["ok", "proj", strJoin "\n" ["READ ", projVal2, projContents] ] , state ]
+--             -- k [ ["ok", "proj", projContents ] , state ]
+--             k [ ["ok", "proj", projContents, show heapEnv, jsCode ] , state ]
+--         , ["srcSelect", srcVal] |->
+--             guardInt srcVal <| srcVal2 =>
+--             (k : { [Any, WebIdeState] -> Io }) ->
+--             let entry @ [_, _, tag, decls, _, _] = listIndex srcEntries srcVal2;
+--             match tag
+--             [ "Contents" |=>
+--                 k [ ["ok", "src", strJoin "\n" ["SRC ", show srcVal2, show entry, decls] ] , state ]
+--             , "Filename" |=>
+--                 let filePath = strCat ["../../fe/", decls]; -- TODO handle path-relative filenames
+--                 io2ReadFile filePath <| fileContents ->
+--                 k [ ["ok", "src", strJoin "\n" ["SRC ", show srcVal2, show entry, fileContents] ] , state ]
+--             ]
+--         , ["bindingSelect", bindingVal] |->
+--             guardInt bindingVal <| bindingVal2 =>
+--             (k : { [Any, WebIdeState] -> Io }) ->
+-- 
+--             let entry = listIndex bindingEntries bindingVal2;
+--             let [heap, henv, declsRb, state2] = 
+--                 match entry
+--                 [ [ _, _, _, [heap], henv] |=>
+--                     [heap, henv, [], state]
+--                 , [_, _, testDefn, [], _] |=>
+--                     let decls = fieldGetOrDefault testDefn "decls" "";
+--                     let declsAst = parseDeclsStr decls;
+--                     let expectVals : List Str = 
+--                         forFlatMap testDefn (["expectValue",[expr,val]] |=> expr);
+-- 
+--                     -- let [evListAst, _] = 
+--                     --     -- TODO ? define and use forFoldR
+--                     --     forEach (["ELit",[]]:Expr) (reverse expectVals) <| 
+--                     --     accum -> ev ->
+--                     --     [ ["EPair", parseExprStr ev, accum], [] ];
+--                         
+--                     let evListAst : Expr = 
+--                         ["EList", forMap expectVals parseExprStr, [] ];
+--                         
+-- 
+--                     let declsAst2 = append declsAst [ [["EVar", "_expect_"], evListAst] ];
+-- 
+--                     let [heap0, henv0] = graphReduceInit instantiateBuiltins;
+--                     let doGR = true;
+--                     let [heap1, henv1, declsRb1] = graphReduceDecls3 doGR [heap0, henv0, builtinDecls []];
+--                     let [heap2, henv2, declsRb2] = graphReduceDecls3 doGR [heap1, henv1, declsAst2];
+-- 
+--                     let state2 = state;
+--                     [heap2, henv2, declsRb2, state2]
+--                 ];
+--             let envStr = strCat <| for henv <| a -> strCat [show a, "\n"];
+--             let [_, heapStr] = heapStepper heap <|
+--                 heapDumpAll (for henv <| [name,addr] -> addr) <| indirects ->
+--                 let heapStr = strCat <| forMap (reverse indirects) <| a -> strCat [showIndirect a, "\n"];
+--                 heapDone (heapStr : Str);
+--             let heapStr2 = cast Any Str heapStr;
+--             let declsRbStr = strJoin "\n" <| map dtShowJoin <| map jsDisplayStmt <| cgDeclsJs cgExprJs declsRb;
+-- 
+--             k [ ["ok", "binding", envStr, heapStr2, declsRbStr], state2 ]
+--         , _ |=>
+--             (k : { [Any, WebIdeState] -> Io }) ->
+--             k [ ["fail", data], state ]
+--         ] <| [response, state2] ->
+--         let _ = debug ["POST", "Response", response];
+--         io2HttpRespond request [["content-type", "application/json"]] (show2 response) <| ->
+--         k state2
+--     , _ |=> 
+--         error ["unknown/unhandled http request method", method]
+--     ];
+-- 
+-- let runWebApp_webIde : Io = 
+--     io2GetArgs <| args ->
+--     match args
+--     [ [testFilename] |=>
+--         loadTestDefns4 testFilename <| testDefns ->
+--         let projFileNames : List Str = 
+--             listUniq <| concat <| concat <|
+--             for testDefns <| testDefn ->
+--             for testDefn <| testLine ->
+--             match testLine
+--             [ ["project", name] |=> [name] 
+--             , _ |=> []
+--             ];
+--         ioMap ( (projFilename: Str) ->
+--             (k :  { [Str,[Str,Project]] -> Io }) ->
+--             io2ReadFile projFilename <| projFileContents ->
+--             loadProject projFilename <| project ->
+--             k [projFilename, [projFileContents, project]]
+--         ) projFileNames <| projFileNameContents ->
+--         let _ = debug ["projFileNames", projFileNames];
+--         io2ReadFile testFilename <| testFileContents ->
+--         let wiTsTestFile : WiTsTestFile = ["TestFile", [testFilename], testFilename, testFileContents, scanFile testFilename testFileContents];
+--         let wiTsProject : WiTsProject = ["Project", projFileNames, "", ""];
+--         let [nextSrcEntryNum, tfSrcEntries1 : List (List WiSourceEntry)] = 
+--             forEach (0 : Int) testDefns <| num -> testDefn ->
+--             let name = fieldGetOrDefault testDefn "name" "<unknown>";
+--             let name2 = strCat [testFilename, " / ", name];
+--             let decls = fieldGetOrDefault testDefn "decls" "";
+--             let entry = [ num, name2, "Contents", decls, [], [] ];
+--             let nextNum = num + 1;
+--             let declsEntry = [nextNum, entry];
+--             let expectVals : List Str = 
+--                 forFlatMap testDefn (["expectValue",[expr,val]] |=> expr);
+--             let [nextNum2, expectEntries : List WiSourceEntry] = 
+--                 forEach (nextNum : Int) expectVals <| 
+--                 num -> expr ->
+--                 -- let name2 = strCat [name, " [ ", expr, " ]"];
+--                 let name3 = strCat [name2, " / ", expr];
+--                 [ num + 1, [num, name3, "Contents", expr, [], [] ] ];
+--             [ nextNum2, [entry ,, expectEntries] ];
+--         let tfSrcEntries : List WiSourceEntry = concat tfSrcEntries1;
+--         let [_, projSrcEntries1 : List (List WiSourceEntry)] = 
+--             forEach nextSrcEntryNum projFileNames <|
+--             num -> fileName ->
+--             -- let [contents, project] = lookup fileName projFileNameContents;
+--             -- let contents2 = match contents [ [] |=> "", [contents2] |=> contents2 ];
+--             let contentsProject = lookup fileName projFileNameContents;
+--             let [contents2, project] = match contentsProject [ [] |=> ["",[]], [contents2Proj] |=> contents2Proj ];
+--             -- let entry = [num, fileName, "Contents", contents2, [], []];
+--             let entry = [num, fileName, "Filename", fileName, [], []];
+--             let [nextNum, srcEntry : List (Maybe WiSourceEntry)] = 
+--                 forEach num project <|
+--                     num -> projectLine ->
+--                     match projectLine
+--                     [ ["source", srcFilename] |=>
+--                         let srcName = strCat [fileName, " / CODE / ", srcFilename];
+--                         [ num + 1, [ [num, srcName, "Filename", srcFilename, [], []] ] ]
+--                     , ["text", bindName, srcFilename] |=>
+--                         let srcName = strCat [fileName, " / TEXT / ", srcFilename];
+--                         [ num + 1, [ [num, srcName, "Filename", srcFilename, [], []] ] ]
+--                     , _ |=>
+--                         [num, []]
+--                     ];
+--             -- [num + 1, entry];
+--             [nextNum, concat srcEntry];
+--         let projSrcEntries = concat projSrcEntries1;
+--         let srcEntries : List WiSourceEntry = concat [ tfSrcEntries, projSrcEntries ];
+--         let wiTsSource : WiTsSource = [ "Source", srcEntries ];
+-- 
+--         let [nextBindingEntryNum, bindingEntries : (List WiBindingEntry)] = 
+--             forEach (0 : Int) testDefns <| num -> testDefn ->
+--             let name = fieldGetOrDefault testDefn "name" "<unknown>";
+--             let name2 = strCat [testFilename, " / ", name];
+--             let entry = [ num, name2, testDefn, [], [] ];
+--             let nextNum = num + 1;
+--             [ nextNum, entry ];
+--         -- let bindingEntries : List WiBindingEntry = concat bindingEntries1;
+--         let wiTsBinding : WiTsBinding = [ "Binding", bindingEntries ];
+-- 
+-- 
+-- 
+--         let initState : WebIdeState =
+--             [ wiTsTestFile, wiTsProject, wiTsSource, wiTsBinding ];
+--         runWebApp initState webIde
+--     , _ |=>
+--         error ["Usage: webide <test-filename>"]
+--     ];
+-- 
+-- 

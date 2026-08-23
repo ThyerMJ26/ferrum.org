@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>
+What is the motivation behind Ferrum?
+</title>
+<style>
+html { box-sizing: border-box; }
+*, *:before, *:after { box-sizing: inherit; }
+body { font-family: sans-serif; margin: auto; line-height: 1.5; }
+.s0 { display: flex; flex-direction: column; margin-block-end: 1em; max-width: 100ch; margin-left: calc(50% - 50ch); }
+.s1 { display: flex; flex-direction: column; margin-block-end: 1em; max-width: 100ch; margin-left: calc(50% - 50ch); }
+.s2 { margin-left: 4ch; text-indent: -4ch; }
+.s3 { margin-left: 4ch; text-indent: -2ch; }
+.s4 { text-indent: 4ch; }
+.s5 { text-indent: 0ch; }
+.s6 { max-width: 100ch; margin-top: 1ch; text-indent: 0ch; }
+.s7 { max-width: 100ch; margin-left: calc(50% - 50ch); }
+</style>
+</head>
+<body>
+<hr style='margin: 4ch'>
+<script type="module">
+import "/gen/site/page-reload.js"
+</script>
+<div style="margin-left: calc(50% - 50ch); width: 100ch;">
+<h1>
+What is the motivation behind Ferrum?
+</h1>
+</div>
+<div class="s1">
+<span class="s2">
+The Ferrum programming language exists to help reduce tedium in programming.
+</span>
+<span class="s3">
+Programming is all about reducing tedium in other domains, 
+</span>
+<span class="s3">
+but when it comes to reducing tedium in programming itself, 
+</span>
+<span class="s3">
+existing solutions always run out of steam, one way or another.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Many of the limits of existing solutions exist because:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+interpretive overhead is non-zero, and
+</li>
+<li class="s5">
+a fundamental tension exists between type-system expressability and decidability.
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Ferrum provides:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+a way to specialize away interpretive overhead, and
+</li>
+<li class="s5">
+an expressive type-system.
+</li>
+</ul>
+</span>
+<br>
+</div>
+<section class="s0">
+<h2>
+Meta-programming
+</h2>
+<div class="s1">
+<span class="s2">
+Many programming language have features that help support meta-programming.
+</span>
+<span class="s3">
+Examples include:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+templates,
+</li>
+<li class="s5">
+macros,
+</li>
+<li class="s5">
+reflection/introspection.
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Templates and macros can enable computations to be moved to compile-time.
+</span>
+<span class="s3">
+The benefit of this is faster execution at run-time.
+</span>
+<span class="s3">
+The drawback is that code now needs to be written differently depending on when it is to be run.
+</span>
+<span class="s3">
+This can be a problem if we want to use that same code at different times.
+</span>
+<span class="s3">
+If there are two implementations, they risk getting out of sync.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Consider a parser.
+</span>
+<span class="s3">
+A parser can be written in an interpretive style to interpret the rules in the grammar.
+</span>
+<span class="s3">
+If this interpretation is done in templates or macros, the resulting parser will run without interpretive overhead.
+</span>
+<span class="s3">
+The downside is that the parsing algorithm can now only be given a new grammar at compile-time.
+</span>
+<span class="s3">
+It would not be possible to write a diagnostic tool for use during grammar development which used the same parser implementation.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+The prospect of dynamic grammars may sound contrived.
+</span>
+<span class="s3">
+For a more concrete example, consider a parser for a binary format, such as an image or video file (or stream).
+</span>
+<span class="s3">
+Binary formats are often highly parameterized, for example, by colour depth.
+</span>
+<span class="s3">
+The header will contain the actualy parameters, the body then conforms to those parameters.
+</span>
+<span class="s3">
+Generating parsers for every possible parameterization may result in prohibitively large executables.
+</span>
+<span class="s3">
+Always consulting the parameters may result in prohibitively long execution time.
+</span>
+<span class="s3">
+Somewhere between the two is a tradeoff.
+</span>
+<span class="s3">
+But where may depend on external factors.
+</span>
+<span class="s3">
+For a diagnostic tool, flexability and universality is more important.
+</span>
+<span class="s3">
+For an embedded device, efficiency for a specific case is more important.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+For a format with a stable specification, multiple implementations is a workable solution.
+</span>
+<span class="s3">
+But this isn't ideal.
+</span>
+<span class="s3">
+Not all formats are stable, and even those that are don't typically start as such.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Is it possible to write the code once, independently of how we wish to use it later?
+</span>
+<span class="s3">
+We may wish to specialize the code to some subset of its parameters.
+</span>
+<span class="s3">
+We may wish to run the code on the backend or frontend, inside a database, or target a GPU, NPU, FPGA, or ASIC.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Why not capture all the fiddly details as data (for example as XML or JSON)?
+</span>
+<span class="s3">
+This is a common approach, used in many places.
+</span>
+<span class="s3">
+It starts off well, but fiddly details have an annoying habit of getting everywhere.
+</span>
+<span class="s3">
+The data format can become steadily more complex, and the numerous consumers of this format need to be kept in sync.
+</span>
+<span class="s3">
+What if we could write the code once and be done with it.
+</span>
+<span class="s3">
+Specialzing away functionality we don't need, and translating the result to whichever language we do need,
+</span>
+<span class="s3">
+will, in many cases, produce much the same code we would previously have had to write and maintain in multiple languages.
+</span>
+<br>
+</div>
+</section>
+<section class="s0">
+<h2>
+Data and Code
+</h2>
+<div class="s1">
+<span class="s2">
+Here are some quotes regarding the use of data and code.
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Show me the data, and I won't need the code:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+Fred Brooks: Show me your flowcharts and conceal your tables, and I shall continue to be mystified. Show me your tables, and I won’t usually need your flowcharts; they’ll be obvious.
+</li>
+<li class="s5">
+Rob Pike: Data dominates. If you’ve chosen the right data structures and organized things well, the algorithms will almost always be self-evident. Data structures, not algorithms, are central to programming.
+</li>
+<li class="s5">
+Linus Torvalds: Bad programmers worry about the code. Good programmers worry about data structures and their relationships.
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+The meaning is in the eye of the beholder:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+Alan Kay: What is "data" without an interpreter (and when we send "data" somewhere, how can we send it so its meaning is preserved?).
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Principle of least power:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+W3C: Choose the least powerful language suitable for a given purpose.
+</li>
+<li class="s5">
+Tim Berners-Lee: The less powerful the language, the more you can do with the data stored in that language.
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+So, which is best, data or code?
+</span>
+<span class="s3">
+When the relationship between data items is simple, the code is obvious.
+</span>
+<span class="s3">
+But data doesn't always stay simple.
+</span>
+<span class="s3">
+Imagine defining a questionaire definition language.
+</span>
+<span class="s3">
+Not all questions are relevant to all reponders, so we want a way to specify whether a question should asked or not.
+</span>
+<span class="s3">
+We could start by adding flags to questions to indicate which category of people they are relevant for.
+</span>
+<span class="s3">
+Before long, we might also add:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+Boolean operations on flags,
+</li>
+<li class="s5">
+numerical attributes and comparisons,
+</li>
+<li class="s5">
+references to previously asked questions (current or historical),
+</li>
+<li class="s5">
+a means of specifying repetition, if a question needs to be asked once for each occurence of something.
+</li>
+</ul>
+</span>
+<span class="s3">
+It's probably best not to immediately jump to adding a turing-complete language to a data format (principle of least power).
+</span>
+<span class="s3">
+But as more and more constructs get added, capturing the meaning of these constructs becomes more important.
+</span>
+<span class="s3">
+This can be more problematic if the format is being extended by different people at different times, each with a different partial understanding of future needs.
+</span>
+<span class="s3">
+If there are multiple consumers of the data format, extending the format can be problematic.
+</span>
+<span class="s3">
+For example, if the format needs to be extended, the ideal solution might be to modify an existing construct, but if this requires modifying code maintained by different teams or different companies, it might be more expedient to add a new construct.
+</span>
+<span class="s3">
+The need to capture the meaning of data, in some machine-readable and manipulable way is all too easy to overlook.
+</span>
+<br>
+</div>
+</section>
+<section class="s0">
+<h2>
+Code is Data
+</h2>
+<div class="s1">
+<span class="s2">
+Separating data from code makes it easier to use that same data with multiple code-bases.
+</span>
+<span class="s3">
+However, the code that consumes that data can also end up containing lots of problem-domain specific details that we shouldn't need to repeat.
+</span>
+<span class="s3">
+Just as it wouldn't make sense to directly write the same list of questions in multiple programming languages,
+</span>
+<span class="s3">
+we would ideally not write the code that consumes that data in multiple programming languages.
+</span>
+<span class="s3">
+Code is trivially data, as code is typically stored in text files.
+</span>
+<span class="s3">
+This doesn't make it amenable to maniplulation though.
+</span>
+<span class="s3">
+Ferrum is built on the premise that, the best way to manipulate problem-domain specific code, is to:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+Interpret it,
+</li>
+<li class="s5">
+specialize away the interpretive overhead, and
+</li>
+<li class="s5">
+translate the result to whichever language we need.
+</li>
+</ul>
+</span>
+<span class="s3">
+
+</span>
+<br>
+</div>
+</section>
+<section class="s0">
+<h2>
+Component-specific data and code
+</h2>
+<div class="s1">
+<span class="s2">
+Component-specific data includes things such as:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+Register-maps used by hardware and software to communicate,
+</li>
+<li class="s5">
+the names, positions and widths of fields within a protocol packet header,
+</li>
+<li class="s5">
+the names, positions and widths of fields within a image file/segment,
+</li>
+<li class="s5">
+the list of questions to ask in a survey.
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Component-specific code includes things such as:
+</span>
+<span class="s3">
+<ul class="s6">
+<li class="s5">
+The read/write sequences needed to work with a specific hardware device,
+</li>
+<li class="s5">
+the expected/permitted hardware responses (useful for generating testbenches, and possibly hardware too),
+</li>
+<li class="s5">
+the steps needed to construct and process protocol packets,
+</li>
+<li class="s5">
+the steps needed to reconstruct an image,
+</li>
+<li class="s5">
+the steps needed to determine which question to ask next.
+</li>
+</ul>
+</span>
+<br>
+</div>
+<div class="s1">
+<span class="s2">
+Component-specific data can be captured in JSON, or XML, or any of a number of widely supported formats.
+</span>
+<span class="s3">
+But what about component-specific code?
+</span>
+<span class="s3">
+What serves the purpose for code that JSON/XML serves for data?
+</span>
+<span class="s3">
+Ferrum aspires to be that language.
+</span>
+<span class="s3">
+Alternatively, a language that can be interpreted by Ferrum can be used.
+</span>
+<br>
+</div>
+</section>
+<section class="s0">
+<h2>
+Component-specific and application-specific code boundaries
+</h2>
+<div class="s1">
+<span class="s2">
+The application code connects everything together for a specific purpose.
+</span>
+<span class="s3">
+There are multiple ways of connecting software components together, each with different trade-offs.
+</span>
+<span class="s3">
+Concurrency needs to be handled, and there are multiple approaches.
+</span>
+<span class="s3">
+These differences make it harder to write component-specific code in a way that can be reused.
+</span>
+<span class="s3">
+To some extent, differences can be abstracted over.
+</span>
+<span class="s3">
+For example, should a component write its output to memory, or directly call the next component?
+</span>
+<span class="s3">
+We can have both, at the cost of an indirect function call.
+</span>
+<span class="s3">
+An indirect function call might not sound a great expense, but we also incur lost opportunities for optimizations.
+</span>
+<span class="s3">
+The (intended) Ferrum solution is to use effect-handlers and specialization.
+</span>
+<span class="s3">
+This makes it possible to keep component-specific code decoupled, but generate tightly-coupled code that intermingles code from multiple components.
+</span>
+<br>
+</div>
+</section>
+<hr style='margin: 4ch'>

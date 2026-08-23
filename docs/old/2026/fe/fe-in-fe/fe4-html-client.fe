@@ -1,0 +1,100 @@
+language ferrum/0.1
+
+
+-- TODO change Any to Data / DataN / FeDn / DateFe
+
+let HtmlRef = 
+    { ["Ref", Int]
+    | ["Id", Str]
+    };
+
+let HtmlStep = Rec <| Hs ->
+    { [ ["printLn", Any]                                 , []        -> Hs ]
+    | [ ["getElemProperty", Str, (List Str)]             , Any       -> Hs ]
+    | [ ["setElemProperty", Str, (List Str), Any]        , []        -> Hs ]
+    | [ ["fetch", Str, Str, (List {[Str, Str]}), Any]    , Any       -> Hs ]
+    | [ ["serverCall", Any]                              , Any       -> Hs ]
+    | [ ["serverCall2", Data]                            , Data      -> Hs ]
+    | [ ["createHtml", Html]                             , HtmlRef   -> Hs ]
+    | [ ["updateHtml", HtmlRef, Html]                    , []        -> Hs ]
+    | [ ["dropRef", HtmlRef]                             , []        -> Hs ]
+    | [ ["appendChild", HtmlRef, HtmlRef]                , []        -> Hs ]
+    | [ ["elemObjCall", HtmlRef, Str, (List Data)]       , Data      -> Hs ]
+    | [ ["replaceChildren", Str, (List Html)]            , []        -> Hs ]
+    | [ ["done", Any] ]
+    };
+
+let HtmlK : { Type -> Type } = T -> { T -> HtmlStep };
+let HtmlA : { Type -> Type } = T -> { (HtmlK T) -> HtmlStep };
+
+
+
+let printLn : { Any -> { [] -> HtmlStep } -> HtmlStep } =
+     output -> k ->
+    [ ["printLn", output], k];
+
+let getElemProperty : { Str -> (List Str) -> { Any -> HtmlStep } -> HtmlStep } =
+    elemId -> propPath -> k ->
+    [ ["getElemProperty", elemId, propPath], k];
+
+let setElemProperty : { Str -> (List Str) -> Any -> { [] -> HtmlStep } -> HtmlStep } =
+    elemId -> propPath -> value -> k ->
+    [ ["setElemProperty", elemId, propPath, value], k];
+
+let serverCall : { Any -> { Any -> HtmlStep } -> HtmlStep } =
+    reqData -> k ->
+    [ ["serverCall", reqData], k ];
+
+let serverCall2 : { Data -> { Data -> HtmlStep } -> HtmlStep } =
+    reqData -> k ->
+    [ ["serverCall2", reqData], k ];
+
+-- let domAppendTextNode : { Str -> Str -> { [] -> HtmlStep } -> HtmlStep } =
+--     parentId -> textContent ->
+--     [ ["domAppendTextNode", parentId, textContent], k];
+
+let createHtml : { Html -> { HtmlRef -> HtmlStep } -> HtmlStep } =
+    html -> k ->
+    [ ["createHtml", html], k];
+
+let updateHtml : { HtmlRef -> Html -> { [] -> HtmlStep } -> HtmlStep } =
+    ref -> html -> k ->
+    [ ["updateHtml", ref, html], k];
+
+let dropRef : { HtmlRef -> { [] -> HtmlStep } -> HtmlStep } =
+    htmlRef -> k ->
+    [ ["dropRef", htmlRef], k];
+
+let appendChild : { HtmlRef -> HtmlRef -> { [] -> HtmlStep } -> HtmlStep } =
+    parentRef -> childRef -> k ->
+    [ ["appendChild", parentRef, childRef], k];
+
+let elemObjCall : { HtmlRef -> Str -> (List Data) -> { Data -> HtmlStep } -> HtmlStep } =
+    htmlRef -> method -> args -> k ->
+    [ ["elemObjCall", htmlRef, method, args], k];
+
+let replaceChildren : { Str -> (List Html) -> { [] -> HtmlStep } -> HtmlStep } =
+    parentId -> childrenHtml -> k ->
+    [ ["replaceChildren", parentId, childrenHtml], k];
+
+let htmlStop : { Any -> HtmlStep } =
+    value ->
+    [ ["done", value] ];
+
+let htmlWhile = stepWhile HtmlStep;
+let htmlForEach = stepForEach HtmlStep;
+
+let htmlTryInt : { Any -> { [] -> HtmlStep } -> { Int -> HtmlStep } -> HtmlStep } =
+    a -> kFail -> kOkay ->
+    ifInt a 
+    [ a2 -> kOkay a2
+    , _ -> kFail [] -- TODO ? add diagnostic info in call ?
+    ];
+
+let htmlTryStr : { Any -> (HtmlK Nil) -> (HtmlA Str) } =
+    a -> kNo -> kYes ->
+    ifStr a 
+    [ a2 -> kYes a2
+    , _ -> kNo [] -- TODO ? add diagnostic info in call ?
+    ];
+

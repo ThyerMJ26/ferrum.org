@@ -1,0 +1,161 @@
+language ferrum/0.1
+
+
+-- let Env = List {[Str, Any]};
+let Eval = { Expr -> Env -> Any };
+
+-- TODO ? memoize lookup ?
+let lookupVar : { Str -> (List {[Any, Any]}) -> Any }
+    = v -> env0 ->
+    loop1 ( (env: List {[Any, Any]}) ->
+        ifNil env
+        [ [] -> error ["unknown variable", v]
+        , [[name,val],,env2] -> 
+            if (v==name)
+            [ -> break val
+            , -> continue env2
+            ]
+        ]
+    ) env0;
+
+let bindPat : { Expr -> Any -> Env }
+    = rec ( (bindPat: { Expr -> Any -> Env }) -> pat -> val ->
+    match pat
+    [ ["EVar", a] |=> [[a, val]]
+    , ["ELit", a] |=> 
+        if (a == val) [ -> [], -> error ["bindPat failed", a, val]]
+    , ["EAs", a, pat2] |=> 
+        append [[a, val]] (bindPat pat2 val)
+    , ["EList", [], []] |=> []
+    , ["EList", [], [listTail]] |=> bindPat listTail val
+    , ["EList", [elem,,elems], listTail] |=> 
+        match val 
+        [ [h,,t] |=>  append (bindPat elem h) (bindPat ["EList", elems, listTail] t)
+        , _ |=> error ["bindPat EList failed", val]
+        ]
+    , ["EType", term, ty] |=>
+        bindPat term val
+    , ["ETermBrackets", expr] |=>
+        bindPat expr val
+    , _ |=> error ["TODO bindPat", pat]
+    ]);
+
+let just = (a: A@Any) -> [a];
+let nothing = [];
+
+-- let appendMaybe : { A @ (Maybe (List Any)) -> B@(Maybe (List Any)) -> (Maybe (List {(Elem (Hd A))|(Elem (Hd B))})) } =
+let appendMaybe : { A @ (Maybe (List Any)) -> (Maybe (List (Elem (Hd A)))) -> (Maybe (List (Elem (Hd A)))) } =
+    (a: A @ (Maybe (List Any))) -> b ->
+    match [a, b]
+    [ [[a2], [b2]] |=>
+        just (append2 a2 b2)
+    , _ |=>
+        nothing
+    ];
+
+let tryBindPat : { Expr -> Any -> (Maybe Env) }
+    = rec ( (tryBindPat: { Expr -> Any -> (Maybe Env) }) -> pat -> val ->
+    match pat
+    [ ["EVar", a] |=> 
+        just [[a, val]]
+    , ["ELit", a] |=> 
+        if (a == val)
+        [ -> just []
+        , -> nothing
+        ]
+    , ["EAs", a, pat2] |=> 
+        match (tryBindPat pat2 val)
+        [ [] |=> nothing
+        , [env] |=>
+            just [ [a, val],, env]
+        ]
+    , ["EList", [], []] |=> 
+        if (val == [])
+        [ -> just []
+        , -> nothing
+        ]
+    , ["EList", [], [listTail]] |=> 
+        tryBindPat listTail val
+    , ["EList", [elem,,elems], listTail] |=> 
+        match val 
+        [ [h,,t] |=> 
+            appendMaybe (tryBindPat elem h) (tryBindPat ["EList", elems, listTail] t)
+        , _ |=> 
+            nothing
+        ]
+    , ["EType", term, ty] |=>
+        tryBindPat term val
+    , ["ETermBrackets", expr] |=>
+        tryBindPat expr val
+    , _ |=> 
+        error ["TODO tryBindPat", pat]
+    ]);
+
+-- TODO substitution based version
+let eval1 : { Expr -> Env -> Any }
+    = rec ( (eval:Eval)-> (expr: Expr) -> (env: Env) -> 
+    -- let _ = debug ["Eval", expr];
+    match expr
+    [ ["ELit", val] |=> val
+    , ["EApply",func,arg] |=> 
+        -- (castT (eval func env):Fun any any) (eval arg env)
+        let func1 = eval func env;
+        let func2 = castT func1 : { Any -> Any };
+        let arg2 = eval arg env;
+        func2 arg2
+    -- , ["EApply",func,arg] |=> env $? (castT (eval func env):Fun any any) (eval arg env)
+    , ["EPair",h,t] |=> [ eval h env,,eval t env ]
+    , ["EList", elems, []] |=> map ((elem: Expr) -> eval elem env) elems
+    , ["EList", elems, [listTail]] |=> appendTail (map ((elem: Expr) -> eval elem env) elems) (eval listTail env)
+    , ["EVar",name] |=>  lookupVar name env
+    , ["ELambda",argPat,body] |=> argVal -> eval body (append (bindPat argPat argVal) env)
+    -- , ["ELambda",argPat,body] |=> argVal -> env $? (eval body) (append (bindPat argPat argVal) env)
+    , ["ELambdaMaybe",argPat,body] |=> 
+        argVal -> 
+        match (tryBindPat argPat argVal)
+        [ [] |=>
+            nothing
+        , [env2] |=>
+            just (eval body (append env2 env))
+        ]
+    , ["ELets",decls, body] |=> 
+        let evalDecl = 
+            (env1 : Env) -> [letPat:Expr, exp:Expr] -> 
+            -- append (bindPat letPat (eval exp env1)) env1;
+            let env2 = (bindPat letPat (eval exp env1));
+            -- let _ = debug ["BOUND", map hd env2];
+            append env2 env1;
+        let env2 = foldl evalDecl env decls;
+        eval body env2
+    , ["EOper",opName,args] |=> 
+        let op = lookupVar opName env;
+        let argVals = map ((arg: Expr) -> eval arg env) args;
+        let apply = f -> a -> (castT f: {Any -> Any}) a;
+        -- let apply = f -> a -> (castT f) a;
+        let app = foldl apply op argVals;
+        -- let _ = debug ["EOper", args];
+        -- let _ = debug ["EOper", opName, argVals, app];
+        app
+    , ["ETypeBrackets", expr2] |=>
+        -- all type-brackets evaluate to Any for now
+        -- Any
+        "AnyType"
+    , ["ETermBrackets", expr2] |=>
+        eval expr2 env
+    , ["EType", term, ty] |=>
+        eval term env
+    , [tag,,_] |=> error ["eval1: missing case",tag," ",expr]
+    ] );
+
+
+let evalStr : { Str -> Any } =
+    input ->
+    -- debug2 ["evalStr/input", input] <| ->
+    let toks = scan input;
+    -- debug2 ["evalStr/toks", toks] <| ->
+    let ast = parseExpr toks;
+    -- debug2 ["evalStr/ast", ast] <| ->
+    let value = eval1 ast initEnv;
+    -- debug2 ["evalStr/value", value] <| ->
+    value;
+

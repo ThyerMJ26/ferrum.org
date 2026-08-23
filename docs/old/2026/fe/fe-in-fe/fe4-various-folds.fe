@@ -1,0 +1,147 @@
+language ferrum/0.1
+
+-- Haskell
+-- https://hackage.haskell.org/package/base-4.15.0.0/docs/Prelude.html
+-- http://www.zvon.org/other/haskell/Outputprelude/
+
+let hs_foldl : 
+    -- (a -> b -> a) -> a -> [b] -> a
+    { F @ { Void -> Void -> (Domain F)} -> (Domain F) -> (List (Domain (Codomain F))) -> (Domain F) } = 
+    -- { F @ { _ -> _ -> F ~ _ } -> F ~ _ -> (List (F _ ~ _)) -> F ~ }
+    -> error "TODO";
+
+let hs_foldr :
+    -- (a -> b -> b) -> b -> [a] -> b
+    { F @ { Void -> Void -> (Domain (Codomain F)) } -> (Domain (Codomain F)) -> (List (Domain F)) -> (Domain (Codomain F)) } = 
+    -> error "TODO";
+
+-- SML
+-- https://smlfamily.github.io/Basis/top-level-chapter.html
+
+let ml_foldl :
+    -- ('a*'b->'b)-> 'b -> 'a list -> 'b 
+    -- (a -> b -> b) -> b -> [a] -> b
+    { F @ { Void -> Void -> (Domain (Codomain F)) } -> (Domain (Codomain F)) -> (List (Elem (Domain F))) -> (Domain (Codomain F)) } = 
+    -> error "TODO";
+
+let ml_foldr :
+    --  ('a*'b->'b)-> 'b -> 'a list -> 'b 
+    --  (a -> b -> b) -> b -> [a] -> b 
+    { F @ { Void -> Void -> (Domain (Codomain F)) } -> (Domain (Codomain F)) -> (List (Domain F)) -> (Domain (Codomain F)) } = 
+    -> error "TODO";
+
+
+-- [ Folds ] --
+
+
+-- Haskell
+-- https://hackage.haskell.org/package/base-4.15.0.0/docs/Prelude.html
+-- http://www.zvon.org/other/haskell/Outputprelude/
+-- foldl : (a -> b -> a) -> a -> [b] -> a
+-- foldr : (a -> b -> b) -> b -> [a] -> b
+
+
+-- Agda
+-- https://github.com/agda/agda-stdlib/blob/master/src/Data/List/Base.agda
+-- foldl : (A → B → A) → A → List B → A
+-- foldr : (A → B → B) → B → List A → B
+-- https://github.com/UlfNorell/agda-prelude/blob/master/src/Prelude/List.agda
+-- foldl : (B → A → B) → B → List A → B
+-- foldr : (A → B → B) → B → List A → B
+
+-- SML
+-- https://smlfamily.github.io/Basis/top-level-chapter.html
+-- val foldl : ('a*'b->'b) -> 'b -> 'a list -> 'b 
+-- val foldr : ('a*'b->'b) -> 'b -> 'a list -> 'b 
+
+
+-- OCaml
+-- https://ocaml.org/api/List.html
+-- val fold_left  : ('a -> 'b -> 'a) -> 'a -> 'b list -> 'a
+-- val fold_right : ('a -> 'b -> 'b) -> 'a list -> 'b -> 'b
+
+
+-- Coq
+-- https://coq.inria.fr/distrib/current/stdlib/Coq.Lists.List.html
+-- (f : A -> B -> A) fold_left (l:list B) (a0:A) : A
+-- (f : B -> A -> A) (a0 : A) fold_right (l:list B) : A
+
+
+-- Reason/ML
+-- https://reasonml.github.io/api/List.html
+-- let fold_left  : ( ('a, 'b) => 'a , 'a , list('b) ) => 'a;
+-- let fold_right : ( ('a, 'b) => 'b , list('a) , 'b ) => 'b;
+
+
+-- F#
+-- https://fsharp.github.io/fsharp-core-docs/reference/fsharp-collections-listmodule.html
+-- let fold     : ('State -> 'T -> 'State) -> 'State -> 'T list -> 'State
+-- let foldBack : ('T -> 'State -> 'State) -> 'T list -> 'State -> 'State 
+
+
+-- Scala
+-- https://www.scala-lang.org/api/2.13.6/scala/collection/immutable/List.html
+-- def foldLeft  [B] (z: B) (op: (B, A) => B) : B
+-- def foldRight [B] (z: B) (op: (A, B) => B) : B
+
+
+-- Scheme
+-- https://srfi.schemers.org/srfi-1/srfi-1.html
+-- (fold       cons '() lis)   ; Reverse LIS.
+-- (fold-right cons '() lis)   ; Copy LIS.
+-- fold       : { { A -> B -> B } -> B -> (List A) -> B }
+-- fold-right : { { A -> B -> B } -> B -> (List A) -> B }
+
+
+-- how about
+-- let fold : { A @ (ListNonEmpty Any) -> F @ { (Hd A) -> (Elem (Tl A)) -> (Domain F) } -> (Domain F) }
+-- let sum = (nums: List Int) -> fold [0:Int,,nums] (a -> b -> a+b);
+
+-- or
+-- let forEach : { A @ Any -> B @ (List Any) -> F @ { A -> (Elem B) -> (Domain F) } -> (Domain F) }
+-- let forEach : { A @ Any -> B @ (List Any) -> F @ { A -> (Elem B) -> A } -> A }
+-- let sum = (nums: List Int) -> forEach (0:Int) nums (a -> b -> a+b);
+
+-- or
+-- let forEach : { A @ (List Any) -> B @ Any -> F @ { (Elem A) -> B -> (Domain (Codomain F)) } -> (Domain (Codomain F)) }
+-- let forEach : { A @ (List Any) -> B @ Any -> F @ { (Elem A) -> B -> B } -> B }
+-- let sum = (nums: List Int) -> forEach nums (0:Int) (a -> b -> a+b);
+
+
+
+
+-- [ Unfolds ] --
+
+-- Haskell
+-- https://hackage.haskell.org/package/base-4.15.0.0/docs/Data-List.html
+-- unfoldr :: (b -> Maybe (a, b)) -> b -> [a] 
+ 
+-- OCaml
+-- https://ocaml.org/api/Seq.html
+-- val unfold : ('b -> ('a * 'b) option) -> 'b -> 'a t
+ 
+-- F#
+-- https://fsharp.github.io/fsharp-core-docs/reference/fsharp-collections-listmodule.html
+-- let unfold: ('State -> ('T*'State) option) -> (state:'State) ->  'T list
+ 
+-- Scala
+-- https://www.scala-lang.org/api/2.13.6/scala/collection/immutable/List$.html
+-- def unfold [A, S] (init: S) (f: (S) => Option[(A, S)]) : List[A]
+
+
+-- how about ?
+-- let unfold : { S @ Any -> G @ { S -> Maybe [Any, S] } -> (List (Hd (Hd (Codomain G)))) }
+-- let while : { S @ Any -> R @ Any -> G @ { S -> R -> Maybe [S, R] } -> R }
+
+-- let while : { S @ Any -> S @ { S -> Maybe S } -> S }
+
+-- let genNums = n -> unfold ( n -> n >= 0 |- [n-1, n] ) n;
+-- let genNums = 
+--      max -> 
+--      while [0,[]] ( 
+--          [n, nums] -> n < max |- 
+--          [n+1, [n,,nums]] 
+--      ) 
+--      |> [_, result] -> result;
+
+

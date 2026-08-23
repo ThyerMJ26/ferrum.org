@@ -1,0 +1,919 @@
+language ferrum/0.1
+
+let vtRed = "\x1B[31m";
+let vtGreen= "\x1B[32m";
+let vtAttrReset = "\x1B[0m";
+
+-- temp work around for JSON.stringify generating invalid C string
+-- let vtRed = "x1B[31m";
+-- let vtGreen= "x1B[32m";
+-- let vtAttrReset = "x1B[0m";
+
+let tcResultLabel : { TcTag -> Str } =
+    tcTag ->
+    match tcTag
+    [ "TcOkay" |=> strCat [vtGreen, "Okay", vtAttrReset]
+    , "TcFail" |=> strCat [vtRed,   "Fail", vtAttrReset]
+    ];
+
+-- let tcResultLabel : { TcTag -> Str } =
+--     tcTag ->
+--     match tcTag
+--     [ "TcOkay" |=> "Okay"
+--     , "TcFail" |=> "Fail"
+--     ];
+
+let JsCode = Str;
+
+let ProjectCacheEntry = { [ Str, [HeapSnapshot, HEnvTy, JsCode, CgHandler, CghEnv] ] };
+let ProjectCache = List ProjectCacheEntry;
+
+
+let SchemaLine = { [Str, Type] };
+let schemaLineToType : { SchemaLine -> Type } =
+    [name2, Ty] -> { [ (Single name2), Ty ] };
+    -- [name2, Ty] -> { [ (singleT name2), Ty ] };
+
+let schemaToType : { (List SchemaLine) -> Type } =
+    schema0 -> 
+    loop1 ( [schema: List SchemaLine, result: Type] ->
+        match schema
+        [ [] |=>
+            break result
+        , [line,,schema2] |=>
+            let ty = schemaLineToType line;
+            continue [ schema2, { ty | result } ]
+        ]    
+    ) [ reverse schema0, Void ];
+
+let StrLoc = { [Str, Loc] };
+
+let testLineSchema = 
+    [ ["name", Str]
+    , ["language", Str]
+    , ["typeCheck", Str]
+    , ["project", Str]
+    , ["decls", StrLoc]
+    , ["expectValue", { [Str, Str] } ]
+    , ["expectType", { [Str, Str] } ]
+    , ["typeCheckOk", Str ]
+    , ["typeCheckDeclsOk", Str ]
+    , ["typeCheckFail", Str ]
+    , ["expectNumErrors", { [Str, Int] } ]
+    ];
+
+let TestLine = schemaToType testLineSchema;
+
+let TestDefn = List TestLine;
+
+let testLineDefaults : TestDefn = 
+    [ ["name", ""]
+    , ["language", ""]
+    , ["typeCheck", ""]
+    , ["typeCheckOk", ""]
+    , ["typeCheckDeclsOk", ""]
+    , ["typeCheckFail", ""]
+    , ["project", ""]
+    , ["decls", ["", nilLoc]]
+    ];
+
+
+-- let OneOf : { (List Str) -> Type } =
+--     x ->
+--     let [_, Result] = 
+--         while [x: List Str, Void: Type] <|
+--             [ [x1,,xs], Y] |=>
+--             [ xs, { (Single x1) | Y} ];
+--     Result;
+
+
+let evaluationModes = ["Direct", "InstRb", "InstGrRb", "InstGrRb2"];
+
+-- TODO ? define the type using the term, save writing the same list of modes in two places
+-- let EvaluationMode = Elem (Single evaluationModes);
+-- let EvaluationMode = Elem {evaluationModes:_};
+-- let EvaluationMode = OneOf evaluationModes;
+
+let EvaluationMode = 
+    { "Direct"     -- generate code directly.
+    | "InstRb"     -- instantiate, and then immediately readback the instantiated code, and generate code from this.
+    | "InstGrRb"   -- instantiate, graph reduce, readback, then generate code. for just decls, test-expression is evaluated via direct translation
+    | "InstGrRb2"  -- instantiate, graph reduce, readback, then generate code. for both declarations and the test-expression
+    -- TODO
+    | "InstTyRb"        -- instantiate, and type-check, then readback.
+    | "InstTyGrRb"      -- instantiate, and type-check, then graph-reduce decls and readback.
+    | "InstTyGr2Rb"     -- instantiate, and type-check, then graph-reduce decls+expr and readback.
+    };
+
+
+let tdLookup : { TestDefn -> TestDefn -> N @ Str -> (Hd (Tl { TestLine & [N, Any] })) } =
+    defaults -> td -> name ->
+    let mv1 = lookupAny name td;
+    match mv1
+    [ [vals] |=>
+        vals
+    , [] |=>
+        let mv2 = lookupAny name defaults;
+        match mv2
+        [ [vals] |=>
+            vals
+        , [] |=>
+            error ["unknown name", name, "expected one of", map hd defaults]
+        ]
+    ];
+
+
+let TestResult = 
+    { [ Str    -- test name
+      , Str    -- test expr
+      , Bool   -- ok
+      , Str    -- expected val/type/num-errors
+      , Str    -- actual   val/type/num-errors
+      ] };
+
+-- let convertStr : { Any -> Str } =
+--     arg ->
+--     ifStr arg
+--     [ arg2 -> 
+--         arg2
+--     , _ -> 
+--         -- error ["expected a strng, not", arg]
+--         ""
+--     ];
+
+
+-- let convertList : { C @ { Any -> Any } -> Any -> (List (Codomain C)) } =
+--     (convert: C @ { Any -> Any }) -> arg0 ->
+--     loop1 ( [arg, elems: List (Codomain C)] ->
+--         match arg
+--         [ [] |=> 
+--             break (reverse elems)
+--         , [a,,as] |=>
+--             continue [as, [convert a,,elems]]
+--         , _ |=>
+--             error ["expected a list, not", arg]
+--         ]
+--     ) [arg0, []];
+-- 
+-- -- let convertListListStr : { Any -> (List (List Str)) } =
+-- --     arg ->
+-- --     convertList (convertList convertStr) arg;
+-- 
+-- let convertListListListStr = 
+--     convertList (convertList (convertList convertStr));
+
+
+
+-- let convertExprStr : { Expr -> Str } =
+--     expr ->
+--     match expr
+--     [ ["ELit", datum] |->
+--         guardStr datum <| datumStr =>
+--         datumStr
+--     , _ => 
+--         -- error ["expected a strng, not", arg]
+--         ""
+--     ];
+
+let convertExprStrLoc : { ExprLoc -> StrLoc } =
+    [expr, loc] ->
+    match expr
+    [ ["ELit", datum] |->
+        guardStr datum <| datumStr =>
+        [datumStr, loc]
+    , _ => 
+        -- error ["expected a strng, not", arg]
+        ["", nilLoc]
+    ];
+
+-- let convertExprList : { C @ { Expr -> Any } -> Expr -> (List (Codomain C)) } =
+--     (convert: C @ { Expr -> Any }) -> expr ->
+--     match expr
+--     [ ["EList", elems, []] |=>
+--         map convert elems
+--     , _ =>
+--         error ["expected a list, not", expr]
+--     ];
+
+let convertExprListLoc : { C @ { ExprLoc -> Any } -> ExprLoc -> (List (Codomain C)) } =
+    (convert: C @ { ExprLoc -> Any }) -> [expr, loc] ->
+    match expr
+    [ ["EList", elems, []] |=>
+        map convert elems
+    , _ =>
+        error ["expected a list, not", expr]
+    ];
+
+-- let convertExprListListListStr = 
+--     convertExprList (convertExprList (convertExprList convertExprStr));
+
+let convertExprListListListStrLoc = 
+    convertExprListLoc (convertExprListLoc (convertExprListLoc convertExprStrLoc));
+
+
+-- let convertTestDefn : { (List (List Str)) -> TestDefn } =
+--     lines0 ->
+--     loop1 ( [lines: List (List Str), result: TestDefn ] ->
+--         match lines
+--         [ [] |=>
+--             break result
+--         , [line,,lines2] |=>
+--             match line
+--             [ ln @ ["name", name2] |=>
+--                 continue [lines2, [ln,,result]]
+--             , ln @ ["decls", decls2] |=>
+--                 let declsLine = ["decls", [decls2, nilLoc]];
+--                 continue [lines2, [declsLine ,, result]]
+--             , ln @ ["project", project2] |=>
+--                 continue [lines2, [ln,,result]]
+--             , ["expect", expect2, "value", value2,,_] |=>
+--                 continue [lines2, [["expectValue", [expect2, value2]],,result]]
+--             , ["expectValue", expect2, value2] |=>
+--                 continue [lines2, [["expectValue", [expect2, value2]],,result]]
+--             , ["expectType", expect2, value2] |=>
+--                 continue [lines2, [["expectType", [expect2, value2]],,result]]
+--             , ["typeCheck", value2] |=>
+--                 continue [lines2, [["typeCheck", value2] ,, result]]
+--             , ["typeCheckOk", value2] |=>
+--                 continue [lines2, [["typeCheckOk", value2] ,, result]]
+--             , ["typeCheckDeclsOk"] |=>
+--                 continue [lines2, [["typeCheckDeclsOk", ""] ,, result]]
+--             , ["typeCheckFail", value2] |=>
+--                 continue [lines2, [["typeCheckFail", value2] ,, result]]
+--             -- TODO numErrors is an integer, but so far everything has been encoded as a (List (List Str))
+--             -- , ["expectNumErrors", expect2, value2] |=>
+--             --     continue [lines2, [["expectNumErrors", [expect2, value2]],,result]]
+--             , _ |=>
+--                 continue [lines2, result]
+--             ]
+--         ]    
+--     ) [lines0, []];
+
+let convertTestDefnLoc : { (List (List StrLoc)) -> TestDefn } =
+    lines0 ->
+    loop1 ( [lines: List (List StrLoc), result: TestDefn ] ->
+        match lines
+        [ [] |=>
+            break <| reverse result
+        , [lineLoc ,, lines2] |=>
+            match lineLoc
+            [ [["decls", _], declsStrLoc] |=>
+                let declsLine = ["decls", declsStrLoc];
+                continue [lines2, [declsLine ,, result]]
+            , _ |=>
+                let line = forMap lineLoc <| [datum, loc] -> datum;
+                -- debug2 ["convertTestDefnLoc/line", line] <| ->
+                match line
+                [ ln @ ["name", name2] |=>
+                    -- debug2 ["convertTestDefnLoc/ln", ln] <| ->
+                    continue [lines2, [ln,,result]]
+                -- , ln @ ["decls", decls2] |=>
+                --     continue [lines2, [ln,,result]]
+                , ln @ ["project", project2] |=>
+                    continue [lines2, [ln,,result]]
+                , ["expect", expect2, "value", value2,,_] |=>
+                    continue [lines2, [["expectValue", [expect2, value2]],,result]]
+                , ["expectValue", expect2, value2] |=>
+                    continue [lines2, [["expectValue", [expect2, value2]],,result]]
+                , ["expectType", expect2, value2] |=>
+                    continue [lines2, [["expectType", [expect2, value2]],,result]]
+                , ["typeCheck", value2] |=>
+                    continue [lines2, [["typeCheck", value2] ,, result]]
+                , ["typeCheckOk", value2] |=>
+                    continue [lines2, [["typeCheckOk", value2] ,, result]]
+                , ["typeCheckDeclsOk" ,, _] |=>
+                    continue [lines2, [["typeCheckDeclsOk", ""] ,, result]]
+                , ["typeCheckFail", value2] |=>
+                    continue [lines2, [["typeCheckFail", value2] ,, result]]
+                -- TODO numErrors is an integer, but so far everything has been encoded as a (List (List Str))
+                -- , ["expectNumErrors", expect2, value2] |=>
+                --     continue [lines2, [["expectNumErrors", [expect2, value2]],,result]]
+                , _ |=>
+                    continue [lines2, result]
+                ]
+            ]
+        ]        
+    ) [lines0, []];
+
+
+-- let testDefnsFromExpr : { Expr -> (List TestDefn) } =
+--     expr ->
+--     panic ["TODO"];
+ 
+-- let rtCodeGen = cgExprJs;
+let rtCodeGen = cgExprJs_HPS;
+
+-- let rtCodeGen : { Decls -> CgHandler -> [(List JsStmt), CgHandler] } = 
+--     decls -> cgHandler -> 
+--     [cgExprJs_HPS decls, cgHandler];
+
+-- let rtCodeGenDecls = cgDeclsJs cgExprJs_HPS;
+-- TODO need to plumb through name-source, otherwise there is a risk of generating the same name twice, in the global-scope
+-- let rtCodeGenDecls = cgDeclsJs_HPS;
+
+-- let rtCodeGenDecls : { Decls -> CgHandler -> [(List JsStmt), CgHandler] } = 
+--     decls -> cgHandler -> 
+--     [cgDeclsJs_HPS decls, cgHandler];
+
+let rtCodeGenDecls : { CghEnv -> Decls -> CgHandler -> [(List JsStmt), CgHandler, CghEnv] } = 
+    env -> decls -> cgHandler -> 
+    cgDeclsJs_HPS2 env decls cgHandler;
+
+
+
+let dumpVarErrors : { (List VarCheckError) ->  [] } = 
+    varErrs ->
+
+    -- show all errors
+    -- let varErrs2 = varErrs;
+
+    -- only show VarUnknown errors
+    let varErrs2 = 
+        concat <|
+        forMap varErrs <| 
+        err @ [tag, loc, val] -> 
+        match tag
+        [ "VarUnknown" |=> 
+            okay <| err
+        , "VarShadow" |=> 
+            -- ignore shaddowing errors, they aren't really errors
+            fail
+        , _ |=>
+            error ["dumpVarErrors", "missing case", tag]
+        ];
+
+    let varErrMsgs = forMap varErrs2 <| [tag, loc, val] -> strCat ["    ", showLoc loc, " ", tag, " ", val];
+
+    ifNil varErrs2 
+    [ -> []
+    , _ -> 
+        let varErrMsg = strJoin "\n" ["VarErrors" ,, varErrMsgs];
+        debug varErrMsg
+    ];
+
+
+    -- let varErrMsg = strJoin "\n" ["VarErrors" ,, varErrMsgs];
+    -- let _ = ifNil varErrs2 [-> [], _ -> debug varErrMsg];
+    -- [];
+
+let runTest : { EvaluationMode -> ProjectCacheEntry -> TestDefn -> (List TestResult) } =
+    evalMode -> [_, [projHeapSnapshot, projEnv, projJsCode, cgHandler, cghEnv]] -> testDefn -> 
+    let doInstRb = (evalMode == "InstRb") || (evalMode == "InstGrRb") || (evalMode == "InstGrRb2");
+    let doGR = (evalMode == "InstGrRb") || (evalMode == "InstGrRb2");
+    let doGR2 = evalMode == "InstGrRb2";
+    let td = tdLookup testLineDefaults testDefn;
+    let [decls2, declsTE, declsLoc, declsHEnv, declsHeapSnapshot] = 
+        match (td "decls")
+        [ ["", _] |=> 
+            [ [], [], nilLoc, projEnv, projHeapSnapshot ]
+        , [declsStr, declsLoc] |=>
+            let decls : DeclLocs = parseDeclsLoc (scan declsStr);
+            let vcEnv = append vcInitEnv <| forMap cghEnv <| [name, _] -> name;
+            let [vcErrs, _] = varCheckDeclsLoc decls vcEnv;
+            let _ = dumpVarErrors vcErrs;
+            let heap = projHeapSnapshot [];
+            let [declsHeap, declsEnv, declsTE] = instDecls heap projEnv decls;
+            let declsEnv2 = append declsEnv projEnv;
+            if doInstRb
+            [ -> 
+                -- let [heap2, henv, decls2] = graphReduceDeclsLoc doGR [heap, projEnv, decls];
+                -- let henv2 = append henv projEnv;
+                let declAddrs = forMap declsEnv <| [name, [addr, _]] -> addr;
+                let heap2 = 
+                    if doGR
+                    [ ->
+                        graphReduceAddrs declAddrs declsHeap
+                    , ->
+                        declsHeap
+                    ];
+                -- debug2 ["runTest/readbackDecls"] <| ->
+                let [heap3, decls2] = readbackDecls heap2 projEnv declsEnv;
+                let [_, snapshot] = snapshotHeap heap3;
+                [ declsStripLoc decls2, declsTE, declsLoc, declsEnv2, snapshot ]
+            , ->
+              let [_, snapshot] = snapshotHeap declsHeap;
+              [ declsStripLoc decls, declsTE, declsLoc, declsEnv2, snapshot ]
+            ]
+        ];
+
+    let [declsJsAst, cgHandler2, cghEnv2] = rtCodeGenDecls cghEnv decls2 cgHandler;
+    let declsJsDts = map jsDisplayStmt declsJsAst;
+    let declsJsCode = strJoin "\n" <| map dtShowJoin declsJsDts;
+
+    let maxTcIters = 10;
+
+    let typeCheckTest : { Str -> { [Int,Int] -> Bool } -> TestResult } =
+        exprStr -> expectedErrsTest ->
+        let expr = parseExprLoc (scan exprStr);
+        let heap : Heap = declsHeapSnapshot [];
+        let [heap2, exprAddr, exprET] = instExpr heap declsHEnv expr;
+        let [heap3, tcResult] = doTypeCheckExpr heap2 maxTcIters exprET;
+        debug2 ["TypeCheck", tcResult] <| ->
+        let tcOkays = forFlatMap tcResult <| tc @ ["TcOkay", loc] |=> tc;
+        let numOkays = length tcOkays;
+        let tcErrors = forFlatMap tcResult <| tc @ ["TcFail", loc] |=> tc;
+        let numErrors = length tcErrors;
+        -- let ok = numErrors == 0;
+        let ok = expectedErrsTest [numOkays, numErrors];
+        let result1 = [td "name", exprStr, ok, show 0, show numErrors];
+        result1;
+
+    let typeCheckDecls : { -> (List TypeCheckResult) } = ->
+        let heap = declsHeapSnapshot [];
+        let [_, _, tcResults] = 
+            while [declsTE, heap, [] : List TypeCheckResult] <|
+            [ [[pat, defn] ,, decls], heap, results] |=>
+            let [heap, tcResultPat] = doTypeCheckExpr heap maxTcIters pat;
+            let [heap, tcResultDefn] = doTypeCheckExpr heap maxTcIters defn;
+            [decls, heap, concat [tcResultPat, tcResultDefn, results]];
+        reverse tcResults;
+
+
+
+    loop1 ( [lines: TestDefn, results: List TestResult] ->
+        match lines
+        [ [] |=>
+            break (reverse results)
+        , [line1,,lines2] |=>
+            -- debug2 ["Test Line", line1] <| ->
+            match line1
+            [ ["expectValue", [exprStr, expectValue]] |=>
+
+                let expr = parseExprLoc (scan exprStr);
+
+                let exprReduced = 
+                    if doGR2
+                    [ ->
+                        let heap : Heap = declsHeapSnapshot [];
+                        -- debug2 ["GR2", declsHEnv] <| ->
+                        -- let [_, expr2] = graphReduceExpr2 doGR [heap, declsHEnv, expr]; 
+                        let [heap2, exprAddr, exprET] = instExpr heap declsHEnv expr;
+                        let heap3 = graphReduceAddrs [exprAddr] heap2;
+                        -- debug2 ["runTest/readbackExpr"] <| ->
+                        let [heap4, expr2] = readbackExpr heap3 declsHEnv exprAddr;
+
+                        let expr1Str = pretty3Show (pfExpr 0 [] (exprStripLoc expr));
+                        let expr2Str = pretty3Show (pfExpr 0 [] (exprStripLoc expr2));
+
+                        -- debug2 ["Expr Reduced1", expr] <| ->
+                        debug2 ["Expr Reduced1"] <| ->
+                        debug2 expr1Str <| ->
+                        -- debug2 ["Expr Reduced2", expr2] <| ->
+                        debug2 ["Expr Reduced2"] <| ->
+                        debug2 expr2Str <| ->
+                        expr2
+                    , ->
+                        expr
+                    ];
+
+
+                let expr2JsCode = dtShowJoin (jsDisplayExpr (rtCodeGen cghEnv2 (exprStripLoc exprReduced)));
+                let jsCode = 
+                        strJoin "\n"
+                        [ "( () => {"
+                        , projJsCode
+                        , declsJsCode
+                        , "return ("
+                        , expr2JsCode
+                        , ") } ) ()"
+                        ];
+
+
+                let value = jsEvalMaybe jsCode;
+
+                -- let _ = debug ["runTest", exprStr, value];
+                let _ = debug ["runTest/input", exprStr];
+                -- let _ = debug ["runTest/expr", exprReduced];
+                let _ = debug ["runTest/value", value];
+
+
+                let result1 = 
+                    match value
+                    [ [] |=>
+                        [td "name", exprStr, false, expectValue, "JS CRASH"]
+                    , [val] |=>
+                        let value2 = 
+                            ifType val
+                            [ val2 -> 
+                                showType val2
+                            , val2 ->
+                                show2 val2
+                            ];
+                        let ok = value2 == expectValue;
+                        [td "name", exprStr, ok, expectValue, value2]
+                    ];
+                continue [lines2, [result1,,results]]
+
+            , ["expectType", [exprStr, expectType]] |=>
+
+                let expr = parseExprLoc (scan exprStr);
+
+                let heap : Heap = declsHeapSnapshot [];
+
+                let envTy = declsHEnv;
+                let [heap2, tyExpr] = calcExprType [heap, envTy, expr];
+
+                let tyValue = showExpr tyExpr;
+
+                let ok = tyValue == expectType;
+                let result1 = [td "name", exprStr, ok, expectType, tyValue];
+
+                continue [lines2, [result1,,results]]
+
+            , ["typeCheck", exprStr] |=>
+
+                let expr = parseExprLoc (scan exprStr);
+
+                let heap : Heap = declsHeapSnapshot [];
+
+                let [heap2, exprAddr, exprET] = instExpr heap declsHEnv expr;
+                let [heap3, tcResult] = doTypeCheckExpr heap2 10 exprET;
+
+                debug2 ["TypeCheck", tcResult] <| ->
+                let tcErrors = forFlatMap tcResult <| tc @ ["TcFail", loc] |=> tc;
+                let numErrors = length tcErrors;
+                let ok = numErrors == 0;
+                let result1 = [td "name", exprStr, ok, show 0, show numErrors];
+
+                continue [lines2, [result1,,results]]
+
+            , ["typeCheckOk",   exprStr] |=>
+                let result = typeCheckTest exprStr ([ok,fail] -> (fail == 0));
+                continue [lines2, [result ,, results]]
+            , ["typeCheckFail", exprStr] |=>
+                let result = typeCheckTest exprStr ([ok,fail] -> not (fail == 0));
+                continue [lines2, [result ,, results]]
+
+            , ["typeCheckDeclsOk",   exprStr] |=>
+                -- debug2 ["typeCheckDeclsOk", exprStr] <| ->
+                let tcResults = typeCheckDecls [];
+                -- let _ = forMap tcResults <| tcResult ->
+                --     debug2 ["TcDeclResult", tcResult] <| ->
+                --     []; 
+
+                let showTcError : { TypeCheckResult -> Str } =
+                    [tag, loc] ->
+                    let loc2 = locAdd declsLoc loc;
+                    let [filename, [line, col, _], [lineEnd, colEnd, _]] = loc2;
+                    -- strCat [tag, ": ", filename, ":", show line, ":", show col];
+                    let label = tcResultLabel tag;
+                    strCat 
+                    [ label, ": (", show line, ":", show col, " - ", show lineEnd, ":", show colEnd, ") "
+                    , filename, ":", show line, ":", show col, " - "
+                    , filename, ":", show lineEnd, ":", show colEnd
+                    ];
+
+                -- let showTcErrorMb : { TypeCheckResult -> (Maybe Str) } =
+                --     tcResult ->
+                --     match tcResult
+                --     -- [ ["TcFail", [filename, [line, col, _], _]] |=>
+                --     [ ["TcFail", loc] |=>
+                --         -- let loc2 = locAdd declsLoc loc;
+                --         -- let [filename, [line, col, _], _] = loc2;
+                --         -- yes <| strCat ["TcFail: ", filename, ":", show line, ":", show col]
+                --         yes <| showTcError tcResult
+                --     , _ |=>
+                --         no
+                --     ];
+
+                let tcResultMsg = strJoin "\n" <| ["TcDeclResult", show declsLoc ,, map show tcResults];
+                debug2 tcResultMsg <| ->
+                let tcResultMsg2 = strJoin "\n" <| ["TcDeclResult", show declsLoc ,, forMap tcResults showTcError];
+                debug2 tcResultMsg2 <| ->
+                -- continue [lines2, [result ,, results]]
+                continue [lines2, results]
+
+
+            , _ |=>
+                continue [lines2, results]
+            ]
+        ]
+    ) [testDefn, []];
+
+
+-- TODO print the results out nicely formatted
+-- TODO print the result totals / summary
+
+
+let loadTestDefns : { Str -> { (List TestDefn) -> Io } -> Io } =
+    filename -> returnK ->
+    readFile filename <| fileContents ->
+    let tdToks = scanFile filename fileContents;
+    -- TODO retain parsed token locations, so as to present error locations within "decls" relative to the whole file
+    let tdExp = parseExprLoc tdToks;
+    let testLines0 = convertExprListListListStrLoc tdExp;
+    -- debug2 ["TestDefn/testLines0", testLines0] <| ->
+    -- debug2 ["TestDefn/tdExp", tdExp] <| ->
+    -- let tdVal = eval1 tdExp []; 
+    -- let testLines = convertListListListStr tdVal;
+    let testDefns = map convertTestDefnLoc testLines0;
+    -- print testDefns <| _ ->
+    -- debug2 ["TestDefn/testDefns", testDefns] <| ->
+    let testNames = map ( (a: TestDefn) -> tdLookup testLineDefaults a "name") testDefns;
+    -- print testNames <| _ ->
+    debug2 ["TestDefn/testNames", testNames] <| ->
+    -- let testDefns3 = filter (a -> not (a==[])) testDefns;
+    returnK testDefns;
+
+let loadProjectViaCache : { (Maybe Str) -> EvaluationMode -> Str -> ProjectCache -> Str -> { [ ProjectCacheEntry, ProjectCache ] -> Io } -> Io } =
+    srcDirMb -> evalMode -> projFilename -> projCache -> testDir -> returnK ->
+    let doRb = (evalMode == "InstRb") || (evalMode == "InstGrRb") || (evalMode == "InstGrRb2");
+    let doInstRb = (evalMode == "InstRb") || (evalMode == "InstGrRb") || (evalMode == "InstGrRb2");
+    let doGR = (evalMode == "InstGrRb") || (evalMode == "InstGrRb2");
+    let initialDecls = builtinDecls[];
+    -- debug2 ["loadProjectViaCache", "srcDirMb", srcDirMb] <| ->
+    let initialDecls = 
+        ifNil srcDirMb
+        [ -> initialDecls
+        , [srcDir] -> [ [["EVar", "ferrumDir"], ["ELit", srcDir]] ,, initialDecls]
+        ];
+    let initialDeclsLoc = declsAddNilLoc initialDecls;
+    -- debug2 ["loadProjectViaCache", "initialDeclsLoc", initialDeclsLoc] <| ->
+    if (projFilename == "")
+    [ ->
+        let cgHandler = codeGenMk cghInitState;
+        let cghEnv = cghInitEnv : CghEnv;
+        let [initHeap, initHEnv] = graphReduceInit instantiateBuiltins;
+        let [declsHeap, declsEnv, declsTE] = instDecls initHeap initHEnv initialDeclsLoc;
+        let declsEnv2 = append declsEnv initHEnv;
+        let declAddrs = forMap declsEnv <| [name, [addr, _]] -> addr;
+        if doInstRb
+        [ -> 
+            let heap3 =
+                if doGR
+                [ ->
+                    graphReduceAddrs declAddrs declsHeap
+                , ->
+                    declsHeap
+                ];
+            -- debug2 ["loadProjectViaCache/readbackDecls"] <| ->
+            let [heap4, declsRb] = readbackDecls heap3 initHEnv declsEnv;
+            let [_, heapSnapshot] = snapshotHeap heap4;
+            returnK [["",[heapSnapshot, declsEnv2, "", cgHandler, cghEnv]], projCache]
+        , ->
+            let [_, heapSnapshot2] = snapshotHeap declsHeap;
+            returnK [["",[heapSnapshot2, declsEnv2, "", cgHandler, cghEnv]], projCache]
+        ]
+    , ->
+        let projFilename = pathJoin [testDir, projFilename];
+        match (lookup projFilename projCache)
+        [ [] |=>
+            loadProject projFilename <| projContents ->
+            -- let _ = debug ["PROJECT CONTENTS", projContents];
+            let projDir = pathBasename projFilename;
+            loadProjContents projDir projContents <| projDecls ->
+            -- let _ = debug ["PROJECT DECLS", projDecls];
+
+            let projDeclsLoc : List DeclLoc = concat projDecls;
+
+            let [vcErrs, _] = varCheckDeclsLoc projDeclsLoc vcInitEnv;
+            let _ = dumpVarErrors vcErrs;
+            
+            let projDecls1 : List Decl = declsStripLoc projDeclsLoc;
+            let [initHeap, initHEnv] = graphReduceInit instantiateBuiltins;
+            let decls = concat [initialDeclsLoc, projDeclsLoc];
+            let [declsHeap, declsEnv, declsTE] = instDecls initHeap initHEnv decls;
+            let declsEnv2 = append declsEnv initHEnv;
+
+            let [heap, henv, projDecls2] =
+                if doInstRb
+                [ ->
+                    -- let [heap2, henv, decls2] = graphReduceDeclsLoc doGR [initHeap, initEnv, decls];
+                    -- let henv2 = append henv initEnv;
+                    -- [heap2, henv2, decls2]
+
+                    let declAddrs = forMap declsEnv <| [name, [addr, _]] -> addr;
+                    let heap2 = graphReduceAddrs declAddrs declsHeap;
+                    -- debug2 ["loadProjectViaCache/readbackDecls"] <| ->
+                    let [heap3, declsRb] = readbackDecls heap2 initHEnv declsEnv;
+                    [heap3, declsEnv2, declsRb]
+
+                , ->
+                    -- TODO we need some representation of the projEnv, so as to make the var-checks work
+                    -- [heapMk [], [], projDecls1]
+                    [declsHeap, declsEnv2, projDecls1]
+                ];
+
+            let [_, hpSnapshot] = snapshotHeap heap;
+            
+            let cgHandler0 = codeGenMk cghInitState;
+            let [declsJs, cgHandler1, cghEnv2] = rtCodeGenDecls cghInitEnv projDecls1 cgHandler0;
+
+            let projJsCodePp3 = pretty3Show <| jsPretty3Stmts declsJs;
+            io2WriteFile "tmp-runtest-js-pp3.js" projJsCodePp3 <| ->
+            let projJsCode = projJsCodePp3;
+
+            let projCacheEntry : ProjectCacheEntry = [projFilename, [hpSnapshot, henv, projJsCode, cgHandler1, cghEnv2]];
+            let projCache2 : ProjectCache = [ projCacheEntry ,, projCache ];
+            returnK [projCacheEntry, projCache2]
+
+        , [ entry @ [hpSnapshot, henv, projJsCode, cgHandler, cghEnv] ] |=>
+            returnK [ [projFilename, entry], projCache]
+        ]
+    ];
+
+
+let runTestDefn : { (Maybe Str) -> EvaluationMode -> TestDefn -> ProjectCache -> Str -> { [ (List TestResult), ProjectCache ] -> Io } -> Io } =
+    srcDirMb -> evalMode -> td -> projCache -> testDir -> returnK -> 
+    let doGR = evalMode == "InstGrRb";
+
+    loadProjectViaCache srcDirMb evalMode (tdLookup testLineDefaults td "project") projCache testDir <| [proj, projCache2] ->
+
+    let testResults = runTest evalMode proj td;
+
+    returnK [testResults, projCache2];
+
+
+
+let printTestResults : { (List TestResult) -> { [] -> Io } -> Io } =
+    testResults -> returnK ->
+    ioMap ( (tr: TestResult) ->
+        print tr
+    ) testResults <| _ ->
+    ioMap ( (tr: TestResult) ->
+        let [name1, name2, ok, exp, act] = tr;
+        if ok
+        [ -> print (strJoin " " [ "      ", "PASSED", name1, name2 ])
+        , -> print (strJoin " " [ " ***  ", "FAILED", name1, name2 ])
+        ]
+    ) testResults <| _ ->
+    returnK [];
+    -- error "TODO";
+
+let TestSummary = { [Int, Int, Int] };
+
+let summariseTestResults : { (List TestResult) -> { TestSummary -> Io } -> Io } =
+    testResults -> returnK ->
+    ioLoop ( [trs: List TestResult, summary : TestSummary] ->
+        (kBreak : { TestSummary -> Io }) -> (kContinue : { [(List TestResult), TestSummary] -> Io }) ->
+        match trs
+        [ [] |=>
+            kBreak summary
+        , [[_,_,ok,_,_],,trs2] |=>
+            let [passed,failed,total] = summary;
+            if ok 
+            [ -> kContinue [trs2, [passed + 1  , failed      , total + 1]]
+            , -> kContinue [trs2, [passed      , failed + 1  , total + 1]]
+            ]
+        ]
+    ) [testResults, [0,0,0]] <| summary ->
+    returnK summary;
+
+let loadAndRunTests : { (Maybe Str) -> EvaluationMode -> Str -> Str -> { (List TestResult) -> Io } -> Io } =
+    srcDirMb -> evalMode -> testFilename -> testName -> returnK ->
+    loadTestDefns testFilename <| testDefns0 ->
+    io2Loop2B ( [testDefns: List TestDefn, projCache: ProjectCache, testResults: List TestResult] ->
+        (breakK: { (List TestResult) -> Io }) -> continueK ->
+        match testDefns
+        [ [] |=> breakK (reverse testResults) 
+        , [td,,tds] |=>
+            let tdName = tdLookup [] td "name";
+            -- if (tdName == "testCountNodes")
+            -- if true
+            if ((tdName == testName) || (testName == ""))
+            [ ->
+                print (strCat [" --- RUNNING TEST [ ", tdLookup [] td "name" ," ] --- "]) <| _ ->
+                let testDir = pathBasename testFilename;
+                runTestDefn srcDirMb evalMode td projCache testDir <| [testResult, projCache2] ->
+                print " --- TEST RESULT --- " <| _ ->
+                print testResult <| _ ->
+                continueK [ tds, projCache2, reverseOnto testResult testResults ]
+            , ->
+                print (strCat ["Test Skipped ", tdName]) <| _ ->
+                continueK [ tds, projCache, testResults ]
+            ]
+        ]
+    ) [testDefns0, [], []] <| testResults ->
+    printTestResults testResults <| _ ->
+    returnK testResults;
+
+
+let loadAndRunTests_single : { EvaluationMode -> Str -> Str -> { (List TestResult) -> Io } -> Io } =
+    evalMode -> testFilename -> testName -> returnK ->
+    loadAndRunTests evalMode testFilename testName returnK;
+
+let loadAndRunTests_all : { EvaluationMode -> Str -> { (List TestResult) -> Io } -> Io } =
+    evalMode -> testFilename -> returnK ->
+    loadAndRunTests evalMode testFilename "" returnK;
+
+-- let loadAndRunTests_all_Direct : { Str -> { (List TestResult) -> Io } -> Io } =
+--     testFilename -> returnK ->
+--     loadAndRunTests "Direct" testFilename "" returnK;
+
+
+-- let loadAndRunTests_single : { (Maybe Str) -> EvaluationMode -> Str -> Str -> { TestSummary -> Io } -> Io } =
+--     srcDirMb -> evalMode -> testFilename -> testName -> returnK ->
+--     loadAndRunTests srcDirMb evalMode testFilename testName <| results ->
+--     summariseTestResults results <| summary ->
+--     returnK summary;
+-- 
+-- let loadAndRunTests_all : { (Maybe Str) -> EvaluationMode -> Str -> { TestSummary -> Io } -> Io } =
+--     srcDirMb -> evalMode -> testFilename -> returnK ->
+--     loadAndRunTests srcDirMb evalMode testFilename "" <| results ->
+--     summariseTestResults results <| summary ->
+--     returnK summary;
+
+
+
+-- let runTestHeaderJsCode =
+--     [ "let rt = require ('../../langs/js/runtime/runtime2.js')"
+--     , "let _ = rt.primitives"
+--     , "", ""
+--     ];
+-- 
+-- let runTestHeaderJsCode2a =
+--     [ "let rt = (() => {"
+--     ];
+-- 
+-- let runTestHeaderJsCode2b =
+--     [ "return exports;  }) ()"
+--     , "let _ = rt.primitives"
+--     , "", ""
+--     ];
+
+-- let runTestFooterJsCode =
+--     [ "try {"
+--     , "  try {"
+--     , "    rt.ioDoPrim (v_runTestCmdLine);"
+--     , "  }"
+--     , "  catch (exc) {"
+--     , "    console.log('Exception:', exc)"
+--     , "  }"
+--     , "} finally {"
+--     , ""
+--     -- , "  console.log('\x07') // go beep at the end"
+--     -- , "  process.stdout.write('', () => { }) // make sure everything is written out"
+--     , "}"
+--     , "", ""
+--     ];
+
+
+
+-- let ifStrIn : { Str -> B @ (List Str) -> C @ [ (Elem B) -> Any, Str -> Any] -> (Codomain (Hd C)) | (Codomain (Hd (Tl C))) }
+--     = a -> (b : B @ (List Str)) -> ([cThen, cElse]) ->
+--     let result = while (b: { (List (Elem B)) | (Elem B) }) <|
+--         [b1,,bs] |=>
+--         ifEq a b1
+--         [ _ -> _ -> b1
+--         , _ -> _ -> bs
+--         ];
+--     ifStr result
+--     [ result2 ->
+--         cThen result2
+--     , result2 ->
+--         cElse a
+--     ];
+
+let readEvalMode : { Str -> (Maybe EvaluationMode) } =
+    evalMode ->
+    let [_, result] = 
+        while [evaluationModes: List EvaluationMode, []: Maybe EvaluationMode] <|
+            [ [em,, ems], _ ] |=>
+            if (evalMode==em)
+            [ -> [ [], [em] ]
+            , -> [ ems, [] ]
+            ];
+    result;
+
+
+let runTestCmd : { (Maybe Str) -> Str -> Str -> Str -> { [] -> Io } -> Io } = 
+    srcDirMb -> evalMode -> testFilename -> testName -> k ->
+    match (readEvalMode evalMode)
+    [ [] |=> 
+        error ["runTestCmd", "unknown evaluation mode", evalMode, "expected one of", evaluationModes]
+    , [evalMode2] |=> 
+        loadAndRunTests srcDirMb evalMode2 testFilename testName <| testResults ->
+        io2Print ["Test Results", testResults] <| _ ->
+        k []
+    ];
+    
+
+let runTestCmdLine : Io = 
+    io2GetArgs <| args ->
+    io2Print (["runTestCmdLine",,args]) <| _ ->
+
+    let [cmdOpts, cmdArgs] = parseOptions args;
+    let srcDirMbMb = lookupCmdLineOption "ferrumDir" cmdOpts;
+    let srcDirMb : Maybe Str =
+        match srcDirMbMb
+        [ [] |=> []
+        , [[]] |=> panic ["ferrumCmdLine:", "value required for --ferrumDir option"]
+        , [[val]] |=> [val]
+        ];
+
+    match cmdArgs
+    [ [testFilename] |=>
+        runTestCmd srcDirMb "Direct" testFilename ""
+    , [evalMode, testFilename] |=>
+        runTestCmd srcDirMb evalMode testFilename ""
+    , [evalMode, testFilename, testName] |=>
+        runTestCmd srcDirMb evalMode testFilename testName
+    , _ |=>
+        io2Print "Usage"
+    ] <| _ ->
+
+    -- TODO exit with number of passes/fails, so as to spot regressions when tests run tests
+    io2Exit 4;
+
+
+

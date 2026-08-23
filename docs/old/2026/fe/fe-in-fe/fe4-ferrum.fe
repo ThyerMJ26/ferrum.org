@@ -1,0 +1,238 @@
+language ferrum/0.1
+
+let genCmdLineCommand : { (Maybe Str) -> Str -> Str -> Str -> { Nil -> Io } -> Io } =
+    srcDirMb -> rtIoDoName -> funcName -> fileName -> k ->
+    ifNil srcDirMb
+    [ -> io2GetFerrumDir_orPanic
+    , [srcDir] -> (k : K @ { Str -> IoReqResp }) -> k srcDir
+    ] <| srcDir ->
+    -- io2GetFerrumDir_orPanic <| srcDir ->
+    -- let srcDir = "";
+    loadProjectViaCache srcDirMb "Direct" "fe4.proj.fe" [] srcDir <| [[_, [_, _, projJsCode, _, cghEnv]], _] ->
+    io2Print ["Project Code Length", strLen projJsCode] <| _ ->
+    let funcNameJs = 
+        match (cghLookupVar funcName cghEnv)
+        [ ["JsVar", name] |=> name
+        , _ |=> error "impossible"
+        ];
+    let fullJsCode = 
+        strJoin "\n" <| 
+        -- TODO -- [ "\"use strict\";"
+        -- [ js_runtime_text
+        [ ""
+        , "import * as rt from \"./gen/runtime-core.js\""
+        , "import * as rt_nodejs from \"./gen/runtime-nodejs.js\""
+        -- , "let rt = exports;"
+        -- , "let _ = rt.primitives"
+        , "const _ = { ...rt.primitives, ...rt_nodejs.primitives }"
+        , "", ""
+        , projJsCode
+        , "try {"
+        , "  try {"
+        ,      strCat ["    ", rtIoDoName, " (", funcNameJs ,");"]
+        , "  }"
+        , "  catch (exc) {"
+        , "    console.log('Exception:', exc)"
+        , "  }"
+        , "} finally {"
+        , ""
+        , "  rt_nodejs.flush()"
+        , "}"
+        , "", ""
+        ];
+    io2WriteFile fileName fullJsCode <| _ ->
+    k [];
+
+-- let ferrumFooterJsCode =
+--     [ "try {"
+--     , "  try {"
+--     , "    rt.ioDoPrim (v_ferrumCmdLine);"
+--     , "  }"
+--     , "  catch (exc) {"
+--     , "    console.log('Exception:', exc)"
+--     , "  }"
+--     , "} finally {"
+--     , ""
+--     -- , "  console.log('\x07') // go beep at the end"
+--     -- , "  process.stdout.write('', () => { }) // make sure everything is written out"
+--     , "  rt.jsio.flush()"
+--     , "}"
+--     , "", ""
+--     ];
+
+-- let feCodeGen : { Expr -> Str } = expr -> dtShowJoin (jsDisplayExpr (cgExprJs expr));
+let feCodeGen : { Expr -> Str } = expr -> dtShowJoin (jsDisplayExpr (cgExprJs_HPS [] expr));
+
+
+let ferrumCmdLine : Io =
+
+    io2GetArgs <| args ->
+
+    let options @ [globalOpts, cmd, cmdOpts, cmdArgs] = parseCmdLineArgs args;
+
+    io2Print ["OPTIONS", options] <| ->
+    io2Print ["  GLOBAL", globalOpts] <| ->
+    io2Print ["  CMD", cmd] <| ->
+    io2Print ["  OPTS", cmdOpts] <| ->
+    io2Print ["  ARGS", cmdArgs] <| ->
+
+    let projectMb = lookupCmdLineOption "project" globalOpts;
+    let srcDirMbMb = lookupCmdLineOption "ferrumDir" globalOpts;
+
+    let srcDirMb : Maybe Str =
+        match srcDirMbMb
+        [ [] |=> []
+        , [[]] |=> panic ["ferrumCmdLine:", "value required for --ferrumDir option"]
+        , [[val]] |=> [val]
+        ];
+
+    match projectMb
+    [ [] |=>
+        (k : { Str -> Io }) -> 
+        k ""
+    , [[]] |=>
+        (k : { Str -> Io }) -> 
+        k ""
+    , [[filename]] |=>
+        (k : { Str -> Io }) ->
+        loadProjectViaCache srcDirMb "Direct" filename [] "." <| [proj, _] ->    
+        let [_, [projHeapSnapshot, projEnv, projJsCode, cgHandler, cghEnv]] = proj;
+        k projJsCode
+    ] <| (projJsCode : Str) ->
+
+    let cmd2 = 
+        match cmd
+        [ [] |=>
+            error ["missing command"]
+        , [cmd2] |=> 
+            cmd2
+        ];
+
+    match [cmd2, cmdArgs]
+    [ ["eval", [arg1]] |=>
+        let argStr = arg1;
+        let _ = debug ["arg1", arg1];
+        let argExpr = parseExpr (scan argStr);
+        let argJsCode = feCodeGen argExpr;
+        let jsCode = strJoin "\n"
+            [ "( () => {"
+            , projJsCode
+            , "return ("
+            ,   argJsCode
+            , ") } ) ()"
+            ];
+        let argValueMb = jsEvalMaybe jsCode;
+        match argValueMb 
+        [ [] |=>
+            io2Print "Evaluation Failed"
+        , [argValue] |=>
+            let argShow = show2 argValue;
+            io2Print argShow
+        ]
+    , ["run",[arg1,,remainingArgs]] |=> 
+        let argStr = arg1;
+        let _ = debug ["arg1", arg1];
+        let argExpr = parseExpr (scan argStr);
+        let argJsCode = feCodeGen argExpr;
+        let jsCode = strJoin "\n"
+            [ "( () => {"
+            , projJsCode
+            , "rt_nodejs.ioDoPrim1 ("
+            ,    show remainingArgs
+            , ") ("
+            ,    argJsCode
+            , ") } ) ()"
+            ];
+        let argValueMb = jsEvalMaybe jsCode;
+        match argValueMb 
+        [ [] |=>
+            io2Print "Evaluation Failed"
+        , [argValue] |=>
+            let argShow = show2 argValue;
+            io2Print argShow
+        ]
+    , ["codegen",[arg1]] |=> 
+        let argStr = arg1;
+        let _ = debug ["arg1", arg1];
+        -- let argExpr = parseExpr (scan argStr);
+        -- let argJsCode = feCodeGen argExpr;
+        -- let jsCode = strJoin "\n"
+        --       [ "\"use strict\";"
+        --       , "let rt = (() => {"
+        --       , js_runtime_text
+        --       , "return exports;  }) ()"
+        --       , "let _ = rt.primitives"
+        --       , "", ""
+        --       , projJsCode
+        --       , "try {"
+        --       , "  try {"
+        --       , "    rt.ioDoPrim ("
+        --       ,         argJsCode
+        --       , "    );"
+        --       , "  }"
+        --       , "  catch (exc) {"
+        --       , "    console.log('Exception:', exc)"
+        --       , "  }"
+        --       , "} finally {"
+        --       , "  rt.jsio.flush()"
+        --       , "}"
+        --       , "", ""
+        --       ];
+        let outputFilename = 
+            match (lookupCmdLineOption "output-filename" cmdOpts)
+            [ []      |=> "tmp-ferrum-codegen-output.js"
+            , [[]]    |=> "tmp-ferrum-codegen-output.js"
+            , [[val]] |=> val
+            ];
+        -- io2WriteFile outputFilename jsCode
+        genCmdLineCommand srcDirMb "rt_nodejs.ioDoPrim" argStr outputFilename
+    , ["codegenAsync",[arg1]] |=> 
+        let argStr = arg1;
+        let _ = debug ["arg1", arg1];
+        -- let argExpr = parseExpr (scan argStr);
+        -- let argJsCode = feCodeGen argExpr;
+        -- let jsCode = strJoin "\n"
+        --       [ "\"use strict\";"
+        --       , "let rt = (() => {"
+        --       ,     js_runtime_text
+        --       , "return exports;  }) ()"
+        --       , "let _ = rt.primitives"
+        --       , "", ""
+        --       , projJsCode
+        --       -- , "try {"
+        --       -- , "  try {"
+        --       , "    rt.mkIoDoAsync (rt.jsio.args()) ("
+        --       ,         argJsCode
+        --       , "    );"
+        --       -- , "  }"
+        --       -- TODO add a catch/exception handler in the appropriate async way
+        --       -- , "  catch (exc) {"
+        --       -- , "    console.log('Exception:', exc)"
+        --       -- , "  }"
+        --       -- , "} finally {"
+        --       -- , "  rt.jsio.flush()"
+        --       -- , "}"
+        --       , "", ""
+        --       ];
+        let outputFilename = 
+            match (lookupCmdLineOption "output-filename" cmdOpts)
+            [ []      |=> "tmp-ferrum-codegen-output.js"
+            , [[]]    |=> "tmp-ferrum-codegen-output.js"
+            , [[val]] |=> val
+            ];
+        -- io2WriteFile outputFilename jsCode
+        genCmdLineCommand srcDirMb "rt_nodejs.mkIoDoAsyncFe(process.argv.slice(2))" argStr outputFilename
+    , ["runTest",_] |=> 
+        io2Print "TODO"
+    , _ |=>
+        error ["missing case / unhandled command", args]
+    ] <| _ ->
+    io2Exit 0;
+
+
+-- let simpleProgram : Io =
+--     io2Print "Hello" <| ->
+--     io2Print "World" <| ->
+--     io2Exit 0;
+
+

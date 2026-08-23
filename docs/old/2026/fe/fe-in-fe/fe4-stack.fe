@@ -1,0 +1,29 @@
+language ferrum/0.1
+
+-- ----
+-- Stack Object implementation
+-- ----
+
+let Stack = Rec ( S ->
+    { { ["push", Int] -> [S,[]]  }
+    & { ["pop"]       -> [S,Int] } 
+    } );
+
+let mkStack : { (List Int) -> R@(Domain Stack) -> Stack R }
+    = rec ( (mkStack: { (List Int) -> R@(Domain Stack) -> Stack R }) -> vals -> (req: R@(Domain Stack)) ->
+      objDispatch
+      [ [ "push", [val: Int] -> 
+          let stack2 = mkStack [val,,vals];
+          [stack2, []] 
+        ]
+      , [ "pop", [] -> 
+          match vals
+          [ [] |=> error "stack empty"
+          , [val,,vals2] |=>
+              let stack2 = mkStack vals2;
+              [stack2, val]
+          , _ |=> error ["oops", vals]
+          ]
+        ]  
+      ] req );
+

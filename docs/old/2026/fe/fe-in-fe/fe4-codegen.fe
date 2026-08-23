@@ -1,0 +1,266 @@
+language ferrum/0.1
+
+let JsStr = Str;
+
+let quoteAtomic : { Datum -> Str } = 
+    a ->
+    ifNil a
+    [ -> "null"
+    , _ -> show a
+    ];
+
+let isPrim : { Str -> Bool } = 
+    p ->
+    listAnyTrue initEnv <| [name, _] -> name == p;
+
+
+let cgPatVar : { Expr -> Str } = 
+    pat -> 
+    match pat
+    [ ["EVar", var] |=> 
+        if (isPrim var)
+        [ ->
+            if (isAlphanum var)
+            [ -> strCat ["_.", var]
+            , -> strCat ["_[", "\"var\"", "]"]
+            ] 
+        , -> strCat ["v_", var]
+        ]
+    , _ |=> error ["cgPatVar", "Error, expected EVar, not", pat]
+    ];
+
+let cgPatValue : { Expr -> Str } = 
+    rec <| (cg : { Expr -> Str }) -> 
+    pat -> 
+    match pat
+    [ ["EVar", var] |=> ""
+    , ["ELit", val] |=> quoteAtomic val
+    , ["EPair", h, t] |=> strCat ["[", cg h, ",", cg t, "]"]
+    , ["EList", elems, maybeTail] |=>
+        let tlCode = 
+            match maybeTail
+            [ [] |=> "null"
+            , [t] |=>
+                cg t
+            ];
+        let [_, result] = 
+            while [reverse elems : List Expr, tlCode : Str] <|
+            [[x,,xs], code] |=> [xs, strCat ["[", cg x, ",", code, "]"] ];
+        result
+
+    , ["EType", exp, ty] |=> cg exp
+    , ["EAs", pat2, exp] |=> cg exp
+    , ["ETermBrackets", exp] |=> cg exp
+    , _ |=> error ["missing case cgPatValue", pat]
+    ];
+
+-- generate the value part of a pattern, suitable for use in a call to rt.matchPat
+let cgPatValue2 : { Expr -> Str } =
+    expr ->
+    match (cgPatValue expr) 
+    [ "" |=> "undefined"
+    , pat |=> pat
+    ];
+
+-- generate the binding part of a pattern, suitable for the LHS of a let, or argument pos of a lambda
+let cgPatBind : { Expr -> Str } = 
+    rec <| (cg: { Expr -> Str }) -> 
+    pat -> 
+    match pat
+    [ ["EVar", "_"] |=> ""
+    , ["EVar", var] |=> cgPatVar pat
+    , ["ELit", val] |=> ""
+    , ["EPair", h, t] |=> strCat ["[", cg h, ",", cg t, "]"]
+    , ["EList", elems, maybeTail] |=>
+        let tlCode = 
+            match maybeTail
+            [ [] |=> ""
+            , [t] |=>
+                cg t
+            ];
+        let [_, result] = 
+            while [reverse elems : List Expr, tlCode : Str] <|
+            [[x,,xs], code] |=> [xs, strCat ["[", cg x, ",", code, "]"] ];
+        result
+
+    , ["EType", exp, ty] |=> cg exp
+    , ["EAs", name, exp] |=> strCat ["v_", name]
+    , ["ETermBrackets", exp] |=> cg exp    
+    , _ |=> error ["missing case cgPatBind", pat]
+    ];
+
+-- generate the assignments needed to bind nested as-patterns
+let cgPatStmt : { Expr -> (List Str) } = 
+    rec <| (cg: { Expr -> (List Str) }) -> 
+    pat -> 
+    match pat
+    [ ["EVar", var] |=> []
+    , ["ELit", val] |=> []
+    , ["EPair", h, t] |=> concat ([cg h, cg t]: List (List Str))
+    , ["EList", elems, maybeTail] |=>
+        let tlCode = 
+            match maybeTail
+            [ [] |=> []
+            , [t] |=>
+                cg t
+            ];
+        let [_, result] = 
+            while [reverse elems : List Expr, tlCode : List Str] <|
+            [[x,,xs], code] |=> [xs, append (cg x) code ];
+        result
+
+    , ["EType", exp, ty] |=> cg exp
+    , ["EAs", "", exp] |=> cg exp
+    , ["EAs", name, exp] |=> 
+        [ strCat ["let ", cgPatBind exp, " = v_", name, "; "]
+        ,, cg exp
+        ]
+    , ["ETermBrackets", exp] |=> cg exp
+    , _ |=> error ["missing case cgPatStmts", pat]
+    ];
+
+let cgPatStmts : { Expr -> Str } = 
+    pat -> 
+    let lines = cgPatStmt pat;
+    strCat ["\n", strJoin "\n" lines, "\n"];
+
+
+let cgPatMatch : { Str -> Expr -> Str } = 
+    name -> pat ->
+    match pat
+    [ ["ELit", []] |=> strCat [name, " === null"]
+    , _ |=> strCat ["rt.matchPat(", name, ",", cgPatValue pat, ")"]
+    ];
+
+
+let cgLet : { Str -> Str -> Str } =
+    pat -> defn ->
+    match pat
+    [ "" |=> strCat [                    defn, ";"]
+    , _  |=> strCat ["let ", pat, " = ", defn, ";"]
+    ];
+
+-- ---------
+-- Expression-oriented CodeGen
+-- ---------
+
+let cgExpr : { Expr -> Str } = 
+    rec <| (cg: { Expr -> Str }) -> 
+    expr -> 
+    match expr
+    [ ["EVar", "if"] |=> 
+        "_.if2"
+    , ["EVar", var] |=> 
+        cgPatVar expr
+    , ["ELambda", arg, body] |=> 
+        strCat ["(", cgPatBind arg, ") => {", cgPatStmts arg, "return ", cg body, "}"]
+    , ["ELambdaYes", arg, body] |=> 
+        strCat ["(", cgPatBind arg, ") => {", cgPatStmts arg, "return [", cg body, ",null]}"]
+    , ["ELambdaMaybe", arg, body] |=> 
+        strCat
+        [ "( v ) => {"
+        ,   "if (!("
+        ,     cgPatMatch "v" arg
+        ,   ")) return null;"
+        ,   cgLet (cgPatBind arg) "v"
+        ,   cgPatStmts arg
+        ,   "return (["
+        ,     cg body
+        ,   ",null])"
+        , "}"
+        ]
+
+    , ["ELambdaNo", arg, body] |=> 
+        strCat
+        [ "( v ) => {"
+        ,   "if (!("
+        ,     cgPatMatch "v" arg
+        ,   ")) return null;"
+        ,   cgLet (cgPatBind arg) "v"
+        ,   cgPatStmts arg
+        ,   "return ("
+        ,     cg body
+        ,   ")"
+        , "}"
+        ]
+
+
+    , ["EApply", ["EApply", ["EApply", ["EVar", "if"], c], t], f] |=>
+          strCat ["(", cg c, "?", cg t, ":", cg f, ")"]
+    , ["EApply", ["EApply", ["EVar", "&&"], a], b] |=> 
+        strCat ["(", cg a, "&&", cg b, ")"]
+    , ["EApply", ["EApply", ["EVar", "||"], a], b] |=> 
+        strCat ["(", cg a, "||", cg b, ")"]
+    , ["EApply", func, arg] |=> 
+        strCat ["((", cg func, ")(", cg arg, "))"]
+    , ["ELit", val] |=> 
+        quoteAtomic val
+    , ["EPair", h, t] |=> 
+        strCat ["[", cg h, ",", cg t, "]"]
+    , ["ELets", letDecls, letExpr] |=> 
+          let declsStr = strCat <|
+              forMap letDecls <| [pat, exp] -> 
+              -- TODO avoid generating "let  = v" strings, need to check for trivial non-binding patterns
+              -- strCat ["let ", cgPatBind pat, " = ", cg exp, ";", cgPatStmts pat];
+              strCat [cgLet (cgPatBind pat) (cg exp), cgPatStmts pat];
+          let exprStr = cg letExpr;
+          strCat ["(()=>{", declsStr, "return ", exprStr, "})()"]
+    , ["EType", exp, ty] |=> 
+        cg exp
+    , ["ETermBrackets", exp] |=>
+        strCat ["(", cg exp, ")"]
+    , ["ETypeBrackets", ty] |=>
+        "_.Type"
+    , ["EOper", "|=", [a, b]] |=>
+        strCat ["((", cg a, ") ? [", cg b, ", null] : null)"]
+    , ["EOper", "|-", [a, b]] |=>
+        strCat ["((", cg a, ") ? ", cg b, " : null)"]
+    -- , ["EOper", "^", [a, b]] |=>
+    --     strCat ["(", cg a, "+", cg b, ")"]
+    , ["EOper", opName, [a, b]] |=>
+        strCat ["(", cg a, opName, cg b, ")"]
+    , ["EOper", opName, [a]] |=>
+        strCat ["(", opName, " (", cg a, "))"]
+    , ["EList", elems, tailMb] |=>
+        let tlCode = 
+            match tailMb
+            [ [] |=> "null"
+            , [t] |=>
+                cg t
+            ];
+        let [_, result] = 
+            while [reverse elems : List Expr, tlCode : Str] <|
+            [[x,,xs], code] |=> [xs, strCat ["[", cg x, ",", code, "]"] ];
+        result
+            
+    , _ |=> error ["cgExpr", show(expr)]
+    ];
+
+
+
+let evalJsCgExpr : { Expr -> Any } = 
+    expr -> 
+    jsEval (cgExpr expr);
+
+let cgDeclsJsStr : { Decls -> Str } =
+    decls ->
+    let declsStr = 
+        strCat <|
+        forMap decls <| [pat, exp] -> 
+        strCat ["let ", cgPatBind pat, " = ", cgExpr exp, ";", cgPatStmts pat, "\n"];
+    declsStr;
+    
+
+
+-- utility --
+
+
+
+let splitFuncBody : { Expr -> [(List Expr), Expr] } = 
+    expr ->
+    let [args, body] = 
+        while [ []: List Expr, expr ] <|
+            [ args, ["ELambda", arg, body] ] |=>
+                [ [arg,, args], body ];
+    [ reverse args, body ];
+

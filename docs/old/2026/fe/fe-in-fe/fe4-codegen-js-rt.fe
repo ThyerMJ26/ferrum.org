@@ -1,0 +1,856 @@
+language ferrum/0.1
+
+let jsRuntimeSrc = 
+  """
+    function createJsRuntime () {
+        // least fixed-point combinator
+        // TODO ? implement thhis in a stack-free way ?
+        //let fix = (f) => (x) => (call(call(f, call(fix, f)), x))
+        //let fix = (f) => (x) => f(fix(f))(x)
+        let fix = (f) => (x) => {
+            let f2
+            if (f.length === 1) {
+                f2 = f(fix(f))
+            }
+            else {
+                f2 = f.bind(null, fix(f))
+            }
+            if (f2.length == 1) {
+                return f2(x)
+            }
+            else {
+                return f2.bind(null, x)
+            }
+        }
+        
+        let loop = (f) => (x) => {
+            let [tag, value] = f(x)
+            while (tag === 'continue') {
+                [tag, value] = f(value)
+            }
+            assert(tag === 'break')
+            return value
+        }
+        
+        let primContinue = (value) => (['continue', value])
+        let primBreak = (value) => (['break', value])
+        
+        let grLoop = (v) => (f) => {
+            let [tag, value] = v
+            while (tag === 'continue') {
+                [tag, value] = f(value)
+            }
+            assert(tag === 'break')
+            return value
+        }
+        
+        let grWhile = (a) => (b) => (f) => {
+            while (a !== null) {
+                b = a[0]
+                a = f(b)
+            }
+            return b
+        }
+        
+        
+        let primJsEval = (input) => {
+        
+            let standaloneHeader = [
+                `let rt = require ("../../langs/js/runtime/runtime2.js")`,
+                `let p = rt.primitives`,
+                `let func7 = function(rt, _) {`
+            ]
+            let standaloneFooter = [
+                `}`,
+                `let result7 = func7(rt, p)`,
+                `console.log(JSON.stringify(result7))`,
+                "", ""
+            ]
+        
+        
+            // console.log("JS EVAL", input)
+            let fnCode7 = `return (${input});\n`
+        
+            let standalone = [].concat(standaloneHeader, [fnCode7], standaloneFooter).join("\n")
+        
+            // fs.writeFileSync(`tmp-gen-primJsEval.js`, fnCode7)
+            // fs.writeFileSync(`tmp-gen-primJsEval.js`, standalone)
+            jsrt.writeFile(`tmp-gen-primJsEval.js`, standalone)
+        
+            // fs.appendFileSync(`tmp-gen-primJsEval.js.log`, "\n\n\n// <<<#######################>>> \n")
+            // fs.appendFileSync(`tmp-gen-primJsEval.js.log`, `\n// Stats: bytes: ${fnCode7.length} lines: ${fnCode7.split("\n").length} \n\n\n`)
+            // fs.appendFileSync(`tmp-gen-primJsEval.js.log`, "\n// <<<#######################>>> \n\n\n")
+            // fs.appendFileSync(`tmp-gen-primJsEval.js.log`, fnCode7)
+        
+            let func7 = new Function('rt', '_', fnCode7)
+            // let rt = require("../../../langs/js/runtime/runtime.js")
+            // let p = Object.keys(rt.prims2).reduce((p1, name) => { p1[name] = rt.getRawValue(rt.prims2[name]); return p1 }, {})
+        
+        
+            // let rt = require("../../../langs/js/runtime/runtime2.js")
+            // let rt = exports
+        
+            let p = rt.primitives
+            let result7 = func7(rt, p)
+            return result7
+        }
+        
+        let primJsEvalMaybe = (input) => {
+            let result
+            try {
+                result = primJsEval(input)
+            }
+            catch (exc) {
+                console.log("JsEvalMaybe Crash", exc)
+                return null
+            }
+            return [result, null]
+        }
+        
+        // unsafePerformIO
+        let ioRun = (f) => {
+            // return f._(['THE', 'WORLD'])
+            return f(['THE', 'WORLD'])
+        }
+        exports.ioRun = ioRun
+        
+        let ioWriteFile = (filename) => (contents) => (world) => {
+            // fs.writeFileSync(filename, contents);
+            jsrt.writeFile(filename, contents);
+            return [null, world]
+        }
+        exports.ioWriteFile = ioWriteFile
+        
+        let ioReadFile = (filename) => (world) => {
+            // let contents = fs.readFileSync(filename, "ascii");
+            let contents = jsrt.readFile(filename);
+            return [contents, world]
+        }
+        exports.ioReadFile = ioReadFile
+        
+        // let argv = process.argv.slice(1);
+        let argv = jsrt.args(2);
+        
+        let ioArgV = (world) => {
+            let args = argv;
+            let args2 = null
+            args.reverse().forEach(arg => {
+                args2 = [arg, args2]
+            })
+            return [args2, world]
+        }
+        exports.ioArgV = ioArgV
+        
+        let ioSetArgV = (value) => (world) => {
+            argv = []
+            while (Array.isArray(value)) {
+                argv.push(value[0])
+                value = value[1]
+            }
+            return [null, world]
+        }
+        exports.ioSetArgV = ioSetArgV
+        
+        let ioPrint = (contents) => (world) => {
+            console.log(contents);
+            // fs.appendFileSync("tmp-print.txt", contents, "ascii");
+            // fs.appendFileSync("tmp-print.txt", "\n\n", "ascii");
+            jsrt.appendFile("tmp-print.txt", contents, "ascii");
+            jsrt.appendFile("tmp-print.txt", "\n\n", "ascii");
+            return [null, world]
+        }
+        exports.ioPrint = ioPrint
+        
+        
+        let ioDoPrim = (rr) => {
+            let result = 0
+            let resp
+            while (true) {
+                let [req, [respH, _]] = rr
+                switch (req[0]) {
+                    case "readFile": {
+                        let [filename] = req[1]
+                        // console.log(`IO Read ${req[1][0]}`)
+                        // resp = fs.readFileSync(filename, "ascii");
+                        resp = jsrt.readFile(filename);
+                        console.log(`IO Read ${req[1][0]} ${JSON.stringify(resp).slice(0, 80)}`)
+                        break
+                    }
+                    case "writeFile": {
+                        let [filename, [contents]] = req[1]
+                        // console.log(`IO Write ${req[1][0]} ${req[1][1][0]}`)
+                        console.log(`IO Write ${filename} ${JSON.stringify(contents).slice(0, 80)}`)
+                        // fs.writeFileSync(filename, contents);
+                        jsrt.writeFile(filename, contents);
+                        resp = null
+                        break
+                    }
+                    case "print": {
+                        //console.log(`IO Print ${req[1][0]}`)
+                        // console.log(`IO Print ${JSON.stringify(req[1][0])}`)
+                        console.log(`IO Print ${showValueFerrum2(req[1][0])}`)
+                        resp = null
+                        break
+                    }
+                    case "getArgs": {
+                        // let argv = process.argv.slice(2);
+                        let argv = jsrt.args(2);
+                        resp = null
+                        argv.reverse().forEach(arg => {
+                            resp = [arg, resp]
+                        })
+                        console.log(`IO GetArgs ${JSON.stringify(resp)}`)
+                        break
+                    }
+                    case "done":
+                    case "exit": {
+                        console.log(`IO Exit ${JSON.stringify(req[1][0])}`)
+                        result = req[1][0]
+                        break
+                    }
+                    default:
+                        throw new Error(`unknown IO request (${req[0]})`)
+                }
+                if (respH === null) {
+                    break
+                }
+                rr = respH(resp)
+            }
+            return result
+        }
+        exports.ioDoPrim = ioDoPrim
+        
+        
+        // TODO ? don't supply initial contents of list
+        // let primMkArrayFastAccessSlowCopy = (ty) => {
+        let primMkArrayFastAccessSlowCopy = (ty) => (elems1) => {
+                let elems = []
+            while (elems1 instanceof Array) {
+                elems.push(elems1[0])
+                elems1 = elems1[1]
+            }
+            let array = primMkArrayFastAccessSlowCopy2(elems)
+            return array
+        }
+        
+        let primMkArrayFastAccessSlowCopy2 = (elems) => (req) => {
+            let elems2
+            let result
+            // console.log("primArray request", JSON.stringify(req))
+            switch (req[0]) {
+                case "length": {
+                    elems2 = elems
+                    result = elems.length
+                    break
+                }
+                case "get": {
+                    let pos = req[1][0]
+                    elems2 = elems
+                    result = elems[pos]
+                    break
+                }
+                case "set": {
+                    let pos = req[1][0]
+                    let val = req[1][1][0]
+                    elems2 = [...elems]
+                    elems2[pos] = val
+                    result = null
+                    break
+                }
+                case "extend": {
+                    let elems3 = req[1][0]
+                    let elems4 = []
+                    while (elems3 instanceof Array) {
+                        elems4.push(elems3[0])
+                        elems3 = elems3[1]
+                    }
+                    elems2 = [...elems, ...elems4]
+                    result = null
+                    break
+                }
+                case "slice": {
+                    let newArrayElems = elems.slice(req[1][0], req[1][1][0])
+                    result = primMkArrayFastAccessSlowCopy2(newArrayElems)
+                    break
+                }
+                case "snapshot": {
+                    let newArrayElems = elems.slice(0, elems.length)
+                    result = (nil) => primMkArrayFastAccessSlowCopy2(newArrayElems, [0])
+                    break
+                }
+        default:
+                    throw new Error(`unknown Array request (${req[0]})`)
+            }
+            // console.log("primArray response", JSON.stringify(result))
+            let array = primMkArrayFastAccessSlowCopy2(elems2)
+            return [array, [result, null]]
+        }
+        
+        // TODO ? don't supply initial contents of list
+        // let primMkArrayFastAccessNoCopy = (ty) => {
+        let primMkArrayFastAccessNoCopy = (ty) => (elems1) => {
+            let elems = []
+            while (elems1 instanceof Array) {
+                elems.push(elems1[0])
+                elems1 = elems1[1]
+            }
+            let seqId = [0]
+            let array = primMkArrayFastAccessNoCopy2(elems, seqId)
+            return array
+        }
+        
+        let primMkArrayFastAccessNoCopy2 =
+            (elems, seqId) => {
+                let seqId2 = seqId[0];
+                return (req) => {
+                    if (seqId2 !== seqId[0]) {
+                        throw new Error(`Runtime Error: stale array referece (${seqId2}) expected (${seqId[0]})`)
+                        // console.log(`Runtime Error: stale array referece (${seqId2}) expected (${seqId[0]})`)
+                    }
+                    // update the sequential counter for all operations ?
+                    // or just mutating changes ?
+                    seqId[0] += 1
+                    let elems2
+                    let result
+                    // console.log("primArrayNo request", JSON.stringify(req))
+                    switch (req[0]) {
+                        case "length": {
+                            elems2 = elems
+                            result = elems.length
+                            break
+                        }
+                        case "get": {
+                            let pos = req[1][0]
+                            elems2 = elems
+                            result = elems[pos]
+                            break
+                        }
+                        case "set": {
+                            // seqId[0] += 1
+                            let pos = req[1][0]
+                            let val = req[1][1][0]
+                            elems2 = [...elems]
+                            elems2[pos] = val
+                            result = null
+                            break
+                        }
+                        case "extend": {
+                            // seqId[0] += 1
+                            let elems3 = req[1][0]
+                            let elems4 = []
+                            while (elems3 instanceof Array) {
+                                elems4.push(elems3[0])
+                                elems3 = elems3[1]
+                            }
+                            elems2 = [...elems, ...elems4]
+                            result = null
+                            break
+                        }
+                        case "slice": {
+                            let newArrayElems = elems.slice(req[1][0], req[1][1][0])
+                            elems2 = elems
+                            result = primMkArrayFastAccessNoCopy2(newArrayElems, [0])
+                            break
+                        }
+                        case "snapshot": {
+                            let newArrayElems = elems.slice(0, elems.length)
+                            elems2 = elems
+                            result = (nil) => primMkArrayFastAccessNoCopy2(newArrayElems, [0])
+                            break
+                        }
+                        default:
+                            throw new Error(`unknown Array request (${req[0]})`)
+                    }
+                    // console.log("primArrayNo response", JSON.stringify(result))
+                    let array = primMkArrayFastAccessNoCopy2(elems2, seqId)
+                    return [array, [result, null]]
+                }
+            }
+        
+        
+        function ePair(h, t) {
+            return node([h, t])
+        }
+        exports.ePair = ePair
+        
+        function node(value) {
+            return { value: value, indirect: null }
+        }
+        exports.node = node
+        
+        function derefNode(node) {
+            while (node.indirect !== null) {
+                node = node.indirect
+            }
+            return node.value
+        }
+        exports.derefNode = derefNode
+        
+        function evalNode(node) {
+            var nodes = []
+            while (node.indirect !== null) {
+                nodes.push(node)
+                node = node.indirect
+            }
+            while (node.value instanceof Function && node.value.length === 0) {
+                var node2 = node.value()
+                if (node2 instanceof Function || node2 === undefined) {
+                    var node2 = node.value()
+                    // throw "error"
+                }
+                node.indirect = node2
+                while (node.indirect !== null) {
+                    nodes.push(node)
+                    node = node.indirect
+                }
+            }
+            for (var i = 0; i != nodes.length; i++) {
+                nodes[i].indirect = node
+            }
+            return node.value
+        }
+        exports.evalNode = evalNode
+        
+        
+        function nodeToJs(node) {
+            var v = evalNode(node)
+            if (v instanceof Array) {
+                var h = nodeToJs(v[0])
+                var t = nodeToJs(v[1])
+                return [h, t];
+            }
+            else if (v instanceof Function) {
+                throw "non-data value in nodeToJs"
+            }
+            else {
+                return v
+            }
+        }
+        exports.nodeToJs = nodeToJs
+        
+        
+        function showValueUnboxed(node, bracketsNeeded) {
+            var v = node
+            if (v instanceof Array) {
+                var h = showValueUnboxed(v[0], true)
+                var t = showValueUnboxed(v[1], false)
+                if (bracketsNeeded)
+                    return "(" + h + "," + t + ")"
+                else
+                    return h + "," + t
+            }
+            else if (v instanceof Function) {
+                return "#Func"
+            }
+            else if (v === null) {
+                return "()"
+            }
+            else {
+                return JSON.stringify(v)
+            }
+        }
+        exports.showValueUnboxed = showValueUnboxed
+        
+        function showValueFerrum(node) {
+            var v = node
+            if (v instanceof Array) {
+                let result = "[" + showValueFerrum(v[0])
+                v = v[1]
+                while (v instanceof Array) {
+                    result += "," + showValueFerrum(v[0])
+                    v = v[1]
+                }
+                if (v !== null) {
+                    // result += ",..." + showValueFerrum(v)
+                    result += ",," + showValueFerrum(v)
+                }
+                result += "]"
+                return result
+            }
+            else if (v instanceof Function) {
+                return "#Func"
+            }
+            else if (v === null) {
+                return "[]"
+            }
+            else {
+                return JSON.stringify(v)
+            }
+        }
+        exports.showValueFerrum = showValueFerrum
+        
+        function showValueFerrum2(v) {
+            if (typeof v === "string" && v.indexOf("\n") !== -1) {
+                let v2 = v.split("\n").map(a => "    " + a).join("\n")
+                let result = ['"""', v2, '"""', ""].join("\n")
+                return result
+            }
+            else {
+                return showValueFerrum(v)
+            }
+        }
+        
+        
+        function explodeStrToAst(input) {
+            var result = ['EAtomic', null];
+            for (var i = input.length - 1; i >= 0; i--) {
+                result = ['EPair', [['EAtomic', input.charAt(i)], result]];
+            }
+            return result;
+        }
+        exports.explodeStrToAst = explodeStrToAst
+        
+        
+        /// TODO handle ref/val strict/non-strict arguments
+        /// add direct function calling where possible
+        
+        function applyFunc(func, arg) {
+            func = evalNode(func)
+            if (func instanceof Function && func.length === 1) {
+                //console.log("Apply Func")
+                return node(function () { return func(arg) })
+            }
+            else {
+                throw "bad function application:" + JSON.stringify(func)
+            }
+        }
+        exports.applyFunc = applyFunc
+        
+        function applyFuncV(func, args) {
+            var result = func
+            for (var i = 0; i < args.length; i++) {
+                let resultVal = evalNode(result)
+                if (resultVal instanceof Function && resultVal.length > 0) {
+                    let fn = resultVal
+                    let args2 = args.slice(i, i + fn.length)
+                    // console.log("Apply", fn.length, args.length, i, args.length-i)
+                    result = node(fn.bind(null, ...args2))
+                    i += fn.length - 1
+                }
+                else {
+                    throw "bad function application:" + JSON.stringify(func)
+                }
+            }
+            return result
+        }
+        exports.applyFuncV = applyFuncV
+        
+        
+        function matchPat(value, pattern) {
+            if (pattern === undefined) {
+                return true
+            }
+            else if (pattern instanceof Array) {
+                return value instanceof Array && pattern.every((p, i) => matchPat(value[i], p))
+            }
+            else if (pattern === null || typeof pattern === 'number' || typeof pattern === 'string') {
+                return value === pattern
+            }
+            else {
+                throw new Error("missing case " + pattern)
+                // throw new Error("missing case " + JSON.stringify(pattern))
+            }
+        }
+        exports.matchPat = matchPat
+        
+        function lambdaMaybe(pattern, func) {
+            return (v) => {
+                if (matchPat(v, pattern)) {
+                    return [func(v), null]
+                }
+                else {
+                    return null
+                }
+            }
+        }
+        exports.lambdaMaybe = lambdaMaybe
+        
+        function lambdaNothing(pattern, func) {
+            return (v) => {
+                if (matchPat(v, pattern)) {
+                    return func(v)
+                }
+                else {
+                    return null
+                }
+            }
+        }
+        exports.lambdaNothing = lambdaNothing
+        
+        // function lambdaJust(pattern, func) {
+        //     return (v) => {
+        //         return [func(v), null]
+        //     }
+        // }
+        // exports.lambdaJust = lambdaJust
+        
+        function pgPair (a, f) {
+            if (a instanceof Array) {
+                return f(a[0])(a[1])
+            }
+            else {
+                return null
+            }
+        }
+        exports.pgPair = pgPair
+        
+        function pgEq (a, b, f) {
+            if (a === b) {
+                return f()
+            }
+            else {
+                return null
+            }
+        }
+        exports.pgEq = pgEq
+        
+        // TODO use this for as-pattern matching, instead of requiring a statement context
+        // translate
+        //   a @ [b, c] -> ...
+        // into 
+        //   (a) => as ( a, [b, c] => (...) )
+        // instead of
+        //   (a) => { let [b, c] = a; return (...) }
+        
+        function as (a, f) {
+            return f(a)
+        }
+        exports.as = as
+        
+        
+        // Function.prototype._ = function (...args) { return call(this, ...args) }
+        // Object.prototype.match = function (pattern) { return matchPat(this.valueOf(), pattern) }
+        
+        
+        let primitives2 = () => {
+        
+            let prims = {}
+        
+            prims["inc"] = (n) => (n + 1)
+            prims["+"] = (a) => (b) => (a + b)
+            prims["-"] = (a) => (b) => (a - b)
+            prims["*"] = (a) => (b) => (a * b)
+            prims["=="] = (a) => (b) => a === b
+            prims[">"] = (a) => (b) => (a > b)
+            prims[">="] = (a) => (b) => (a >= b)
+            prims["<"] = (a) => (b)(a < b)
+            prims["<="] = (a) => (b) => (a <= b)
+            prims["ord"] = (a) => (a.charCodeAt(0))
+            prims["chr"] = (a) => (String.fromCharCode(a))
+            prims["!"] = (a) => (!a)
+            prims["not"] = (a) => (!a)
+            prims["&&"] = (a) => (b) => a && b
+            prims["||"] = (a) => (b) => a || b
+            prims["|-"] = (a) => (b) => a ? b : null
+            prims["|="] = (a) => (b) => a ? [b,null] : null
+            prims["isPair"] = (a) => (Array.isArray(a))
+            prims["isNumber"] = (a) => (typeof a === 'number')
+            prims["isString"] = (a) => (typeof a === 'string')
+            prims["hd"] = (a) => (a[0])
+            prims["tl"] = (a) => (a[1])
+            prims.head = prims.hd
+            prims.tail = prims.tl
+            // prims.if = (a, b, c) => a ? b : c
+            prims.if2 = (a) => (b) => a ? b[0](null) : b[1][0](null)
+            prims.trace = (a) => (b) => {
+                // console.log("RuntimeTrace:\n" + showValueFerrum(a))
+                console.log("RuntimeTrace:\n" + showValueFerrum2(a))
+                return b
+            }
+            prims.error = (a) => {
+                // var value = printValue(a, false)
+                // var value = showValue2(a, false, unbox)
+                let value = showValueFerrum(a)
+                console.log("Error: " + value)
+                Error.stackTraceLimit = 1000
+                let origPrepareStackTrace = Error.prepareStackTrace
+                Error.prepareStackTrace = (error, stackTrace) => {
+                    // console.log(JSON.stringify(stackTrace))
+                    let lines = []
+                    stackTrace.forEach(se => {
+                        if (true) {
+                        // if (se.isEval()) {
+                            let name = se.getFunctionName()
+                            if (name === "eval" || name == null) {
+                                name = ""
+                            }
+                            let line = se.getLineNumber().toString().padStart(5)
+                            let col = se.getColumnNumber().toString().padStart(3)
+                            lines.push(`  [ ${line}, ${col} ]  ${name}`)
+                        }
+                        // console.log(se.getFunctionName(), se.getTypeName(), se.getEvalOrigin(), se.isEval())
+                    })
+                    return ("*** STACK *** \n" + lines.join("\n"))
+                }
+                console.log((new Error()).stack)
+                Error.prepareStackTrace = origPrepareStackTrace
+                // let callStack = (new Error()).stack
+                // let stackEntries = callStack.split("\n")
+                // // let re = new RegExp("anonymous")
+                // let re2 = new RegExp(", (<anonymous>.*)\\)")
+                // let re3 = new RegExp("at ([^ ]*) .*, (<anonymous>.*)\\)")
+                // stackEntries.forEach(se => {
+                //     // console.log(se)
+                //     // let m = re.test(se)
+                //     // let m2 = re2.test(se)
+                //     // let m3 = se.match(re2)
+                //     let m3 = se.match(re3)
+                //     // console.log("   ", m, m2, m3)
+                //     if (m3 !== null) {
+                //         // console.log(se)
+                //         let name = m3[1]
+                //         let loc = m3[2]
+                //         if (name==="eval") {
+                //             name = ""
+                //         }
+                //         name = name.padEnd(20)
+                //         console.log("   ", name, loc)
+                //     }
+                // })
+                // console.log("JS Call Stack:", callStack)
+                // console.trace("JS Call Stack2:")
+                // console.log("Error: " + value)
+                // process.stdout.write('', () => { }) // make sure everything is written out
+                throw "Error: " + value
+            }
+            prims.show = (a) => {
+                var value = showValueFerrum(a)
+                return value
+            }
+            prims.show2 = (a) => {
+                var value = showValueFerrum(a)
+                return value
+            }
+        
+        
+            prims.false = false
+            prims.true = true
+            prims.null = (a) => (a === null)
+            prims["$"] = (a) => (b) => a(b)
+            prims.strConcat = (a) => (b) => (a + b)
+            -- prims["^"] = (a) => (b) => (a + b)
+            prims.explode = (input) => {
+                var result = null;
+                for (var i = input.length - 1; i >= 0; i--) {
+                    result = [input.charAt(i), result];
+                }
+                return result;
+            }
+        
+            prims.type = Object // TODO this is just a place holder, TODO something better in future
+            prims.Type = Object // TODO this is just a place holder, TODO something better in future
+            prims.pair = (hdT) => (tlT) => (prims.type)
+            prims.list = (elemT) => (prims.type)
+            prims.List = (elemT) => (prims.type)
+            prims.Fun = (domT) => (rngT) => (prims.type)
+            prims.any = prims.type
+            prims.Any = prims.type
+            prims.never = prims.type
+            prims.void = prims.type
+            prims.Void = prims.type
+            prims.int = prims.type
+            prims.Int = prims.type
+            prims.str = prims.type
+            prims.Str = prims.type
+            prims.bool = prims.type
+            prims.Bool = prims.type
+            prims.nil = prims.type
+        
+            prims.singleT = (value) => (prims.type)
+            prims.unionT = (t1) => (t2) => (prims.type)
+            prims.intersectT = (t1) => (t2) => (prims.type)
+            prims.Union = (tl) => (prims.type)
+        
+            prims.domain = (t) => (prims.type)
+            prims.Domain = (t) => (prims.type)
+            prims.range = (t) => (prims.type)
+            prims.Codomain = (t) => (prims.type)
+            prims.Inverse = (t) => (prims.type)
+            prims.primInverse = (t) => (prims.type)
+            prims.variant = (name) => (type) => (orElse) => (prims.type)
+            prims.Variant = (name) => (type) => (prims.type)
+            prims.hdT = (value) => (prims.type)
+            prims.tlT = (value) => (prims.type)
+            prims.Hd = (value) => (prims.type)
+            prims.Tl = (value) => (prims.type)
+            prims.Fix = (value) => (prims.type)
+            prims.Self = (value) => (prims.type)
+        
+            // TODO change name from coerceT to castT
+            prims.coerceDT = (val) => (typ) => (val)
+            prims.coerceT = (val) => (val)
+            prims.castDT = (val) => (typ) => (val)
+            prims.castT = (val) => (val)
+            prims.fix = fix
+            prims.loop = loop
+            prims.break = primBreak
+            prims.continue = primContinue
+        
+            prims.grLoop = grLoop
+            prims.grWhile = grWhile
+        
+        
+            prims.jsEval = primJsEval
+            prims.jsEvalMaybe = primJsEvalMaybe
+        
+            prims.ioRun = ioRun
+            prims.ioReadFile = ioReadFile
+            prims.ioWriteFile = ioWriteFile
+            prims.ioArgV = ioArgV
+            prims.ioSetArgV = ioSetArgV
+            prims.ioPrint = ioPrint
+            prims.ioDoPrim = ioDoPrim
+        
+            prims.testIsStr = (a) => ([t, [f, _]]) => (typeof a === "string" ? t(a) : f(a))
+            prims.testIsNil = (a) => ([t, [f, _]]) => (a === null ? t(a) : f(a))
+            prims.matchMaybe = (a) => ([t, [f, _]]) => (a === null ? t(a) : f(a))
+            prims.matchList = (a) => ([t, [f, _]]) => (a === null ? t(a) : f(a))
+        
+            prims.ifNil = (a) => ([t, [f, _]]) => (a === null ? t(a) : f(a))
+            prims.ifBool = (a) => ([t, [f, _]]) => (typeof a === "boolean" ? t(a) : f(a))
+            prims.ifInt = (a) => ([t, [f, _]]) => (typeof a === "number" ? t(a) : f(a))
+            prims.ifStr = (a) => ([t, [f, _]]) => (typeof a === "string" ? t(a) : f(a))
+            prims.ifPair = (a) => ([t, [f, _]]) => (a instanceof Array ? t(a) : f(a))
+        
+            prims.strOrd = (a) => a.charCodeAt(0)
+            prims.strChr = (a) => String.fromCharCode(a)
+            prims.strLen = (a) => a.length
+            prims.strAdd = (a) => (b) => a + b
+            prims.strCharAt = (a) => (b) => a.charAt(b)
+        
+            prims.jsStrJoin = (delim) => (parts) => {
+                if (typeof(delim) !== "string") {
+                    throw new Error(`expected a string as delimiter, not (${JSON.stringify(delim)})`)
+                }
+                let elems = []
+                while (parts instanceof Array) {
+                    let part = parts[0]
+                    if (typeof(part) !== "string") {
+                        throw new Error(`expected a string in list, not (${JSON.stringify(part)})`)
+                    }
+                    elems.push(part)
+                    parts = parts[1]
+                }
+                if (parts !== null) {
+                    throw new Error(`expected a nil at end of list, not (${JSON.stringify(parts)})`)
+                }
+                return elems.join(delim)
+            }
+            prims.jsStrCat = prims.jsStrJoin("")
+        
+            prims.primMkArrayFastAccessSlowCopy = primMkArrayFastAccessSlowCopy
+            prims.primMkArrayFastAccessNoCopy = primMkArrayFastAccessNoCopy
+        
+            return prims
+        }
+        
+        exports.primitives = primitives2();
+        return exports        
+    }
+
+    let rt = createJsRuntime()
+    let _ = rt.primitives
+        
+  """
+;
+        

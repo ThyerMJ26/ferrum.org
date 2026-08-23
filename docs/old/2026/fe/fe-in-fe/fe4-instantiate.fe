@@ -1,0 +1,171 @@
+language ferrum/0.1
+
+let HEnv = List {[Str, Addr]};
+
+let instantiatePat : { Int -> Addr -> HEnv -> Expr -> K@(HeapK HEnv) -> Heap -> K HEnv Heap} 
+    = rec ( (instPat: { Int -> Addr -> HEnv -> Expr -> K@(HeapK HEnv) -> Heap -> K HEnv Heap} )
+    -> depth -> addr -> env -> pat -> (k : K@(HeapK HEnv)) ->
+    match pat
+    [ ["EVar", name] |=> 
+        let env2 = [ [name, addr],,env];
+        k env2
+    , ["EPair", hdPat, tlPat] |=>
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HOper", "hd", [addr] ]] <| hdAddr ->
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HOper", "tl", [addr] ]] <| tlAddr ->
+        instPat depth hdAddr env hdPat <| env2 ->
+        instPat depth tlAddr env2 tlPat <| env3 ->
+        k env3
+    , ["EList", [], []] |=>
+        k env
+    , ["EList", [], [tlPat]] |=>
+        instPat depth addr env tlPat <| env2 ->
+        k env2 
+    , ["EList", [elemPat,,elemPats], tlPat] |=>
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HOper", "hd", [addr] ]] <| hdAddr ->
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HOper", "tl", [addr] ]] <| tlAddr ->
+        instPat depth hdAddr env elemPat <| env2 ->
+        instPat depth tlAddr env2 ["EList", elemPats, tlPat] <| env3 ->
+        k env3
+    -- , ["EPair", hdPat, tlPat] |=>
+    --     heapNewNode [depth, "HDelta", "hd", [addr] ] |>then<| hdAddr ->
+    --     heapNewNode [depth, "HDelta", "tl", [addr] ] |>then<| tlAddr ->
+    --     instPat depth hdAddr env hdPat |>then<| env2 ->
+    --     instPat depth tlAddr env2 tlPat |>then<| env3 ->
+    --     k env3
+    , ["EAs", name, pat2] |=>
+        instPat depth addr env pat2 <| env2 ->
+        let env3 = [ [name, addr],,env2 ];
+        k env3
+    , ["ETermBrackets", pat] |=>
+        instPat depth addr env pat <| env2 ->
+        k env2
+    , ["EType", pat, ty] |=>
+        instPat depth addr env pat <| env2 ->
+        k env2
+    , other |=> error ["invalid pattern", other]
+    ] );
+
+
+let instantiateDecl : { { Int -> HEnv -> Expr -> K@(HeapK Addr) -> Heap -> K Addr Heap } -> Int -> HEnv -> [Expr, Expr] -> K@(HeapK HEnv) -> Heap -> K HEnv Heap }
+    = inst -> depth -> env -> [pat,defn] -> (k: K@(HeapK HEnv)) ->
+    inst depth env defn <| defnAddr ->
+    instantiatePat depth defnAddr env pat <| env2 ->
+    k env2;
+
+let instantiateDecls : { { Int -> HEnv -> Expr -> K@(HeapK Addr) -> Heap -> K Addr Heap } -> Int -> HEnv -> (List {[Expr, Expr]}) -> K@(HeapK HEnv) -> Heap -> K HEnv Heap }
+    = inst -> depth -> env -> decls -> k ->
+    -- TODO a cps loop-based version, to avoid excess stack usage
+    error "TODO instantiateDecls";
+
+-- let instantiateDecls2 : { { Int -> HEnv -> Expr -> K@(HeapK Addr) -> Heap -> K Addr Heap } -> Int -> HEnv -> (List {[Expr, Expr]}) -> K@(HeapK HEnv) -> Heap -> K HEnv Heap }
+--     = rec ( (instDecls: { { Int -> HEnv -> Expr -> K@(HeapK Addr) -> Heap -> K Addr Heap } -> Int -> HEnv -> (List {[Expr, Expr]}) -> K@(HeapK HEnv) -> Heap -> K HEnv Heap }) -> inst -> depth -> env -> decls -> k ->
+--     match decls
+--     [ [] |=> k env
+--     , [decl1,,declss] |=>
+--         instantiateDecl inst depth env decl1 ( env2 ->
+--         instDecls inst depth env2 declss ( env3 ->
+--         k env3 ) )
+--     ]);
+
+
+let instantiate : { Int -> HEnv -> Expr -> K@(HeapK Addr) -> Heap -> K Addr Heap }
+    = rec ( (inst: { Int -> HEnv -> Expr -> K@(HeapK Addr) -> Heap -> K Addr Heap })
+    -> depth -> env -> expr -> (k: K@(HeapK Addr)) ->
+    match expr 
+    [ ["ELit", a] |=> 
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HValue", a]] <| valueAddr ->
+        k valueAddr
+    , ["EApply", func, arg] |=> 
+        inst depth env func <| funcAddr ->
+        inst depth env arg <| argAddr ->
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HApply", funcAddr, argAddr]] <| applyAddr ->
+        k applyAddr
+    , ["ELambda", pat, body] |=>
+        heapNewNode [[depth+1, "Term", "Weak", "None", [pat]], ["HVar"]] <| varAddr ->
+        instantiatePat (depth+1) varAddr env pat <| env2 ->
+        inst (depth+1) env2 body <| bodyAddr ->
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HLambda", bodyAddr]] <| lambdaAddr ->
+        k lambdaAddr
+   , ["EVar", name] |=>
+        match (lookup name env)
+        [ [] |=> error ["unknown variable", name, env]
+        , [addr] |=> k addr
+        ]
+
+--   , ["ELets", decls, expr] |=>
+--        instantiateDecls inst depth env decls ( env2 ->
+--        inst depth env2 expr ( exprAddr ->
+--        k exprAddr ) )
+
+   , ["ELets", [], expr] |=>
+        inst depth env expr ( exprAddr ->
+        k exprAddr )
+
+   , ["ELets", [[pat,defn],,decls], expr] |=>
+        -- TODO a cps loop-based version, to avoid excess stack usage
+        inst depth env defn <| defnAddr ->
+        instantiatePat depth defnAddr env pat <| env2 ->
+        inst depth env2 ["ELets", decls, expr] <| letAddr ->
+        k letAddr
+
+   , ["EOper", opName, args] |=> 
+        heapMap (inst depth env) args <| argAddrs ->
+        -- heapNewNode [[depth, "Term", false, []], ["HOper", opName, argAddrs]] <| opAddr ->
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HOper", opName, argAddrs]] <| opAddr ->
+        k opAddr
+
+    , ["EList", [], []] |=> 
+        -- heapNewNode [[depth, "Term", false, []], ["HValue", []]] ( valueAddr ->
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HValue", []]] <| valueAddr ->
+        k valueAddr
+    , ["EList", [], [tlExpr]] |=> 
+        inst depth env tlExpr <| tlAddr ->
+        k tlAddr
+    , ["EList", [elemExpr,,elemsExpr], tlExpr] |=> 
+        inst depth env elemExpr <| elemAddr ->
+        inst depth env ["EList", elemsExpr, tlExpr] <| elemsAddr ->
+        -- heapNewNode [[depth, "Term", false, []], ["HPair", elemAddr, elemsAddr]] <| pairAddr ->
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HPair", elemAddr, elemsAddr]] <| pairAddr ->
+        k pairAddr
+    , ["ETermBrackets", expr] |=>
+        inst depth env expr <| exprAddr ->
+        k exprAddr
+    , ["ETypeBrackets", expr] |=>
+        -- use nil for all types for now, this file is semi-obselete already anyway
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HValue", []]] <| nilAddr ->
+        k nilAddr
+    , _ |=> error ["instantiate", "missing case", expr]
+
+    ]);
+
+
+let instantiateStrToNodes : { Str -> (List Node) } =
+    input ->
+    let instTmp1 = (expr : Expr) ->
+        instantiate 0 [] expr
+        ( addr -> (heap: Heap) -> 
+            let _ = debug [addr];
+            let _ = debug [heap];
+            -- addr
+            let [_, h] = heap;
+
+            let [h2, len] = h ["length"]; 
+            let t1 = loop ([h: Array Indirect, addr: Addr, nodes: List Node] ->
+              let _ = debug ["instNodes", addr, nodes];
+              if (addr==len)
+              [ -> break (reverse nodes)
+              , ->
+                let [h2, ind] = h ["get", addr];
+                let [_, _, _, node] = ind;
+                continue [h2, addr+1, [node,,nodes]]
+              ]
+            ) [h2,0,[]];
+            t1 
+        )
+        (heapMk []);
+    
+    -- let t2 = inst_tmp1 ["ELit", 77];
+    let instTmp2 = instTmp1 ["EApply", ["EApply", ["ELit", "+"], ["ELit", 33]], ["ELit", 44]];
+    -- let instTmp3 = instTmp1 (testParse3 "EXP" (scan "1 + 2"));
+    let instTmp3 = instTmp1 (parseExpr (scan input));
+    instTmp3;

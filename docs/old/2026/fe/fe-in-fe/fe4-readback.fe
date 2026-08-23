@@ -1,0 +1,65 @@
+language ferrum/0.1
+
+let readbackVarName : { Int -> (Maybe Expr) -> Str }
+    = depth -> srcAnnot ->
+    match srcAnnot
+    [ [] |=> "v" ^ depth
+    , [srcAnnot2] |=> 
+        match srcAnnot2
+        [ ["EVar", name] |=> "v" ^ depth ^ "_" ^ name
+        , ["EAs", name, _] |=> "v" ^ depth ^ "_" ^ name
+        , _ |=> "v" ^ depth
+        ]
+    ];
+
+let readbackAddr : { Addr -> K@(HeapK Expr) -> Heap -> K Expr Heap }
+    = rec ( (rbAddr : { Addr -> K@(HeapK Expr) -> Heap -> K Expr Heap })
+    -> addr -> (k: K@(HeapK Expr)) ->
+    heapDeref addr ( [nc@[depth, _, _, _, srcAnnot2], node] ->
+    -- let _ = debug ["srcAnnot", srcAnnot2];
+    match node
+    [ [ "HValue", val] |=>
+        k ["ELit", val]
+    , [ "HOper", opName, args ] |=>
+        heapMap (rbAddr) args ( argExprs ->
+        k ["EOper", opName, argExprs] )
+    , [ "HVar" ] |=>
+        -- let varName = readbackVarName depth srcAnnot2;
+        let varName = readbackVarName depth [];
+        k ["EVar", varName]
+    , [ "HLambda", body ] |=>
+        -- TODO go looking for things to put in lambda+let bound patterns
+        -- TODO let bind using the original source names where possible
+        rbAddr body ( bodyExp -> 
+        -- let varName = readbackVarName (depth+1) srcAnnot2;
+        let varName = readbackVarName (depth+1) [];
+        k ["ELambda", ["EVar", varName], bodyExp] )
+    , [ "HApply", func, arg ] |=>
+        rbAddr func ( funcExp -> 
+        rbAddr arg ( argExp -> 
+        k ["EApply", funcExp, argExp] ) )
+    , [ "HPair", hdAddr, tlAddr ] |=>
+        rbAddr hdAddr ( hdExp -> 
+        rbAddr tlAddr ( tlExp -> 
+        -- k ["EPair", hdExp, tlExp] ) )
+        k (ePair hdExp tlExp) ) )
+
+    , other |=> error ["missing case", other]
+    ] ) );
+
+
+
+let instantiateReadBack : { Str -> Expr } =
+    input ->
+    let instTmp1 = (expr : Expr) ->
+        instantiate 0 [] expr
+        ( addr -> heap -> 
+            let _ = debug [addr];
+            let _ = debug [heap];
+            [addr, heap]
+        )
+        (heapMk []);
+    
+    let [addr1, heap2] = instTmp1 (parseExpr (scan input));
+    let expr2 = readbackAddr addr1 ( expr -> heap -> expr ) heap2;
+    expr2;

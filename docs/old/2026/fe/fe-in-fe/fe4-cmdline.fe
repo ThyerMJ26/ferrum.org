@@ -1,0 +1,92 @@
+language ferrum/0.1
+
+let CmdLineOption = {[Str, (Maybe Str)]};
+
+let CmdLine = {
+    [ (List CmdLineOption)   -- global options
+    , (Maybe Str)            -- command name
+    , (List CmdLineOption)   -- command options
+    , (List Str)             -- command arguments
+    ] };
+
+let scanArg : { Str -> Int -> { Str -> Bool } -> [Str, Int] } =
+    arg -> pos -> cond ->
+    loop1 ( [result : Str, pos2 : Int] ->
+        -- let _ = debug ["ScanArg", result, pos2];
+        if (pos2 < strLen arg)
+        [ ->
+            let ch = strCharAt arg pos2;
+            if (cond ch)
+            [ -> continue [strAdd result ch, pos2 + 1]
+            , -> break [result, pos2]
+            ]
+        , ->
+            break [result, pos2]
+        ] ) ["" : Str, pos : Int];
+
+let tryParseOption : { Str -> (Maybe {[Str, (Maybe Str)]}) } =
+    arg ->
+    let argLen = strLen arg;
+    if (argLen == 0)
+    [ -> []
+    , ->
+        match (strCharAt arg 0)
+        [ "-" |=>
+            let [dashes, pos2] = scanArg arg 0 (ch -> ch == "-");
+            let [name, pos3] = scanArg arg pos2 (ch -> not (ch == "="));
+            let valMb = 
+                if (strCharAt arg pos3 == "=")
+                [ ->
+                    let [val, _] = scanArg arg (pos3+1) (ch -> true);
+                    [val]
+                , -> 
+                    []
+                ];
+            [ [name, valMb] ]
+        , _ |=>
+            []
+        ]
+    ];
+
+let parseOptions : { (List Str) -> { [ (List CmdLineOption), (List Str) ] } } =
+    args0 ->
+    let [opts, args2] = 
+        loop1 ( [opts : List CmdLineOption, args : List Str] ->
+        match args
+        [ [] |=>
+            break [opts, []]
+        , [arg1 ,, args3] |=>
+            match (tryParseOption arg1)
+            [ [] |=>
+                break [opts, args]
+            , [opt] |=>
+                continue [[opt ,, opts], args3]
+            ]
+        ] ) [ [] : List CmdLineOption, args0 : List Str] ;
+    [opts, args2];
+
+let parseCmdLineArgs : { (List Str) -> CmdLine } =
+    args ->
+    let [globalOpts, args2] = parseOptions args;
+    match args2
+    [ [] |=>
+        [ globalOpts, [], [], [] ]
+    , [cmdName ,, args3] |=>
+        let [cmdOptions, args4] = parseOptions args3;
+        [ globalOpts, [cmdName], cmdOptions, args4]
+    ];
+
+let lookupCmdLineOption : { Str -> (List CmdLineOption) -> (Maybe (Maybe Str)) } =
+    optName -> options ->
+    let isOpt : { CmdLineOption -> Bool } =
+        [name, valueMb] -> name == optName;
+    let optList = filter isOpt options;
+    match optList 
+    [ [] |=>
+        []
+    , [ [_, valMb] ] |=> 
+        [valMb]
+    , nameVals |=>
+        error ["options defined multiple times", optName, nameVals]
+    ];
+

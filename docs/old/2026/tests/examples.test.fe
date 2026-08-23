@@ -1,0 +1,96 @@
+language ferrum/test/0.1
+
+
+[ 
+
+  [ ["name", "power1"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+    let power : { Int -> Int -> Int } = 
+      fix <| (power : { Int -> Int -> Int }) -> (n : Int) -> (x : Int) ->
+      if (n == 0)
+      [ -> 1
+      , -> power (n - 1) x * x
+      ];
+
+    let cube = power <$ 3;   
+    -- let cube = power <| 3;   
+
+  """
+  ]
+  , ["expectTerm", "cube", "x -> 1 * x * x * x"]
+  , ["expectValue", "cube 5", "125"]
+  , ["expectValue", "(power <$ 3) 5", "125"]
+  ]
+
+
+, [ ["name", "power2"]
+  , ["language", "ferrum/0.1"]
+  , ["primitives", "../fe/primitives/vso.fe"]
+  , ["type_check", "bidir"]
+  , ["decls", 
+  """
+    let flip = 
+      (f : F @ { Void -> Void -> Any }) -> 
+      (x : X @ (Domain (Codomain F))) -> 
+      (y : Y @ (Domain F)) -> 
+      f y x;
+
+    let power : { Int -> Int -> Int } = 
+      (x : Int) ->
+      -- fix <| (pow : { Int -> Int }) -> 
+      fix2 <| (pow : { Int -> Int }) -> 
+      (n : Int) -> 
+      if (n == 0)
+      [ -> 1
+      , -> n $? pow (n - 1) * x
+      ];
+
+    let cube = (flip power) <$ 3;   
+    -- let cube = (flip power) <| 3;   
+
+    let two_raised_a = power <| 2;  
+    let two_raised_b = power <$ 2;  
+
+    let two_raised_a_5 = two_raised_a 5;  
+    let two_raised_b_5 = two_raised_b 5;  
+
+  """
+  ]
+  , ["expectValue", "cube 5", "125"]
+  , ["expectValue", "(power <$ 5) 3", "125"]
+  , ["expectValue", "(flip power <$ 3) 5", "125"]
+  , ["expectTerm", "cube", "x -> 1 * x * x * x"]
+
+  , ["expectTerm", "two_raised_a_5", "32"]
+  , ["expectTerm", "two_raised_b_5", "32"]
+  , ["expectValue", "two_raised_b 5", "32"]
+
+  , ["expectTerm", "two_raised_b", 
+      """
+        let raise = 
+            f -> n -> 
+            if (n == 0) 
+            [ -> 1
+            , -> n $? f (n - 1) * 2
+            ];
+
+        -- n -> raise (fix raise) n 
+        n -> fix2 raise n
+      """
+    ]
+
+  -- If we eta-contract the result, we get this.
+  , ["expectTerm", "two_raised_b", "fix2 <| f -> n -> if (n == 0) [ -> 1, -> n $? f (n - 1) * 2]"]
+  -- Note "fix2" is a 2-arity primitive, it can only exist in the graph in a fully saturated form.
+  -- Any under-saturated uses in the AST will be automatically eta-expanded during instantiation.
+  ]
+
+
+
+]
+
+

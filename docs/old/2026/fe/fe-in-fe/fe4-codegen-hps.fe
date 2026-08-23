@@ -1,0 +1,288 @@
+language ferrum/0.1
+
+-- let CgEnv = List { [Str, Str] }; -- this looks unused
+
+
+-- TODO define a codegen context to avoid creating fresh variables where an existing one would better serve the same purpose
+
+-- let CgCtx0 = 
+--   { ["Assign", JsExpr]
+--   | ["Return"]
+--   };
+
+-- let CgCtx = 
+--   { ["Expr"]
+--   | ["Assign", JsExpr]
+--   -- | ["Bind", JsExpr]
+--   -- | ["Return"]
+--   -- | ["Loop", JsExpr, CgCtx0]
+--   };
+
+
+
+-- let CgCtxAction = { JsStmts -> JsExpr -> (CgA Nil) };
+-- let CgCtxAction = { JsStmts -> JsExpr -> (CgA JsStmts) };
+-- let CgCtxAction = { JsStmts -> JsExpr -> JsStmts };
+
+
+
+-- -- A context requires two functions, "exit" and "fork"
+-- --   "exit" takes the statements added in a child context and the result-expr and returns the statements that can be used in the parent context
+-- --   "fork" knows how to split a parent context into a modified parent context and new child context, 
+-- --       to be used in child contexts where the child can take on the responsibilities of the parent, such as performing an assignment, or returning
+-- let CgCtxAction = 
+--   Rec <| CCA ->
+--   { [ JsStmts -> JsExpr -> JsStmts 
+--     , -> [CCA, CCA]
+--     ]
+--   };
+
+-- let CgCtxActionStmt = 
+--   Rec <| CCAS ->
+--   { [ JsStmts -> JsStmts 
+--     ]
+--   };
+-- 
+-- let CgCtxActionExpr = 
+--   Rec <| CCAE ->
+--   let CCAS = CgCtxActionStmt;
+--   { [ JsStmts -> JsExpr -> JsStmts 
+--     , -> 
+--       [ JsStmts -> CCAS
+--       , CCAE
+--       ]
+--     ]
+--   };
+
+
+-- let CgCtxCloser2 : { Type -> Type } = 
+--   (R : Type) ->
+--   Rec <| CCC ->
+--   { [ JsStmts -> (Maybe JsExpr) -> [JsStmts, R]
+--     , ->
+--       [ CCC
+--       , CCC
+--       ]
+--     ]
+--   };
+
+-- let CgCtxCloser2Nil = CgCtxCloser2 Nil;
+-- let CgCtxCloser2JsExpr = CgCtxCloser2 JsExpr;
+
+
+let CgState = {
+    [ Int             -- name-source, value of next unique id
+    , (List JsStmts)   -- statements
+    -- , (List CgCtxCloser) -- context closers
+    , Nil
+    ] };
+
+-- let CgState = CodeGenState;
+
+let cghInitState : CgState = [1, [], []];
+
+
+-- TODO ? add these to the handler ?
+-- TODO ?   {Push,Pop}Ctx could probably replace {Push,Pop}Stmts
+    -- & { "PushCtx"  -> CgCtx      -> K @ { Nil      -> CgH -> Any } -> K Nil CgH }
+    -- & { "PopCtx"   -> []         -> K @ { CgCtx    -> CgH -> Any } -> K Nil CgH }  -- not sure we really want to see the context again,
+    -- & { "PopCtx"   -> []         -> K @ { JsStmts  -> CgH -> Any } -> K Nil CgH }  --   we just want the statements
+    -- & { "PopCtx"   -> JsExpr     -> K @ { JsStmts  -> CgH -> Any } -> K Nil CgH }  --   is it best to provide the result-expr to the context-popper ?
+    -- & { "BindableVar"    -> []   -> K @ { Str      -> CgH -> Any } -> K Str CgH }
+    -- & { "AssignableVar"  -> []   -> K @ { Str      -> CgH -> Any } -> K Str CgH }
+
+    -- & { "OpenFreshCtx"   -> CgCtxAction     -> K @ { Nil       -> CgH -> Any } -> K Nil CgH }
+    -- & { "OpenNestedCtx"  -> Nil             -> K @ { Nil       -> CgH -> Any } -> K Nil CgH }
+    -- & { "CloseCtx"       -> JsExpr          -> K @ { JsStmts   -> CgH -> Any } -> K Nil CgH }
+    -- & { "CloseCtx"       -> (Maybe JsExpr)  -> K @ { JsStmts   -> CgH -> Any } -> K Nil CgH }
+
+    -- & { "WithFreshCtx"     -> CgCtxAction  -> K @ { Nil       -> CgH -> Any } -> K Nil CgH }
+    -- & { "WithNestedCtx"    -> Nil          -> K @ { Nil       -> CgH -> Any } -> K Nil CgH }
+    -- & { "withDelegateCtx"  -> Nil          -> K @ { Nil       -> CgH -> Any } -> K Nil CgH }
+
+    -- & { "WithExprCtx"   -> Nil           -> K @ { JsExpr    -> CgH -> Any } -> K Nil CgH }
+    -- & { "WithStmtCtx"   -> CgCtxAction   -> K @ { Nil       -> CgH -> Any } -> K Nil CgH }
+
+
+
+let CodeGenHandler = 
+    Rec <| CgH -> 
+    { { "Skip"        -> []                -> K @ { Nil      -> CgH -> Any } -> K Nil      CgH }
+    & { "AddStmts"    -> [JsStmts]         -> K @ { Nil      -> CgH -> Any } -> K Nil      CgH }
+    & { "PushStmts"   -> []                -> K @ { Nil      -> CgH -> Any } -> K Nil      CgH }
+    & { "PopStmts"    -> []                -> K @ { JsStmts  -> CgH -> Any } -> K JsStmts  CgH }
+    & { "FreshVar"    -> []                -> K @ { Str      -> CgH -> Any } -> K Str      CgH }
+    & { "Dump"        -> []                -> K @ { Nil      -> CgH -> Any } -> K Nil      CgH }
+    -- & { "PushCtx"     -> [CgCtxCloser]     -> K @ { Nil      -> CgH -> Any } -> K Nil      CgH }
+    -- & { "ForkCtx"     -> []                -> K @ { Nil      -> CgH -> Any } -> K Nil      CgH }
+    -- & { "PopCtx"      -> [(Maybe JsExpr)]  -> K @ { JsStmts  -> CgH -> Any } -> K JsStmts  CgH }
+    };
+
+let CgHandler = CodeGenHandler;
+let CgH = CodeGenHandler;
+
+let CgK : { Type -> Type } = 
+    A -> { A -> CgH -> Any };
+
+let CgAction : { Type -> Type } = 
+    A -> { K @ (CgK A) -> CgH -> K A CgH };
+
+let CgA = CgAction;
+
+
+-- close/delegate 2-tuple
+-- TODO add a third entry ? close-delegated ? this would remove the need for the (Maybe JsExpr) argument ?
+let CghCtx = 
+  Rec <| CC ->
+  { [ [Str ,, Any]
+    , JsStmts -> (Maybe JsExpr) -> [JsStmts, (Maybe JsExpr)]   -- close
+  -- { [ JsStmts -> [JsExpr] -> [JsStmts, [JsExpr]]   -- close-non-delegated
+  -- , [ JsStmts -> [      ] -> [JsStmts, [      ]]   -- close-delegated
+     , JsStmts -> (CgA { [CC, CC] })                  -- delegate
+  -- , JsStmts -> (CgA { [CC, (Maybe JsExpr] }))   -- delegate 
+    ]
+  };
+
+-- let cghSkip : CgA Nil = 
+--     (k : K @ CgK Nil) ->
+--     (handler : CgH) ->
+--     handler "Skip" [] k;
+
+let cghAddStmts : { JsStmts -> (CgA Nil) } = 
+    stmt ->
+    (k : K @ CgK Nil) ->
+    (handler : CgH) ->
+    -- debug2 ["cghAddStmts", stmt] <| ->
+    handler "AddStmts" [stmt] k;
+
+let cghPushStmts : CgA Nil = 
+    (k : K @ CgK Nil) ->
+    (handler : CgH) ->
+    handler "PushStmts" [] k;
+
+let cghPopStmts : CgA JsStmts = 
+    (k : K @ CgK JsStmts) ->
+    (handler : CgH) ->
+    handler "PopStmts" [] k;
+
+
+
+-- let cghFreshVar : CgA Str = 
+--     (k : K @ CgK Str) ->
+--     (handler : CgH) ->
+--     handler "FreshVar" [] k;
+
+-- TODO ? rather than returning a raw string (only to be used to for a larger variable name), 
+-- TODO ?   take an extra argument hinting at the desired variable name
+let cghFreshVar0 : CgA Str = 
+    (k : K @ CgK Str) ->
+    (handler : CgH) ->
+    handler "FreshVar" [] <| varName ->
+    k varName;
+
+let cghFreshVar : CgA JsExpr = 
+    (k : K @ CgK JsExpr) ->
+    (handler : CgH) ->
+    handler "FreshVar" [] <| varName ->
+    k (jsVar varName);
+
+let cghFreshVar2 : { Str -> (CgA JsExpr) } = 
+    name ->
+    (k : K @ CgK JsExpr) ->
+    (handler : CgH) ->
+    handler "FreshVar" [] <| varName ->
+    let varName2 = strCat [varName, "_", name];
+    k (jsVar varName2);
+
+-- let cghDump : CgA Nil = 
+--     (k : K @ CgK Nil) ->
+--     (handler : CgH) ->
+--     handler "Dump" [] <| ->
+--     k [];
+
+
+-- let cghWithNewCtx : { CgCtxCloser -> (CgA JsExpr) -> CgA JsStmts } = 
+--     ccc -> action ->
+--     (k : K @ CgK JsStmts) ->
+--     (handler : CgH) ->
+--     handler "WithNewCtx" [ccc, action] k;
+
+-- let cghPushCtx : { CgCtxCloser -> (CgA Nil) } =
+--     ccc ->
+--     (k : K @ CgK Nil) ->
+--     (handler : CgH) ->
+--     handler "PushCtx" [ccc] k;
+-- 
+-- let cghForkCtx : CgA Nil =
+--     (k : K @ CgK Nil) ->
+--     (handler : CgH) ->
+--     handler "ForkCtx" [] k;
+-- 
+-- let cghPopCtx : { (Maybe JsExpr) -> (CgA JsStmts) } =
+--     exprMb ->
+--     (k : K @ CgK JsStmts) ->
+--     (handler : CgH) ->
+--     handler "PopCtx" [exprMb] k;
+
+
+
+
+
+
+
+let codeGenMk : { CgState -> CgHandler } =
+    rec <| (cgMk : { CgState -> CgHandler }) ->
+    cgState @ [ns, stmts, ctxs] -> 
+    -- cgState -> 
+    -- let [ns, stmts, ctxs] = cgState;
+    hpsDispatch CgHandler
+    [ [ "Skip"
+      , [] -> (k : K @ { Nil -> CgHandler -> Any }) -> 
+        k [] (cgMk cgState)
+      ]  
+    , [ "AddStmts"
+      , [jsStmts : JsStmts] -> (k : K @ { Nil -> CgHandler -> Any }) -> 
+        -- TODO ? change the "match" calls to "ifNil" (temporarily) to make HPS codegen easier ?
+        -- debug2 ["AddStmts", jsStmts] <| ->
+        ifNil stmts
+        [ [] ->
+            error ["AddStmts", "statement stack is empty, cannot add stmts", jsStmts]
+        , [stmtsTop ,, stmtsStack] ->
+            let state2 = [ns, [ append (reverse jsStmts) stmtsTop ,, stmtsStack], ctxs];
+            k [] (cgMk state2)
+        ]
+     ]   
+    , [ "PushStmts"
+      , [] -> (k : K @ { Nil -> CgHandler -> Any }) -> 
+        let state2 = [ns, [[] ,, stmts], ctxs];
+        k [] (cgMk state2)
+     ]   
+    , [ "PopStmts"
+      , [] -> (k : K @ { JsStmts -> CgHandler -> Any }) -> 
+        ifNil stmts
+        [ [] ->
+            error ["PopStmts", "statement stack is empty, cannot pop stmts"]
+        , [stmtsTop ,, stmtsStack] ->
+            let state2 = [ns, stmtsStack, ctxs];
+            let stmts2 = reverse stmtsTop;
+            k stmts2 (cgMk state2)
+        ]
+     ]   
+    , [ "FreshVar"
+      , [] -> (k : K @ { Str -> CgH -> Any }) ->
+        let varName = strCat ["u", show ns];
+        let state2 = [ns+1, stmts, ctxs];
+        k varName (cgMk state2)
+      ]  
+    , [ "Dump"
+      , [] -> (k : K @ { Nil -> CgH -> Any }) ->
+        -- let _ = debug ["CgState Dump", cgState];
+        k [] (cgMk cgState)
+      ]
+
+    ];
+
+
+let cghWhile = hpsWhile CgHandler;
+let cghForMap = cpsForMap CgHandler;
+

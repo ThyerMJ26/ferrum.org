@@ -1,0 +1,255 @@
+language ferrum/0.1
+
+
+-- This is an experiment in implementing the parser in a sync-object style.
+-- This is what the async-parser should look like when specialized to a suitable effect-handler / async-object.
+-- The object can then be updated in-place, and needn't actually be returned in a 2-tuple.
+-- Not currently used.
+-- This is a very tedious style, and it's not clear it would bring 
+--   fe-in-fe upto a releasable standard any sooner than fe-in-ts can be.
+
+let TokenSource = 
+    Rec <| TS ->
+    { { "parseToken"     -> [TokenTag, Str] -> [TS, Token]   }
+    & { "tryParseToken"  -> [TokenTag, Str] -> [TS, TokenMb] }
+    & { "peekNextToken"  -> []              -> [TS, TokenMb] }
+    & { "takeNextToken"  -> []              -> [TS, TokenMb] }
+    };
+
+let tokenSourceMk : { Tokens -> TokenSource } =
+    rec <| (mk : { Tokens -> TokenSource }) ->
+    tokens -> req ->
+       error "tokenSourceMk: TODO";
+--     match req 
+--     [ "parseToken"     |=> 
+--         tok @ [tag, val] ->
+--         ifNil tokens
+--         [ [] ->
+--             error ["tokenSourceMk", "expected token", tok, "but got token", "EOF"]
+--         , [tok1 @ [tag1, val1, _] ,, toks] ->
+--             if ((tag1 == tag) && (val1 == val))
+--             [ ->
+--                 -- let _ = parseDebug ["PARSED TOKEN", "parseToken", tok1];
+--                 [mk toks, tok1]
+--             , ->
+--                 error ["tokenSourceMk", "expected token", tok, "but got token", tok1]
+--             ]
+--         ]
+--     , "tryParseToken"  |=> error "TODO"
+--     , "peekNextToken"  |=> error "TODO"
+--     , "takeNextToken"  |=> error "TODO"
+--     ];
+
+
+let typeAnnot : { { T : Type } -> T -> T } =
+    T -> value -> value;
+
+-- let Method = { { T : Type } -> M @ (Domain T) -> T M };
+let Method = { T @ Type -> M @ (Domain T) -> T M };
+let MethodApprox = { Type -> Str -> Any };
+
+let methodApprox : MethodApprox =
+    T -> methodName -> { T (Single methodName) };
+
+-- let method : { { T : Type } -> M @ (Hd T) -> T M } =
+--     T -> (methodName : M @ (Hd T)) -> { T M };
+
+let method : Method =
+    justTrustMeCast MethodApprox Method methodApprox;
+
+
+-- let tokenSourceMk : { Tokens -> TokenSource } =
+--     rec <| (mk : { Tokens -> TokenSource }) ->
+--     tokens -> 
+--     hpsDispatch TokenSource
+--     -- [ ["parseToken"
+--     --   , typeAnnot { TokenSource "parseToken" } <| 
+--     [ method TokenSource "parseToken" <|
+--         tok @ [tag, val] ->
+--         ifNil tokens
+--         [ [] ->
+--             error ["tokenSourceMk", "expected token", tok, "but got token", "EOF"]
+--         , [tok1 @ [tag1, val1, _] ,, toks] ->
+--             if ((tag1 == tag) && (val1 == val))
+--             [ ->
+--                 -- let _ = parseDebug ["PARSED TOKEN", "parseToken", tok1];
+--                 [mk toks, tok1] : { [TokenSource, Token] }
+--             , ->
+--                 error ["tokenSourceMk", "expected token", tok, "but got token", tok1]
+--             ]
+--         ]  
+--     , ["tryParseToken", -> error "TODO"]
+--     , ["peekNextToken", -> error "TODO"]
+--     , ["takeNextToken", -> error "TODO"]
+--     ];
+
+
+
+
+
+let SParseExpr = { TokenSource -> [TokenSource, ExprLoc] };
+
+
+let sParseDecls : { SParseExpr -> TokenSource -> [TokenSource, DeclLocs] } =
+    ( sParseExpr : SParseExpr ) ->
+    ts ->
+    let decls0 : List { [ExprLoc, ExprLoc] } = [];
+    let [ts, decls] = 
+        loop2 [ts, decls0] <| [ts, decls] -> 
+        let [ts, letOpt] = ts "tryParseToken" ["KEYWORD", "let"];
+        match letOpt
+        [ [] |=> 
+            break [ts, (reverse decls)]
+        , [_] |=>
+            let [ts, pat] = ts |> sParseExpr;
+            let [ts, _] = ts "parseToken" ["KEYOPER", "="];
+            let [ts, defn] = ts |> sParseExpr;
+            let [ts, _] = ts "parseToken" ["PUNCT", ";"];
+            continue [ts, [ [pat, defn] ,, decls ] ]
+        ];
+    [ts, decls];
+
+
+let sTryParseExpr : { SParseExpr -> TokenSource -> [TokenSource, ExprLocMb] } =
+    ( sParseExpr : SParseExpr ) ->
+    ts ->
+    let [ts, tokOpt] = ts "peekNextToken" [];
+    match tokOpt
+    [ [] |=> 
+        [ts, no]
+    , [tok] |=>
+        match tok
+        [ ["NUMBER", val, loc] |=> 
+            let [ts, _] = ts "takeNextToken" [];
+            [ts, yes [ ["ELit", val], loc ] ]
+        , ["STRING", val, loc] |=> 
+            let [ts, _] = ts "takeNextToken" [];
+            [ts, yes [ ["ELit", val], loc ] ]
+        , ["WORD", val, loc] |=> 
+            let [ts, _] = ts "takeNextToken" [];
+            [ts, yes [ ["EVar", val], loc ] ]
+        , ["KEYWORD", "let", loc1] |=> 
+            -- don't take the token, leave it to hParseDecls
+            let [ts, decls] = ts |> sParseDecls sParseExpr;
+            let [ts, expr @ [_, loc2]] = ts |> sParseExpr;
+            let loc = mergeLoc loc1 loc2;
+            [ts, yes [ ["ELets", decls, expr], loc ] ]
+        , ["PUNCT", "(", loc1] |=> 
+            let [ts, _] = ts "takeNextToken" [];
+            let [ts, expr] = ts |> sParseExpr;
+            let [ts, [_, _, loc2]] = ts "parseToken" ["PUNCT",")"];
+            let loc = mergeLoc loc1 loc2;
+            let expr2 = [ ["ETermBrackets", expr], loc ];
+            [ts, yes expr2 ]
+        , ["PUNCT", "{", loc1] |=> 
+            let [ts, _] = ts "takeNextToken" [];
+            let [ts, expr] = ts |> sParseExpr;
+            let [ts, [_, _, loc2]] = ts "parseToken" ["PUNCT","}"];
+            let loc = mergeLoc loc1 loc2;
+            let expr2 = [ ["ETypeBrackets", expr], loc ];
+            [ts, yes expr2 ]
+        , ["PUNCT", "[", loc1] |=> 
+            let [ts, _] = ts "takeNextToken" [];
+            let [ts, closeOpt] = ts "tryParseToken" ["PUNCT", "]"];
+            match closeOpt
+            [ [[_,_,loc2]] |=> 
+                let loc = mergeLoc loc1 loc2;
+                [ts, yes [ ["ELit", []], loc ] ]
+            , [] |=>
+                let list0 : List ExprLoc = [];
+                let [ts, list1] = 
+                    loop2 [ts, list0] <| [ts, elems] -> 
+                        -- (breakK : KB @ ParserK ExprLoc) ->
+                        -- (continueK : KC @ ParserK (List ExprLoc)) ->
+                        let [ts, elem] = ts |> sParseExpr;
+                        let elems2 = [elem ,, elems];
+                        let [ts, closeOpt2] = ts "tryParseToken" ["PUNCT", "]"];
+                        match closeOpt2
+                        [ [[_,_,loc2]] |=>
+                            let loc = mergeLoc loc1 loc2;
+                            break [ ts, [ ["EList", reverse elems2, []], loc ] ]
+                        , [] |=>
+                            let [ts, pairComma] = ts "tryParseToken" ["COMMA", ",,"];
+                            match pairComma
+                            [ [] |=> 
+                                let [ts, _] = ts "parseToken" ["COMMA", ","];
+                                let [ts, restOpt] = ts "tryParseToken" ["KEYOPER", "..."];
+                                match restOpt
+                                [ [_] |=>
+                                    let [ts, restExpr] = ts |> sParseExpr;
+                                    let [ts, [_,_,loc2]] = ts "parseToken" ["PUNCT", "]"];
+                                    let loc = mergeLoc loc1 loc2;
+                                    break [ts, [ ["EList", reverse elems2, [restExpr]], loc ]]
+                                , [] |=>
+                                    continue [ts, elems2]
+                                ]
+                            , [_] |=>
+                                let [ts, restExpr] = ts |> sParseExpr;
+                                let [ts, [_,_,loc2]] = ts "parseToken" ["PUNCT", "]"];
+                                let loc = mergeLoc loc1 loc2;
+                                break [ts, [ ["EList", reverse elems2, [restExpr]], loc ] ]
+                             ]    
+                         ];
+                 [ts, yes list1 ] : { [TokenSource, ExprLocMb] }
+             ]
+        , ["OPER", val, loc] |=> 
+            let [ts, _] = ts "takeNextToken" [];
+            [ts, yes [ ["ESym", val], loc ] ]
+        , ["KEYOPER", val, loc] |=>
+            -- TODO change definitions of KEYOPER in the scanner
+            match val
+            [ "=" |=> 
+                [ts, no]
+            , _ |=>
+                let [ts, _] = ts "takeNextToken" [];
+                [ts, yes [ ["ESym", val], loc ] ]
+            ]
+        , ["WILD", val, loc] |=> 
+            let [ts, _] = ts "takeNextToken" [];
+            -- TODO ? do we want an explicit wildcard expression type ?
+             [ts, yes [ ["EVar", "_"], loc ] ]
+        
+        -- parse failing cases, don't take the token
+        , ["EOF", _, _] |=> 
+            [ts, no]
+        , ["PUNCT", _, _] |=> 
+            [ts, no]
+        , ["COMMA", _, _] |=> 
+            [ts, no]
+        , _ |=> 
+            error "missing case 2"
+        ]
+    ];
+
+let sParseExpr : SParseExpr =
+    rec <| (sParseExpr: SParseExpr) -> 
+    ts ->
+    let parts0 = [] : List ExprLoc; 
+    let [ts, parts] = 
+        loop2 [ts, parts0] <| [ts, parts] -> 
+        let [ts, exprOpt] = ts |> sTryParseExpr sParseExpr;
+        match exprOpt
+        [ [] |=>
+            break [ts, parts]
+        , [part] |=>
+            continue [ts, [part ,, parts]]
+        ];
+    match parts
+    [ [] |=>
+        error "failed to parse expression"
+        -- let expr = [["ELit", "failed to parse expression"], nilLoc];
+        -- k expr
+    , _ |=>
+        let expr = foldOpArgs (reverse parts);
+        [ts, expr]
+    ];
+
+
+
+
+let parseExprLoc : { (List Token) -> ExprLoc } =
+    tokens ->
+    let ts = tokenSourceMk tokens;
+    let [ts, expr] = ts |> sParseExpr;
+    let [ts, _] = ts "parseToken" ["EOF",""];
+    expr;

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>
+Glossary
+</title>
+<style>
+html { box-sizing: border-box; }
+*, *:before, *:after { box-sizing: inherit; }
+body { font-family: sans-serif; margin: auto; line-height: 1.5; }
+.s0 { display: flex; flex-direction: column; margin-block-end: 1em; max-width: 100ch; margin-left: calc(50% - 50ch); }
+.s1 { display: flex; flex-direction: column; margin-block-end: 1em; max-width: 100ch; margin-left: calc(50% - 50ch); }
+.s2 { margin-left: 4ch; text-indent: -4ch; }
+.s3 { margin-left: 4ch; text-indent: -2ch; }
+.s4 { text-indent: 4ch; }
+.s5 { text-indent: 0ch; }
+.s6 { max-width: 100ch; margin-top: 1ch; text-indent: 0ch; }
+.s7 { max-width: 100ch; margin-left: calc(50% - 50ch); }
+</style>
+</head>
+<body>
+<hr style='margin: 4ch'>
+<script type="module">
+import "/gen/site/page-reload.js"
+</script>
+<div style="margin-left: calc(50% - 50ch); width: 100ch;">
+<h1>
+Glossary
+</h1>
+</div>
+<section class="s0">
+<dl class="s6">
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+[]
+</dt>
+<dd>
+Tuple-brackets.
+An empty-tuple is also known as: no, nil, unit, an empty-list.
+</dd>
+<dt>
+[ a ,, b ]
+</dt>
+<dd>
+A pair.
+</dd>
+<dt>
+[ a, b, c ]
+</dt>
+<dd>
+Equivalent to [ a ,, [ b ,, [ c ,, [] ] ] ].
+</dd>
+<dt>
+[ a, b ,, c ]
+</dt>
+<dd>
+Equivalent to [ a ,, [ b ,, c ] ].
+</dd>
+<dt>
+()
+</dt>
+<dd>
+Term-brackets
+</dd>
+<dt>
+{}
+</dt>
+<dd>
+Type-brackets
+</dd>
+<dt>
+-&gt;
+</dt>
+<dd>
+lambda
+</dd>
+<dt>
+=&gt;
+</dt>
+<dd>
+lambda-yes
+</dd>
+<dt>
+|-&gt;
+</dt>
+<dd>
+lambda-no
+</dd>
+<dt>
+|=&gt;
+</dt>
+<dd>
+lambda-maybe
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+nil
+</dt>
+<dd>
+A value, typically used to denote the absence of another value, such as a pair.
+</dd>
+<dt>
+pair
+</dt>
+<dd>
+A compound value, containing a head value and a tail value.
+</dd>
+<dt>
+tuple
+</dt>
+<dd>
+A tail-nested arrangement of zero or more pair values terminated by a nil value.
+</dd>
+<dt>
+list
+</dt>
+<dd>
+A tail-nested arrangement of zero or more pair values terminated by a nil value.
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+list
+</dt>
+<dd>
+TODO
+</dd>
+<dt>
+Any
+</dt>
+<dd>
+A type which contains all the recursively-discernable values.
+</dd>
+<dt>
+All
+</dt>
+<dd>
+A type which contains all values.
+</dd>
+<dt>
+Pair
+</dt>
+<dd>
+A type-constructor. (Pair A B) denotes the type containing pair values whose heads have type A and tails have type B.
+</dd>
+<dt>
+Maybe
+</dt>
+<dd>
+A type-constructor. (Maybe A) denotes the type containing 
+</dd>
+<dt>
+List
+</dt>
+<dd>
+A type-constructor.
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+discernable-value
+</dt>
+<dd>
+A value that can be used with the ifNil, ifBool, ifInt, isStr, ifPair functions.
+</dd>
+<dt>
+Discernable
+</dt>
+<dd>
+A type that contains all the values in Nil, Bool, Int, Str and (Pair All All).
+</dd>
+<dt>
+DiscernableRecursive
+</dt>
+<dd>
+A type that contains all the values in Nil, Bool, Int, Str and (Pair Any Any).
+</dd>
+<dt>
+Bool
+</dt>
+<dd>
+A type that contains only the 'true' and 'false' values.
+</dd>
+<dt>
+Int
+</dt>
+<dd>
+A type that contains all whole numbers.
+</dd>
+<dt>
+Str
+</dt>
+<dd>
+A type that contains all string values.
+</dd>
+<dt>
+Data
+</dt>
+<dd>
+A type that contains all the values in Nil, Bool, Int, Str and (Pair Data Data).
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+literal
+</dt>
+<dd>
+Values of type Nil, Int, Str can be denoted using literal syntax ([], 123, "ABC").
+</dd>
+<dt>
+value
+</dt>
+<dd>
+A sufficiently reduced term.
+</dd>
+<dt>
+data
+</dt>
+<dd>
+TODO
+</dd>
+<dt>
+term
+</dt>
+<dd>
+A graph-node which may or may not be reduced to a value.
+</dd>
+<dt>
+type-term
+</dt>
+<dd>
+A graph-node which has or will reduce to a type-value.
+</dd>
+<dt>
+type-value
+</dt>
+<dd>
+A term which reduced to a type-value.  Denotes a set of values.
+</dd>
+<dt>
+type
+</dt>
+<dd>
+Ambiguously used for both type-terms and type-values.
+</dd>
+<dt>
+Type
+</dt>
+<dd>
+The type containing all types.
+</dd>
+<dt>
+term-brackets
+</dt>
+<dd>
+(), used for precedence, and to move from a type-context to a term-context.
+</dd>
+<dt>
+type-brackets
+</dt>
+<dd>
+{}, used for precedence, and to move from a term-context to a type-context.
+</dd>
+<dt>
+term-context
+</dt>
+<dd>
+A context in which operators and juxtaposition denote term-level operations, and literals denote term-level values.
+</dd>
+<dt>
+type-context
+</dt>
+<dd>
+A context in which operators and juxtaposition denote type-level operations, and literals denote singleton-types.
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+no-tuple
+</dt>
+<dd>
+A tuple of length 0. Another name for nil.
+</dd>
+<dt>
+yes-tuple
+</dt>
+<dd>
+A tuple of length 1.
+</dd>
+<dt>
+lambda
+</dt>
+<dd>
+A nameless pattern-matching function. Pattern-match failure is considered a term-error, and so will cause a panic.
+</dd>
+<dt>
+lambda-yes
+</dt>
+<dd>
+A lambda that wraps its result in a yes-tuple.
+</dd>
+<dt>
+lambda-no
+</dt>
+<dd>
+A lambda that returns a no-tuple on pattern-match failure.
+</dd>
+<dt>
+lambda-maybe
+</dt>
+<dd>
+A lambda that returns a no-tuple on pattern-match failure, and wraps its result in a yes-tuple on pattern-match success.
+</dd>
+<dt>
+type-error
+</dt>
+<dd>
+TODO
+</dd>
+<dt>
+term-error
+</dt>
+<dd>
+TODO
+</dd>
+<dt>
+panic
+</dt>
+<dd>
+A term-error at runtime causes a panic which halts the program.
+</dd>
+<dt>
+synthesized-type
+</dt>
+<dd>
+For compound terms, the type calculated for a term, based on its sub-terms.
+For term-variables, the type looked-up in the environment.
+For pattern-variables, the context-type is used.
+For literals, the singleton-type containing only that literal-value.
+</dd>
+<dt>
+context-type
+</dt>
+<dd>
+The type for a term calculated from its parent's context-type, and the synthesized types of zero or more of its siblings.
+</dd>
+<dt>
+type-inhabitation
+</dt>
+<dd>
+A type is inhabited if it contains at least one term.
+</dd>
+<dt>
+relative-complement
+</dt>
+<dd>
+TODO
+</dd>
+<dt>
+Void
+</dt>
+<dd>
+The type that contains no terms.
+</dd>
+<dt>
+singleton-type
+</dt>
+<dd>
+A type that contains exactly one value.
+</dd>
+<dt>
+Unit
+</dt>
+<dd>
+The type which contains only the unit value.
+</dd>
+<dt>
+unit
+</dt>
+<dd>
+Another name for nil
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+strong-form
+</dt>
+<dd>
+TODO
+</dd>
+<dt>
+weak-form
+</dt>
+<dd>
+TODO
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+
+</dt>
+<dd>
+
+</dd>
+<dt>
+TorP
+</dt>
+<dd>
+Term or Pattern, terminology used internally
+</dd>
+<dt>
+TorT
+</dt>
+<dd>
+Term or Type, terminology used internally
+</dd>
+</dl>
+</section>
+<hr style='margin: 4ch'>

@@ -1,0 +1,754 @@
+language ferrum/0.1
+
+let SubstMemo = ListAssoc Addr Addr;
+
+
+let graphSubst : { Int -> Int -> Addr -> Addr -> { Form -> Form } -> (CPS Addr Heap) } =
+    lamDepth -> depthShift -> bodyAddr -> argAddr -> newForm -> (k : K @ { Addr -> Heap -> Any }) -> (heap: Heap) ->
+    heapRef bodyAddr ( bodyAddr2 -> heap ->
+    let [heap2, memo] =
+        loop ( [heap: Heap, memo: SubstMemo, todo: List Addr] ->
+            -- let _ = debug ["gr3 MEMO >", memo];
+            -- let _ = debug ["gr3 TODO <", todo];
+            match todo
+            [ [] |=> break [heap, memo] 
+            , [addr,,addrs] |=>
+                heapDerefInd addr ( [ addr2, _, nc@[depth, sort, form, redu, sa], node ] ->
+                    if (depth <= lamDepth)
+                    [ -> 
+                        (hp: Heap) -> continue [hp, [[addr2, addr2],,memo], addrs]
+                    , -> 
+                        if ((hd node == "HVar") && (depth==(lamDepth+1)))
+                        [ ->
+                            (hp: Heap) -> continue [hp, [[addr2, argAddr],,memo], addrs]
+                        , ->    
+                            match (listKvGet memo addr2)
+                            [ [addr3] |=> 
+                                (hp: Heap) -> continue [hp, memo, addrs]
+                            , [] |=>
+                                let children = nodeChildren node;
+                                heapMap heapRef children ( childrenRef -> 
+                                let unSubstChildren = filter ((child: Addr) -> (listKvGet memo child)==[]) childrenRef;
+                                match unSubstChildren
+                                [ [] |=> 
+                                    let children2 = map ((child: Addr) -> listKvGet memo child) childrenRef;
+                                    let children3 = map ((child: Maybe Addr) -> match child [[]|=>error "failGr3",[child2]|=>child2]) children2;
+                                    let node2 = nodeRebuild node children3;
+                                    let nc2 = [depth+depthShift, sort, newForm form, "None", sa];
+                                    heapNewNode [nc2, node2] <| addr3 ->
+                                        (hp: Heap) -> continue [hp, [[addr2,addr3],,memo], addrs]
+                                    
+                                , _ |=>
+                                    (hp: Heap) -> continue [hp, memo, concat [unSubstChildren, todo]]
+                                ] )
+                            ]
+                        ]
+                    ]
+                ) heap
+            ]
+        ) [heap, [], [bodyAddr2]];
+    let result = listKvGet memo bodyAddr2;
+    match result
+    [ [] |=> error ["gs3 impossible", bodyAddr, memo]
+    , [resultAddr] |=> k resultAddr heap2
+    ] ) heap;
+
+
+let canReduceArith : { (List Indirect) -> Bool }
+    = args ->
+    match args
+    [ [ [_, _, _, ["HValue", aVal]], [_, _, _, ["HValue", bVal]] ] |-> 
+        guardInt aVal <| aVal2 ->
+        guardInt bVal <| bVal2 =>
+        true
+    , _ |=> 
+        false
+    ];
+
+let canReduceCondition : { (List Indirect) -> Bool }
+    = args ->
+    match args
+    [ [ [_, _, _, ["HValue", aVal]], [_, _, _, ["HPair", _, _]] ] |-> 
+        guardBool aVal <| _ =>
+        true
+    , _ |=> 
+        false
+    ];
+
+let canResidualize : { (List Indirect) -> Bool }
+    = args ->
+    match args
+    [ [ [_, _, [0, _, _, _, _], _], [addr, _, _, _] ] |=> 
+        true
+    , [ [_, _, [_, _, _, _, _], ["HValue", _]], [addr, _, _, _] ] |=> 
+        true
+    , _ |=> 
+        false
+    ];
+
+let doResidualize : { Int -> (List Indirect) -> K@(HeapK Addr) -> Heap -> K Addr Heap }
+    = depth -> args -> (k: K@(HeapK Addr)) ->
+    match args
+    [ [ [_, _, [0, _, _, _, _], _], [addr, _, _, _] ] |=> 
+        k addr
+    , [ [_, _, [_, _, _, _, _], ["HValue", _]], [addr, _, _, _] ] |=> 
+        k addr
+    , _ |=> 
+        error "cannot reduce"
+    ];
+
+
+let canSpecialize : { (List Indirect) -> Bool }
+    = args ->
+    match args
+    [ [ [_, _, _, ["HLambda", _]], _ ] |=> 
+        true
+    , _ |=> 
+        false
+    ];
+
+let doSpecialize : { Int -> (List Indirect) -> K@(HeapK Addr) -> Heap -> K Addr Heap }
+    = nodeDepth -> args -> (k: K@(HeapK Addr)) ->
+    match args
+    [ [ [_, _, [funcDepth, _, _, _, _], ["HLambda", body]], [argAddr, _, _, _] ] |=> 
+        let depthShift = nodeDepth - funcDepth - 1;
+        graphSubst funcDepth depthShift body argAddr (oldForm -> "Strong") ( newAddr ->
+        let _ = debug ["SPECIAL", body, argAddr, newAddr];
+        k newAddr )
+    , _ |=> 
+        error "cannot reduce"
+    ];
+
+let canSpecialize1 : { (List Indirect) -> Bool }
+    = args ->
+    match args
+    [ [ [_, _, _, _] ] |=> 
+        true
+    , _ |=> 
+        false
+    ];
+
+let doSpecialize1 : { Int -> (List Indirect) -> K@(HeapK Addr) -> Heap -> K Addr Heap }
+    = depth -> args -> (k: K@(HeapK Addr)) ->
+    match args
+    [ [ [addr, _, _, _ ] ] |=> 
+        k addr
+    , _ |=> 
+        error "cannot reduce"
+    ];
+
+
+let canSpecialize3 : { (List Indirect) -> Bool }
+    = args ->
+    match args
+    [ [ [_, _, _, _], _ ] |=> 
+        true
+    , _ |=> 
+        false
+    ];
+
+let doSpecialize3 : { Int -> (List Indirect) -> K@(HeapK Addr) -> Heap -> K Addr Heap }
+    = depth -> args -> (k: K@(HeapK Addr)) ->
+    match args
+    [ [ [addr, _, _, _ ], _ ] |=> 
+        k addr
+    , _ |=> 
+        error "cannot reduce"
+    ];
+
+
+
+
+let canReduceProjection : { (List Indirect) -> Bool }
+    = args ->
+    match args
+    [ [ [_, _, _, ["HPair", h, t]] ] |=> 
+        true
+    , _ |=> 
+        false
+    ];
+
+let doReduceArith : { { Int -> Int -> Datum } -> Int -> (List Indirect) -> K@(HeapK Addr) -> Heap -> K Addr Heap }
+    = op -> depth -> args -> (k: K@(HeapK Addr)) ->
+    match args
+    [ [ [_, _, _, ["HValue", aVal]], [_, _, _, ["HValue", bVal]] ] |-> 
+        guardInt aVal <| aVal2 ->
+        guardInt bVal <| bVal2 =>
+        let resultVal = op aVal2 bVal2;
+        -- TODO copy form from oper-node ? or just set to "Strong" ?
+        heapNewNode [[depth, "Term", "Weak", "None", []], ["HValue", resultVal]] <| addr ->
+        k addr
+        
+    , _ |=> error ["unable perform reduction"]
+    ];
+
+
+let doReduceCondition : { Int -> (List Indirect) -> K@(HeapK Addr) -> Heap -> K Addr Heap }
+    = depth -> args -> (k: K@(HeapK Addr)) ->
+    match args
+    [ [ [_, _, _, ["HValue", aVal]], [_, _, _, ["HPair", h, t]] ] |-> 
+        guardBool aVal <| aVal2 =>
+        let resultVal = if aVal2 [ -> h, -> t ];
+        k resultVal
+    , _ |=> error ["unable perform reduction"]
+    ];
+
+let doReduceProjection : { { [Addr,,Addr] -> Addr } -> Int -> (List Indirect) -> K@(HeapK Addr) -> Heap -> K Addr Heap }
+    = op -> depth -> args -> (k: K@(HeapK Addr)) ->
+    match args
+    [ [ [_, _, _, ["HPair", h, t]] ] |=> 
+        k (op [h,,t])
+    , _ |=> error ["unable perform reduction"]
+    ];
+
+
+
+let OpDefn = { [(List Strict), (List Indirect) -> Bool, Int -> (List Indirect) -> K@(HeapK Addr) -> Heap -> K Addr Heap] };
+
+let opDefns : List {[ Str, OpDefn ]} 
+    = 
+    [ ["+", [ ["Strict", "Strict"], canReduceArith, doReduceArith (a -> b -> a+b) ] ]
+    , ["-", [ ["Strict", "Strict"], canReduceArith, doReduceArith (a -> b -> a-b) ] ]
+    , ["*", [ ["Strict", "Strict"], canReduceArith, doReduceArith (a -> b -> a*b) ] ]
+    , ["==", [ ["Strict", "Strict"], canReduceArith, doReduceArith (a -> b -> a==b) ] ]
+    , ["?", [ ["Strict", "NonStrict"], canReduceCondition, doReduceCondition ] ]
+    , ["hd", [ ["Strict"], canReduceProjection, doReduceProjection hd ] ]
+    , ["tl", [ ["Strict"], canReduceProjection, doReduceProjection tl ] ]
+    -- TODO
+    , ["$!", [ ["Strict", "Strict"], canSpecialize, doSpecialize ] ]
+    -- , ["$!", [ ["Strict"], canSpecialize1, doSpecialize1 ] ]
+    -- , ["$!", [ ["Strict", "Strict"], canSpecialize3, doSpecialize3 ] ]
+    , ["normalize", [ ["Strict"], canSpecialize1, doSpecialize1 ] ]
+    , ["$?", [ ["Strict", "Strict"], canResidualize, doResidualize ] ]
+    -- TODO ? how much do we want non-strict operator arguments ?
+    -- TODO ? should we allow &&,|| to be reduced, under lambdas, when either argument becomes known ?
+    -- , ["||", [ ["Strict", "NonStrict"], canLogicOp, doLogicOp ] ]
+    -- , ["&&", [ ["Strict", "NonStrict"], canLogicOp, doLogicOp ] ]
+    -- , ["|-", [ ["Strict", "NonStrict"], canBoolGuard, doBoolGuard ] ]
+    -- , ["|--", [ ["Strict", "NonStrict"], canBoolGuardChain, doBoolGuardChain ] ]
+
+    -- TODO ? implement the Z-combinator as an operator ?
+    -- ["Z",, ]
+    -- ["$@",, ]
+
+    -- ["$??",, hyper-strict / deep seq ]
+    -- ( a :: b ) $??  --->  (a $??) (b $??)
+    -- $?? ( a :: b )  --->  ($?? a) ($?? b)
+    ];
+
+let grInitEnv = 
+    [
+        -- "if", -- TODO 
+        -- "if", ["ELambda", ["EVar", "a"], ["ELambda", ["EVar", "b"], ["EOp", "if", [["EVar", "a"],["EVar", "b"]]]]]
+    ];
+
+let lookupOpDefn : { Str -> OpDefn }
+    = opName ->
+    match (lookup opName opDefns)
+    [ [] |=> error ["unknown operator", opName]
+    , [opDefn] |=> opDefn
+    ];
+
+let reduceRedex : { Addr -> (HeapA Nil) } =
+    addr -> (k : K @ HeapK Nil) ->
+    heapDeref addr <| [nc@[nodeDepth, _, form1, redu, _], node] ->
+    match node
+    [ ["HApply", func, arg] |=> 
+        heapDeref func <| [fnc@[funcDepth, _, _, _, _], fNode] ->
+        match fNode
+        [ ["HLambda", body] |=>
+            let depthShift = nodeDepth - funcDepth - 1;
+            -- copy the form from the application-node to every freshly instantiated node
+            graphSubst funcDepth depthShift body arg ((form2: Form) -> form1) <| newAddr ->
+            heapLink addr newAddr <| -> 
+            k []
+        , other |=> 
+            heapSetReducedWeak addr <| ->
+            k []
+        ]
+    , ["HOper", opName, args] |=>
+        let [strictness, canReduce, doReduce]: OpDefn = lookupOpDefn opName;
+        heapMap heapDerefInd args <| argNodes -> 
+        if (canReduce argNodes)
+        [ ->
+            doReduce nodeDepth argNodes <| addr2 ->
+            heapLink addr addr2 <| ->
+            k []
+        , ->
+            heapSetReducedForm "Weak" addr <| ->
+            k []
+        ]
+
+    , other |=> 
+        match redu
+        [ "None" |=> 
+            heapSetReducedForm "Weak" addr <| ->
+            k []
+        , _ |=> 
+            error ["reduceRedex", "unexpected node, already reduced", other]
+        ]
+        
+    ];
+
+
+let firstNotReducedNode2 : { (List Addr) -> (HeapA (Maybe Addr)) } =
+    addrs -> (k : K @ (HeapK (Maybe Addr))) ->
+    heapLoop addrs ( 
+        (addrs: List Addr) ->
+        (kBreak : KB @ (HeapK (Maybe Addr))) ->
+        (kContinue : KC @ (HeapK (List Addr))) ->
+        match addrs
+        [ [] |=> 
+            kBreak [] 
+        , [addr ,, addrss] |=>
+            heapDeref addr <| [[_, _, form, redu, _],node] ->
+            match [form, redu]
+            [ [ _, "None" ] |=>
+                kBreak [addr]
+            , [ "Strong", "Weak" ] |=>
+                kBreak [addr]
+            , _ |=> 
+                kContinue addrss
+            ]
+        ]
+    ) <| addrMb ->
+    k addrMb;
+
+let firstNotReducedNode3 : { Form -> (List Addr) -> (HeapA (Maybe Addr)) } =
+    form -> addrs -> (k : K @ (HeapK (Maybe Addr))) ->
+    heapLoop addrs ( 
+        (addrs: List Addr) ->
+        (kBreak : KB @ HeapK (Maybe Addr)) ->
+        (kContinue : KC @ HeapK (List Addr)) ->
+        match addrs
+        [ [] |=> 
+            kBreak [] 
+        , [addr ,, addrss] |=>
+            heapDeref addr <| [[_, _, form2, redu, _],node] ->
+            match [form, redu]
+            [ [ _, "None" ] |=>
+                kBreak [addr]
+            , [ "Strong", "Weak" ] |=>
+                kBreak [addr]
+            , _ |=> 
+                kContinue addrss
+            ]
+        ]
+    ) <| addrMb ->
+    k addrMb;
+
+let RedexCategory = { "Beta" | "Delta" | "Mark" | "NotARedex" };
+let RedexCategory2 = { "Beta" | "Delta" | "MarkWeak" | "MarkStrong" | "NotARedex" };
+
+let categorizeRedex : { Addr -> (HeapA RedexCategory) } =
+    addr -> (k : K @ (HeapK (RedexCategory))) ->
+    heapDeref addr <| [ [depth, _, form, redu, _], node] ->
+    if ((redu == "Weak") || (redu == "Strong"))
+    [ -> k "NotARedex"
+    , ->
+        let children = nodeChildren node;
+        heapMap heapDeref children <| childNodes ->
+        let unreducedChild = listExists ( [[_, _, _, redu, _],_] -> redu == "None") childNodes;
+        if unreducedChild
+        [ -> k "NotARedex"
+        , ->
+            if ((depth > 0) && (form == "Weak"))
+            [ -> k "Mark"
+            , ->
+                match node
+                [ ["HApply", func, arg] |=> 
+                    heapDeref func <| [fnc,fNode] ->
+                    match fNode
+                    [ ["HLambda", _] |=> 
+                        k "Beta"
+                    , _ |=> 
+                        k "Mark"
+                    ]
+                , ["HOper", opName, args] |=>
+                    let [strictness, canReduce, doReduce]: OpDefn = lookupOpDefn opName;
+                    heapMap heapDerefInd args <| 
+                    argNodes -> 
+                    if (canReduce argNodes)
+                    [ -> k "Delta"
+                    , -> k "Mark"
+                    ]
+                , other |=>
+                    k "Mark"
+                ]
+            ]
+        ]
+    ];
+
+
+let getWeakStrictChildren : { Node -> (List Addr) }
+    = node ->
+    match node
+    [ [ "HVar" ] |=> []
+    , [ "HLambda", body ] |=> []
+    , [ "HApply", func, arg ] |=> [func, arg]
+    , [ "HValue", val ] |=> []
+    , [ "HPair", h, t ] |=> [h,t]
+    , [ "HOper", opName, args ] |=>
+        -- TODO only return stict args
+        args
+    , other |=> error ["getWeakStrictChildren", other]
+    ];
+
+let getStrongStrictChildren : { Node -> (List Addr) }
+    = node ->
+    match node
+    [ [ "HVar" ] |=> []
+    , [ "HLambda", body ] |=> [body]
+    , [ "HApply", func, arg ] |=> [func, arg]
+    , [ "HValue", val ] |=> []
+    , [ "HPair", h, t ] |=> [h,t]
+    , [ "HOper", opName, args ] |=> args
+    , other |=> error ["getStrongStrictChildren", other]
+    ];
+
+let getStrictChildren : { Form -> Node -> (List Addr) }
+    = form -> node ->
+    match [form, node]
+    [ [ _         , [ "HVar"                    ] ] |=> []
+    , [ "Weak"    , [ "HLambda"  , body         ] ] |=> []
+    , [ "Strong"  , [ "HLambda"  , body         ] ] |=> [body]
+    , [ _         , [ "HApply"   , func, arg    ] ] |=> [func, arg]
+    , [ _         , [ "HValue"   , val          ] ] |=> []
+    , [ _         , [ "HPair"    , h, t         ] ] |=> [h, t]
+    , [ "Weak"    , [ "HOper"    , opName, args ] ] |=> args     -- TODO in weak mode, only return stict args
+    , [ "Strong"  , [ "HOper"    , opName, args ] ] |=> args
+    , other |=> error ["getStrictChildren", other]
+    ];
+
+
+
+let isReduced1 : { [NodeCommon, Node] -> Bool }
+    = [ [_, _, form, redu, _], node ] -> 
+    match [form, redu]
+    [ [_, "None" ] |=> false
+    , ["Strong", "Weak" ] |=> false
+    , _ |=> true
+    ];
+
+
+
+let isAllReduced1 : { (List Addr) -> (HeapA Bool) } =
+    addrs -> (k : K @ HeapK Bool) ->
+    heapMap heapDeref addrs <| ncNodes ->
+    let result = listForAll isReduced1 ncNodes;
+    k result;
+
+
+let isReduced : { Form -> [NodeCommon, Node] -> Bool } =
+    form -> [ [_, _, form2, redu, _], node ] -> 
+    match [form, redu]
+    [ [_, "None" ] |=> false
+    , ["Strong", "Weak" ] |=> false
+    , _ |=> true
+    ];
+
+
+
+let isAllReduced : { Form -> (List Addr) -> (HeapA Bool) } =
+    form -> addrs -> (k : K @ (HeapK Bool)) ->
+    heapMap heapDeref addrs <| ncNodes ->
+    let allReduced = listForAll (isReduced form) ncNodes;
+    k allReduced;
+
+let isBetaRedex : { Addr -> (HeapA Bool) } =
+    addr -> (k : K @ (HeapK Bool)) ->
+    heapDeref addr <| [nc,node] ->
+    match node
+    [ ["HApply", func, arg] |=> 
+        heapDeref func <| [fnc,fNode] ->
+        match fNode
+        [ ["HLambda", _] |=> k true
+        , _ |=> k false
+        ]
+    , _ |=> k false
+    ];
+     
+let isDeltaRedex : { Addr -> (HeapA Bool) } =
+    addr -> (k : K @ (HeapK Bool)) ->
+    heapDeref addr <| [nc @ [depth,_,_,_,_],node] ->
+    match node
+    [ ["HOper", opName, args] |=>
+        let [strictness, canReduce, doReduce]: OpDefn = lookupOpDefn opName;
+        heapMap heapDerefInd args <| argNodes -> 
+        if (canReduce argNodes)
+        [ -> k true
+        , -> k false
+        ]
+        -- let [arity, tryMakeOpAction]: OpDefn3 = lookupOpDefn2 opName;
+        -- heapMap heapDerefInd args <| argNodes -> 
+        -- tryMakeOpAction depth argNodes <| maybeOpAction ->
+        -- match maybeOpAction
+        -- [ [_] |=> k true
+        -- , [] |=> k false
+        -- ]
+    -- , ["TyOper", opName, args] |=>
+    --     let [nodeDepth, _, _, _] = nc;
+    --     let [tryReduce]: TyOpDefn = lookupTyOpDefn opName;
+    --     heapMap heapDerefInd args <| argNodes -> 
+    --     tryReduce nodeDepth argNodes <| addr2Maybe ->
+    --     match addr2Maybe
+    --     [ [] |=> k false 
+    --     , [ _ ] |=> k true
+    --     ]
+    , other |=>
+        k false
+    ];
+     
+
+
+
+let getReductionMode : { Form -> Form -> Form }
+    = contextForm -> targetForm ->
+    match [ contextForm, targetForm ]
+    [ ["Weak", "Strong"] |=> "Strong"
+    , _ |=> "Weak"
+    ];
+
+
+let categorizeRedex2 : { Form -> Addr -> (HeapA RedexCategory2) } =
+    contextForm -> addr -> (k : K @ (HeapK RedexCategory2)) ->
+    heapDeref addr <| [ [depth, _, form, redu, _], node] ->
+    let reductionMode = getReductionMode contextForm form;
+    match [reductionMode, redu]
+    [ ["Weak"    , "Weak"    ] |=> k "NotARedex"
+    , ["Strong"  , "Strong"  ] |=> k "NotARedex"
+    , ["Weak"    , "Strong"  ] |=> k "NotARedex"
+    , ["Weak"    , "None"    ] |=>
+        let candidateChildren = getWeakStrictChildren node;
+        -- let allReduced = isAllReduced heap "Weak" candidateChildren;
+        isAllReduced "Weak" candidateChildren <| allReduced ->
+        if allReduced
+        [ -> 
+            isBetaRedex addr <| isB ->
+            isDeltaRedex addr <| isD ->
+            if (isB) [ -> k "Beta", -> 
+            if (isD) [ -> k "Delta", -> 
+            k "MarkWeak" ] ]
+        , -> 
+            k "NotARedex"
+        ]
+    , ["Strong"    , "Weak"    ] |=> 
+        -- let allReduced = isAllReduced1 heap (nodeChildren node);
+        isAllReduced1 (nodeChildren node) <| allReduced ->
+        if allReduced
+        [ -> k "MarkStrong"
+        , -> k "NotARedex"
+        ]
+    , ["Strong"    , "None"    ] |=>
+        let candidateChildren = getWeakStrictChildren node;
+        -- let allReduced = isAllReduced heap "Weak" candidateChildren;
+        isAllReduced "Weak" candidateChildren <| allReduced ->
+        if allReduced
+        [ ->
+            isBetaRedex addr <| isB ->
+            isDeltaRedex addr <| isD ->
+            if (isB) [ -> k "Beta", -> 
+            if (isD) [ -> k "Delta", -> 
+            -- let allReduced2 = isAllReduced1 heap (nodeChildren node);
+            isAllReduced1 (nodeChildren node) <| allReduced2 ->
+            if allReduced2 [ -> k "MarkStrong", ->
+            k "NotARedex" ] ] ]
+        , -> 
+            k "NotARedex" 
+        ]
+    , other |=> error ["categorizeRedex2", "impossible"]
+    ];
+
+
+
+
+let findNextRedex2 : { Stack2 -> (HeapA Stack2) } = 
+    stack -> (k : K @ (HeapK Stack2)) ->
+    heapLoop stack ( 
+        (stack : Stack2) ->
+        (kBreak : KB @ (HeapK Stack2)) ->
+        (kContinue : KC @ (HeapK Stack2)) ->
+        let _ = debug ["Stack", stack];
+        match stack
+        [ [] |=> kBreak []
+        , [[addr, form] ,, addrs] |=>
+            heapDeref addr <| [[_, _, form2, redu, _],node] -> 
+            let reductionMode = getReductionMode form form2;
+            match redu
+            [ "None" |=> 
+                heapDeref addr <| [nc,node] -> 
+                -- let reductionMode = getReductionMode form form2;
+                let strictChildren = getStrictChildren reductionMode node;
+                -- let nextNode = firstNotReducedNode3 heap "Weak" strictChildren;
+                firstNotReducedNode3 "Weak" strictChildren <| nextNode ->
+                let _ = debug ["strictChildren", addr, reductionMode, strictChildren, nextNode];
+                match nextNode
+                [ [] |=> 
+                    -- match form2
+                    match reductionMode
+                    [ "Weak" |=> kBreak stack
+                    , "Strong" |=>
+                        isBetaRedex addr <| isB ->
+                        isDeltaRedex addr <| isD ->
+                        if (isB || isD)
+                        [ -> kBreak stack
+                        , -> 
+                            let strictChildren2 = getStrictChildren "Strong" node;
+                            -- let nextNode2 = firstNotReducedNode3 heap "Strong" strictChildren2;
+                            -- let nextNode2 = firstNotReducedNode2 heap strictChildren2;
+                            firstNotReducedNode2 strictChildren2 <| nextNode2 ->
+                            match nextNode2
+                            [ [] |=> 
+                                kBreak stack
+                            , [nextAddr2] |=>
+                                kContinue [ [nextAddr2, "Weak"],,stack]
+                            ]
+                        ]
+                    ]
+                , [nextAddr] |=> 
+                    kContinue [[nextAddr, form2],,stack]
+                ] 
+            , "Weak" |=>
+                match reductionMode
+                [ "Strong" |=>
+                    let strictChildren2 = getStrictChildren "Strong" node;
+                    -- let nextNode2 = firstNotReducedNode3 heap "Strong" strictChildren2;
+                    -- let nextNode2 = firstNotReducedNode2 heap strictChildren2;
+                    firstNotReducedNode2 strictChildren2 <| nextNode2 ->
+                    match nextNode2
+                    [ [] |=> 
+                        kBreak stack
+                    , [nextAddr2] |=>
+                        kContinue [ [nextAddr2, "Weak"],,stack]
+                    ]
+                , "Weak" |=>
+                    kContinue addrs
+                ]
+            , _ |=>
+                kContinue addrs
+            ]
+        ]
+    ) <| stack2 ->
+    k stack2;
+
+let reduceAllB : { Addr -> (HeapA Nil) } =
+    root -> (k : K @ (HeapK Nil)) ->
+    heapLoop ([[root, "Weak"]] : Stack2) ( 
+        (stack: Stack2) ->
+        (kBreak : KB @ HeapK Nil) ->
+        (kContinue : KC @ HeapK Stack2) ->
+        -- let _ = traceHeap root (n -> h -> h) heap;
+        traceHeap root <| ->
+        -- let _ = debug d;
+        -- let stack2 = findNextRedex2 heap stack;
+        findNextRedex2 stack <| stack2 ->
+        -- let _ = debug ["Stack1", stack];
+        let _ = debug ["Stack2", stack2];
+        match stack2
+        [ [] |=> 
+            kBreak []
+        , [[addr, form],,stack3] |=> 
+            -- let redexCateg = categorizeRedex2 heap form addr;
+            categorizeRedex2 form addr <| redexCateg ->
+            let _ = debug ["Redex", redexCateg, addr];
+            match redexCateg
+            [ "Beta" |=>
+                -- let heap2 = reduceRedex heap addr;
+                reduceRedex addr <| ->
+                kContinue stack2
+            , "Delta" |=>
+                reduceRedex addr <| heap2 ->
+                kContinue stack2
+            , "Mark" |=>
+                heapSetReducedForm "Weak" addr <| ->
+                kContinue stack3
+            , "MarkWeak" |=>
+                heapSetReducedForm "Weak" addr <| ->
+                kContinue stack3
+            , "MarkStrong" |=>
+                heapSetReducedForm "Strong" addr <| ->
+                kContinue stack3
+            , other |=> error ["reduceAll impossible", other]
+            ]
+        ]
+    ) <| ->
+    k [];
+
+let reduceAll2 : { Addr -> K@(HeapK {[]}) -> Heap -> K [] Heap } =
+    root -> (k: K@(HeapK {[]})) ->
+    reduceAllB root <| ->
+    k [];
+
+let InstantiateBuiltins = { K@(HeapK HEnv) -> Heap -> K [] Heap };
+
+let instantiateBuiltins : InstantiateBuiltins = 
+    (k: K@(HeapK HEnv)) -> 
+    k [];
+
+let graphReduceExpr : { InstantiateBuiltins -> Expr -> Expr } =
+    instBuiltins -> expr ->
+
+    let heapEmpty = heapMk [];
+    let henv = [];
+    let expr2 = 
+        instBuiltins ( _ ->
+        instantiate 0 henv expr ( addr1 ->
+        reduceAll2 addr1 ( _ ->
+        readbackAddr addr1 ( expr -> 
+        heap -> expr ) ) ) ) heapEmpty;
+
+    expr2;
+
+let graphReduceDecls : { Bool -> [Heap, HEnv, (List Decl)] -> [Heap, HEnv, (List Decl)] } =
+    doGR -> [heap, henv, decls] ->
+    -- error ["TODO", "graphReduceDecls"]; -- maybe?
+    [heap, henv, decls];
+
+
+
+let graphReduceInit : { InstantiateBuiltins -> [Heap, HEnv] } =
+    instBuiltins -> 
+    -- error ["TODO", "graphReduceInit"]; -- maybe?
+    [ heapMk [], [] ];
+
+
+let builtinDecls : List Decl = [];
+
+
+let graphReduceStr : { Str -> Str } =
+    input ->
+    let grs : { Str -> (HeapA Str) } =
+        input ->
+        (k : K @ (HeapK Str)) ->
+        let expr = parseExpr (scan input);
+        instantiate 0 [] expr <| addr ->
+        traceHeap addr <| _ ->
+        reduceAll2 addr <| _ ->
+        traceHeap addr <| _ ->
+        readbackAddr addr <| expr ->
+        let result = showExpr expr;
+        k result;
+   
+    let heapEmpty = heapMk [];
+    let result = grs input (result -> heap2 -> result) heapEmpty;
+    result;
+
+
+let graphReduceStrToExpr : { Str -> Expr } =
+    input ->
+    let grse : { Str -> (HeapA Expr) } =
+        input ->
+        (k : K @ (HeapK Expr)) ->
+        let expr = parseExprStr input;
+        let heapEmpty = heapMk [];
+        instantiate 0 [] expr <| addr ->
+        traceHeap addr <| ->
+        reduceAll2 addr <| ->
+        traceHeap addr <| ->
+        readbackAddr addr <| expr2 -> 
+        k expr2;
+
+    let heapEmpty = heapMk [];
+    let result = grse input (result -> heap2 -> result) heapEmpty;
+    result;
+

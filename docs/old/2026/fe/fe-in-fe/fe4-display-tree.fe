@@ -1,0 +1,561 @@
+language ferrum/0.1
+
+
+let DisplayTree = Rec <| DT ->
+    { ["Leaf", Str]
+    | ["Branch", (List {[Str, DT]})]
+    };
+
+let dtLeaf : { Str -> DisplayTree } =
+    text -> ["Leaf", text];
+
+let dtBranch : { (List {[Str, DisplayTree]}) -> DisplayTree } =
+    parts -> ["Branch", parts];
+
+let DisplayPart = {[Str, DisplayTree]};
+let DisplayParts = List DisplayPart;
+
+let dtNil = dtLeaf "";
+
+let strTranslate : { Str -> { Str -> Str } -> Str } =
+    x -> f ->
+    let xLen = strLen x;
+    let [_, result] = 
+        while [0, "" : Str] <|
+        [pos, result] ->
+        if (pos == xLen)
+        [ -> []
+        , -> 
+            let y = f (strCharAt x pos);
+            [ [pos+1, strAdd result y] ]
+        ];
+    -- let _ = debug ["Translate", x, result];
+    result;
+
+-- TODO limit the level of indentation, use a fully vertical layout beyond this point
+-- let maxIndent = 80;
+
+-- let maxLineLen = 1000000000;
+let maxLineLen = 60;
+-- let maxLineLen = 15;
+
+-- let dtShow0 : { DisplayTree -> (List Str) -> (List Str) } =
+--     rec <| (dtShow : { DisplayTree -> (List Str) -> (List Str) }) ->
+--     dt -> lines ->
+--     match dt
+--     [ ["Leaf", a] |=> 
+--         -- let _ = debug ["Leaf", a];
+--         [a,,lines]
+--     , ["Branch", bs] |=>
+--         let [_, lines2] = 
+--             while [bs, lines : List Str] <|
+--             [ [[label, dt2],,bs3], lines3] |=>
+--             [ bs3, dtShow dt2 [label,,lines3] ];
+--         lines2
+--     , _ |=> error ["oops", dt]
+--     ];
+
+-- let dtShow0b : { DisplayTree -> (List Str) } =
+--     dt -> 
+--     reverse (dtShow0 dt []);
+
+-- let dtShow1a : { DisplayTree -> (List Str) } =
+--     rec <| (dtShow : { DisplayTree -> (List Str) }) ->
+--     dt ->
+--     match dt
+--     [ ["Leaf", a] |=> [a]
+--     , ["Branch", bs] |=>
+--         let bs2 = for bs <| [label, dt2] ->
+--             [label, dtShow dt2];
+--         let [_, lineLen] = 
+--             while [bs2, 0] <|
+--             [ [ [label, lines],,bs3 ], len ] |=>
+--             match lines
+--             [ [line] |=> 
+--                 [ bs3, len + strLen line ]
+--             , _ |=>
+--                 [ [], 0 - 1 ]
+--             ];
+--         if ((0 <= lineLen) && (lineLen < maxLineLen))
+--         [ ->
+--             let [_, line] = 
+--                 while [bs2, "" : Str] <|
+--                 [ [ [label, lines],,bs3 ], wholeLine ] |=>
+--                 match lines
+--                 [ [line] |=> 
+--                     [ bs3, strCat [wholeLine, label, line] ]
+--                 , _ |=>
+--                     error "impossible"
+--                 ];
+--             [line]
+--         , ->
+--             let [_, lines] = 
+--                 while [bs2, [] : List Str] <|
+--                     [ [[label, lines2],,bs3], lines] |=>
+--                     let indent = strTranslate label ( _ -> " ");
+--                     -- let indent = "";
+--                     let [_, _, lines3] = 
+--                         while [lines2, label: Str, [] : List Str] <|
+--                             [ [line,,lines4], prefix, result] |=>
+--                             let line2 = strAdd prefix line;
+--                             [ lines4, indent, [line2,,result]];
+--                     [ bs3, append lines3 lines];
+--             reverse lines
+--         ]
+--     , _ |=> error ["oops", dt]
+--     ];
+
+
+let dtShow1b : { DisplayTree -> (List (List Str)) } =
+    rec <| (dtShow : { DisplayTree -> (List (List Str)) }) ->
+    dt ->
+    match dt
+    [ ["Leaf", a] |=> [[a]]
+    , ["Branch", bs] |=>
+        let bs2 = for bs <| [label, dt2] ->
+            [label, dtShow dt2];
+        let [_, lineLen] = 
+            while [bs2, 0] <|
+            [ [ [label, lines],,bs3 ], len ] |=>
+            match lines
+            [ [line] |=> 
+                -- [ bs3, len + strLen line ]
+                let [_,len2] = while [line,0] ([[part,,parts],len2] |=> [parts, len2 + strLen part]);
+                [ bs3, len + len2 ]
+            , _ |=>
+                [ [], 0 - 1 ]
+            ];
+        if ((0 <= lineLen) && (lineLen < maxLineLen))
+        [ ->
+            let [_, line] = 
+                while [bs2, [] : List Str] <|
+                [ [ [label, lines],,bs3 ], wholeLine ] |=>
+                match lines
+                [ [line2] |=> 
+                    [ bs3, concat [reverse line2, [label], wholeLine] ]
+                , _ |=>
+                    error "impossible"
+                ];
+            -- let _ = debug ["bs", bs];
+            -- let _ = debug ["bs2", bs2];
+            -- let _ = debug ["line", strJoin " " (reverse line)];
+            [[strCat (reverse line)]]
+        , ->
+            let [_, lines] = 
+                while [bs2, []: List (List Str)] <|
+                    [ [[label, lines2],,bs3], lines] |=>
+                    let indent = strTranslate label ( _ -> " ");
+                    -- let indent = "";
+                    let [_, _, lines3] = 
+                        while [lines2, label: Str, []: List (List Str)] <|
+                            [ [line,,lines4], prefix, result] |=>
+                            let line2 = [prefix,, line];
+                            [ lines4, indent, [line2,,result]];
+                    [ bs3, append lines3 lines];
+            reverse lines
+        ]
+    , _ |=> error ["oops", dt]
+    ];
+
+
+
+-- let dtShow2 : { DisplayTree -> (List Str) } =
+--     rec <| (dtShow : { DisplayTree -> (List Str) }) ->
+--     dt ->
+--     match dt
+--     [ ["Leaf", a] |=> [a]
+--     , ["Branch", bs] |=>
+--         let bs2 = for bs <| [label, dt2] ->
+--             [label, dtShow dt2];
+--         let [_, lines] = 
+--             while [bs2, []: List Str] <|
+--                 [ [[label, lines2],,bs3], lines] |=>
+--                 let indent = strTranslate label ( _ -> " ");
+--                 let [_, _, lines3] = 
+--                     while [lines2, label: Str, lines] <|
+--                         [ [line,,lines4], prefix, result] |=>
+--                         let line2 = strAdd prefix line;
+--                         [ lines4, indent, [line2,,result]];
+--                 [ bs3, lines3];
+--         reverse lines
+--     , _ |=> error ["oops", dt]
+--     ];
+
+-- let strAddMaybeMaxLen : { Int -> (MaybeStr) -> (MaybeStr) -> (MaybeStr) } =
+--     maxLen -> a -> b ->
+
+-- TODO it should be possible to output indented code in a single pass
+--      rather than repeatedly prepending short spans of spaces for each time a list of lines is returned for each indentation level
+-- let dtShow3 : { DisplayTree -> [Str,Str,(Maybe Str)] -> (List Str) -> [(Maybe Str), (List Str)] } =
+--     dt -> [prefixFirst, prefixRest, currentLine] -> outputLines ->
+--     error "TODO"
+--     let cLine = strAddMaybeMaxLen 40 currentLine ???;
+--     let oLines = [???,, outputLines];
+--     [cLine, oLines]
+
+
+let dtShow2b : { DisplayTree -> (List Str) } = 
+    dt ->
+    let lineParts = dtShow1b dt;
+    -- let lines = for lineParts <| parts -> strCat parts;
+    let lines = for lineParts <| parts -> strJoin " " parts;
+    -- let lines = map strCat lineParts;
+    lines;
+
+
+-- let dtShowJoin : { DisplayTree -> Str } = 
+--     dt ->
+--     strJoin "\n" (dtShow dt);
+--     -- strJoin " " (dtShow dt);
+
+-- let displayAny : { Any -> DisplayTree } = 
+--     rec <| ( disp : { Any -> DisplayTree } ) ->
+--     a ->
+--     ifPair a 
+--     [ [aHd,,aTl] -> 
+--         let parts : List {[Str, DisplayTree]} = 
+--             [ ["[   ", disp aHd] , [",,  ", disp aTl], ["]", ["Leaf", ""]] ];
+--         ["Branch", parts]: DisplayTree
+--     , _ ->
+--         ["Leaf", show a]: DisplayTree
+--     ];
+
+let displayAny2 : { Any -> DisplayTree } = 
+    rec <| ( disp : { Any -> DisplayTree } ) ->
+    x ->
+    let [elems, xTail] = 
+        while [ []: List Any, x ] <|
+        [ elems, [x1,,xs] ] |=>
+        [ [x1,,elems], xs ];
+    let [_, _, parts] = 
+        while [reverse elems, "[ " : Str, []: List {[Str, DisplayTree]}] <|
+        [ [e1,,es], label, parts ] |=>
+        [es, ", ", [ [label, disp e1],,parts]];
+    match [parts, xTail]
+    [ [ [], x2 ] |=>
+        ["Leaf", show x2]: DisplayTree
+    , [ _, [] ] |=>
+        ["Branch", reverseOnto parts [ ["]", ["Leaf", ""]] ] ]
+    , [ _, x2 ] |=>
+        ["Branch", reverseOnto parts [ [",, ", disp x2], ["]", ["Leaf", ""]] ] ]
+    ];
+
+
+-- An alternative form of display-tree, a string-tree
+--   perhaps not the best idea
+
+-- let StrTreeTag = { "" };
+
+-- let StrTree = Rec <| ST ->
+--     { Str 
+--     | [StrTreeTag,,(List ST)]
+--     };
+
+
+-- let convertDisplayTreeToStrTree : { DisplayTree -> StrTree } =
+--     rec <| (cdt : { DisplayTree -> StrTree } ) ->
+--     dt ->
+--     match dt
+--     [ ["Leaf", text] |=>
+--         text: StrTree
+--     , ["Branch", parts] |=>
+--         let sts = 
+--             for parts <| [label, dt2] ->
+--             ["", label, cdt dt2];
+--         ["",,sts]: StrTree
+--     ];
+
+-- -- output 1 string per line, no indentation
+-- let stShow0 : { Int -> Int -> StrTree -> (List Str) } =
+--     maxIndent -> maxWidth ->
+--     st ->
+--     let [_, output] = 
+--         while [ [st]: List StrTree, []: List Str ] <|
+--         [ [st1,,sts], output ] |=>
+--         ifStr st1
+--         [ st2 -> 
+--             [ sts, [st2,,output] ]
+--         , ["",,sts2] ->
+--             [ append sts2 sts, output ]
+--         ];
+--     reverse output;
+
+-- let blank : { Str -> Str } =
+--     input ->
+--     let [_, output] = 
+--         while [strLen input, []: List Str] <|
+--         [len, output] ->
+--         if (len==0)
+--         [ -> []
+--         , -> [ [ len - 1, [" ",, output] ] ]
+--         ];
+--     strCat output;
+
+
+-- let popIndentStack : { (List Str) -> (List Str) } =
+--     indents ->
+--     match indents
+--     [ [] |=>
+--         error ["popIndentStack", "OOPS", "indent stack empty"]
+--         -- []
+--     , [_,,indents2] |=>
+--         indents2    
+--     ];
+
+
+-- -- output 1 string per line, with indentation
+-- let stShow1 : { Int -> Int -> StrTree -> (List Str) } =
+--     maxIndent -> maxWidth ->
+--     st ->
+--     let [_, _, _, output] = 
+--         while [ [ [st] ]: List (List StrTree), [""]: List Str, "" : Str, []: List Str ] <|
+--         [ [st1,,sts], indents, line, output ] |=>
+--         match st1
+--         [ [] |=>
+--             let newIndents = popIndentStack indents;
+--             [ sts, newIndents, line, output]
+--         , [st11,, st2] |=>
+--             ifStr st11
+--             [ st12 -> 
+--                 let newLine = strAdd (strCat indents) st12;
+--                 let todo : List (List StrTree) = [ st2,, sts ];
+--                 [ todo, indents, line, [newLine,,output] ]
+--             , ["",,sts2] ->
+--                 let newIndents = ["    ",, indents];
+--                 let todo : List (List StrTree) = [ sts2, st2,, sts ];
+--                 [ todo , newIndents, line, output ]
+--             ]
+--         ];
+--     reverse output;
+
+-- let stShow2 : { Int -> Int -> StrTree -> (List Str) } =
+--     maxIndent -> maxWidth ->
+--     st ->
+--     let [_, _, line, output] = 
+--         while [ [ [st] ]: List (List StrTree), [""]: List Str, "" : Str, []: List Str ] <|
+--         [ [st1,,sts], indents, line, output ] |=>
+--         match st1
+--         [ [] |=>
+--             let newIndents = popIndentStack indents;
+--             [ sts, newIndents, line, output ]
+--         , [st11,, st2] |=>
+--             ifStr st11
+--             [ st12 -> 
+--                 let todo : List (List StrTree) = [ st2,, sts ];
+--                 let newLine = strAdd line st12;
+--                 if (strLen newLine > maxWidth)
+--                 [ ->
+--                     let outputLine = line;
+--                     let nextLine = strAdd (strCat indents) st12;
+--                     [ todo, indents, nextLine, [outputLine,,output] ]
+--                 , ->
+--                     [ todo, indents, newLine, output ]
+--                 ]
+--                 -- let newLine = strAdd (strCat indents) st12;
+--                 -- let todo : List (List StrTree) = [ st2,, sts ];
+--                 -- [ todo, indents, line, [newLine,,output] ]
+--             , ["",,sts2] ->
+--                 let newIndents = ["    ",, indents];
+--                 let todo : List (List StrTree) = [ sts2, st2,, sts ];
+--                 [ todo , newIndents, line, output ]
+--             ]
+--         ];
+--     reverse [line,,output];
+
+-- let hdMaybe : { A @ (List Any) -> (Maybe (Elem A)) } =
+--     (a : A @ (List Any)) ->
+--     match a
+--     [ [] |=> []
+--     , [a2,,_] |=> [a2] 
+--     ];
+
+-- let Direction = { "H" | "V" };
+
+-- let Show3State = Rec <| S3S -> 
+--     { [ (List (List StrTree)), (List Str), Direction, (Maybe S3S), [Str,Str], (List Str) ] };
+
+-- TODO smarter back-tracking, so as not to redo work
+
+-- let stShow3 : { Int -> Int -> StrTree -> (List Str) } =
+--     maxIndent -> maxWidth ->
+--     st ->
+--     let [_, _, _, _, line, output] : Show3State = 
+--         while [ [ [st] ]: List (List StrTree), [""]: List Str, "H" : Direction, []: Maybe Show3State, ["",""]: {[Str,Str]}, []: List Str ] <|
+--         [ [st1,,sts], indents, dir, bt, line@[lineIndent, lineContent], output ] |=>
+--         let _ = debug ["ShowWhile", dir, bt==[], strLen lineContent, lineContent];
+--         match st1
+--         [ [] |=>
+--             let newIndents = popIndentStack indents;
+--             [ sts, newIndents, dir, bt, line, output ]
+--         , [st11,, st2] |=>
+--             ifStr st11
+--             [ st12 -> 
+--                 let todo : List (List StrTree) = [ st2,, sts ];
+--                 let newLineContent = strAdd lineContent st12;
+--                 let overflow = if (strLen newLineContent > maxWidth) [ -> "T", -> "F"];
+--                 match [dir, bt, overflow]
+--                 [ ["H", [bt2], "T"] |=>
+--                     bt2
+--                 , ["H", _, _] |=>
+--                     let nextLine = [lineIndent, newLineContent];
+--                     [ todo, indents, dir, bt, nextLine, output ]
+--                 , ["V", _, _] |=>
+--                     let outputLine = strAdd lineIndent lineContent;
+--                     let nextLine = [strCat indents, st12];
+--                     [ todo, indents, dir, bt, nextLine, [outputLine,, output] ]
+--                 ]
+--                 -- if (strLen newLineContent > maxWidth)
+--                 -- [ ->
+--                 --     match [dir, bt]
+--                 --     [ ["H", [bt2]] |=>
+--                 --         bt2
+--                 --     , _ |=>
+--                 --         let nextLine = [lineIndent, newLineContent];
+--                 --         [ todo, indents, dir, bt, nextLine, output ]
+--                 --     ]
+--                 -- , ->
+--                 --     match dir
+--                 --     [ "H" |=> 
+--                 --         let nextLine = [lineIndent, newLineContent];
+--                 --         [ todo, indents, dir, bt, nextLine, output ]
+--                 --     , "V" |=>
+--                 --         let outputLine = strAdd lineIndent lineContent;
+--                 --         let nextLine = [strCat indents, st12];
+--                 --         [ todo, indents, dir, bt, nextLine, [outputLine,, output] ]
+--                 --     ]
+--                 -- ]
+-- 
+--             , ["",,sts2] ->
+-- 
+--                 match sts2
+--                 [ [] |=>
+--                     [ sts, indents, dir, bt, line, output]
+--                 , [x1,, xs] |=>
+--                     ifStr x1
+--                     [ x1s ->
+--                         let newIndentsH = ["    ",, indents];
+--                         let newIndentsV = ["",, indents];
+--                         let todo : List (List StrTree) = [ xs, st2,, sts ];
+--                         let newLineH = [strCat newIndentsH, strAdd lineContent x1s];
+--                         let newLineV = [strCat newIndentsV, x1s];
+--                         let outputLine = strAdd lineIndent lineContent;
+--                         let bt2 = [ [ todo, newIndentsV, "V", bt, newLineV, [outputLine,,output] ] ];
+--                         [ todo , newIndentsH, "H", bt2, newLineH, output ]
+--                     , _ ->
+--                         let newIndentsH = ["    ",, indents];
+--                         let newIndentsV = ["",, indents];
+--                         let todo : List (List StrTree) = [ sts2, st2,, sts ];
+--                         let newLineH = [strCat newIndentsH, lineContent];
+--                         let newLineV = [lineIndent, ""];
+--                         let outputLine = strAdd lineIndent lineContent;
+--                         let bt2 = [ [ todo, newIndentsV, "V", bt, newLineV, [outputLine,,output] ] ];
+--                         [ todo , newIndentsH, "H", bt2, newLineH, output ]
+--                     ]
+-- 
+--                 ]
+--             ]
+--         ];
+--     reverse [strCat line,,output];
+ 
+-- let allTrue = listForAll;
+
+-- let stShowA : { Int -> Int -> StrTree -> (List Str) } =
+--     maxIndent -> maxWidth ->
+--     rec <| ( stShow : { StrTree -> (List Str) }) ->
+--     st ->
+--     ifStr st
+--     [ st2 -> [st2]
+--     , ["",,st2s] ->
+--         let lines = map stShow st2s;
+--         -- let allSingleLine = allTrue (l -> match l [ [_] |=> true, _ |=> false]) lines;
+--         let allSingleLine = listAllTrue lines (l -> match l [ [_] |=> true, _ |=> false]);
+--         let singleLineMaybe = 
+--             if allSingleLine
+--             [ -> 
+--                 let linesConcat = strCat (concat lines);
+--                 let linesLen = strLen linesConcat;
+--                 if (linesLen > maxWidth)
+--                 [ -> []
+--                 , -> [ linesConcat ]
+--                 ]
+--             , ->
+--                 []
+--             ];
+--         match singleLineMaybe
+--         [ [line] |=>
+--             [ line ]
+--         , [] |=>
+--             for (concat lines) <| line ->
+--             strAdd "    " line
+--         ]
+--     ];
+
+-- let dtShowSt0 : { DisplayTree -> (List Str) } = 
+--     dt -> 
+--     let st = convertDisplayTreeToStrTree dt;
+--     stShow0 0 0 st;
+
+-- let dtShowSt1 : { DisplayTree -> (List Str) } = 
+--     dt -> 
+--     let st = convertDisplayTreeToStrTree dt;
+--     stShow1 0 0 st;
+
+-- let dtShowSt2 : { DisplayTree -> (List Str) } = 
+--     dt -> 
+--     let st = convertDisplayTreeToStrTree dt;
+--     stShow2 40 40 st;
+
+-- let dtShowSt3 : { DisplayTree -> (List Str) } = 
+--     dt -> 
+--     let st = convertDisplayTreeToStrTree dt;
+--     stShow3 40 40 st;
+
+-- let dtShowStA : { DisplayTree -> (List Str) } = 
+--     dt -> 
+--     let st = convertDisplayTreeToStrTree dt;
+--     stShowA 40 40 st;
+
+
+-- let dtShow : { DisplayTree -> (List Str) } = dtShow0b;
+-- let dtShow : { DisplayTree -> (List Str) } = dtShow1a;
+let dtShow : { DisplayTree -> (List Str) } = dtShow2b;
+-- let dtShow : { DisplayTree -> (List Str) } = dtShowSt0;
+-- let dtShow : { DisplayTree -> (List Str) } = dtShowSt1;
+-- let dtShow : { DisplayTree -> (List Str) } = dtShowSt2;
+-- let dtShow : { DisplayTree -> (List Str) } = dtShowSt3;
+-- let dtShow : { DisplayTree -> (List Str) } = dtShowStA;
+
+
+let dtShowJoin : { DisplayTree -> Str } = 
+    dt ->
+    strJoin "\n" (dtShow dt);
+    -- strJoin " " (dtShow dt);
+
+
+
+let dtZipBrackets : { [Str, Str, Str] -> (List DisplayTree) -> DisplayTree } =
+    [opn, sep, cls] -> dts ->
+    match dts
+    [ [] |=>
+        dtBranch [ [opn, dtNil], [cls, dtNil] ]
+    , [dt1] |=>
+        dtBranch [ [opn, dt1], [cls, dtNil] ]
+    , [dt1 ,, dtss] |=>
+        dtBranch <| concat
+        [ [ [opn, dt1] ]
+        , forMap dtss <| dt -> [sep, dt]
+        , [ [cls, dtNil] ] 
+        ]
+    ];
+
+let dtConcat : { (List DisplayTree) -> DisplayTree } =
+    dts ->
+    dtBranch <| forMap dts <| dt -> ["", dt];
+
+
+
+
+
+
+
+

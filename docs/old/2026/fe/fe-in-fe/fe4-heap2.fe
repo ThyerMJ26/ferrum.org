@@ -1,0 +1,462 @@
+language ferrum/0.1
+
+let HeapStyle = { "CPS" | "Step" };
+let heapStyle : HeapStyle = "Step";
+
+let Value = Datum;
+let Strict = { "Strict" | "NonStrict" }; 
+let PrimitiveDefn = { [ Str, (List Strict) ] };
+let PrimitiveName = Str;
+let Strategy = { "NF" | "WNF" };
+
+let PtsSort = { "Term" | "Type" }; -- TODO remove this
+
+-- let Form = { "None" | "Reduced" | "Specialized" };
+-- let Form = { "WNF" | "NF" }; -- TODO ? perhaps { "Weak" | "Strong" } ?
+let Form = { "Weak" | "Strong" };
+let Reduced = { "NotReduced" | "Reduced" };
+
+-- let Form = { ["None"] | ["Weak", Int] | ["Strong"] };
+let ReducedForm = { "None" | "Weak" | "Strong" };
+let TargetForm = { "Weak" | "Strong" };
+let ContextForm = { "Weak" | "Strong" };
+
+let Addr = Int;
+let Depth = Int;
+
+let NodeCommon = 
+    { [ Depth
+      , TargetForm -- what form does this node want to be reduced to
+      , ReducedForm -- how far has this node been reduced
+      , (Maybe ExprLoc) -- source annotation
+    ] };
+
+let Node = 
+    { [ "HHole" ]
+    | [ "HVar" ]
+    | [ "HLambda", Addr ] -- TODO ? include an instantiation of the argument pattern / references to all the bound variables / ?
+    | [ "HApply", Addr, Addr ] -- TODO ? add func+arg reduction strategies ?
+    | [ "HValue", Value ]
+    | [ "HPair", Addr, Addr ]
+    | [ "HOper", PrimitiveName, (List Addr) ]
+    -- | [ "HType", Addr ] -- type-brackets within a term-context
+    | [ "HTypeAnnot", Addr, Addr ] -- type-annotation within a term-context
+    | [ "HAs", Str, Addr ] -- TODO ? for instantiating patterns ?
+    -- | [ "HSubst", Addr, (List Addr) ] -- TODO ? optimization, collect substitions then perform all together, this saves repeated substitution of curried functions, and chains of pattern guards
+
+--    -- | [ "TyFun", Str, Addr, Addr ]
+--    -- | [ "TyVar", Str ] 
+--    -- TODO ? can we use graph depth for type-variables as well as term-variables ?
+    | [ "TyFun", Addr, Addr ]
+    | [ "TyVar" ] 
+    | [ "TyPair", Addr, Addr ]
+    | [ "TyApp", Addr, Addr ]
+    | [ "TyDatum", Datum ]
+    | [ "TyOper", Str, (List Addr) ]
+    | [ "TySingle", Addr ]
+    -- | [ "TyTerm", Addr ] -- term-brackets within a type-context
+    | [ "TyTermAnnot", Addr, Addr ] -- term-annotation within a type-context
+
+    };
+
+let NcNode = {[NodeCommon, Node]};
+
+let Indirect = 
+    {[ Addr         -- addr
+     , (Maybe Addr) -- indirect
+     , NodeCommon
+     , Node         -- node
+     -- , (Maybe Expr)   -- src annotation
+     -- , List Addr  -- obligations 
+     -- , (Maybe {[Addr, Int]}) -- reducedTo, reducedAt
+    ]};
+
+
+
+let Stack = List {[Addr, ContextForm]};
+
+
+let Heap1 = 
+    {[ "Heap"
+    ,  (List Indirect)
+    ]};
+
+let heapEmpty1 = ["Heap", []];
+let heapMk1 : { [] -> Heap1 } = -> ["Heap", []];
+
+
+let HeapStep = Rec ( HS -> 
+    { [ ["hGet",    Addr],                Indirect     -> HS ]
+    | [ ["hSet",    Addr, Indirect],      []           -> HS ]
+    | [ ["hNew",    NodeCommon, Node],    Addr         -> HS ]
+    -- | [ ["hClone"],                       Heap2        -> HS ]
+    | [ ["skip"],                         []           -> HS ]
+    | [ ["done", Any],                    []                 ]
+    } );
+
+let heapStepper1 : { Heap1 -> HeapStep -> [Heap1, Any] } =
+    ["Heap", heap] -> step ->
+    loop ( [heap: List Indirect, step: HeapStep] ->
+        match step
+        [ [ ["hGet", addr], k ] |=>
+            let indirect = listIndex heap addr;
+            continue [ heap, k indirect ]
+        , [ ["hSet", addr, indirect], k ] |=>
+            let heap2 = listUpdate heap addr indirect;
+            continue [ heap2, k [] ]
+        , [ ["hNew", nc, node], k ] |=>
+            let addr = length heap;
+            let indirect = [addr, [], nc, node];
+            let heap2 = append heap [indirect];
+            continue [ heap2, k addr ]
+        , [ ["skip"], k ] |=>
+            continue [ heap, k [] ] 
+        , [ ["done", result], [] ] |=>
+            break [ ["Heap", heap], result]
+        ] 
+    ) [heap, step];
+
+
+let Heap2 = 
+    {[ "Heap"
+    ,  (Array Indirect)
+    ]};
+
+let heapEmpty2 : Heap2 = [ "Heap", mkArrayList Indirect [] ];
+-- let heapEmpty2 : Heap2 = [ "Heap", mkArrayFastAccessSlowCopy Indirect [] ];
+
+-- let heapMk2 : { [] -> Heap2 } = -> [ "Heap", mkArrayList Indirect [] ];
+-- let heapMk2 : { [] -> Heap2 } = -> [ "Heap", mkArrayFastAccessSlowCopy Indirect [] ];
+let heapMk2 : { [] -> Heap2 } = -> [ "Heap", mkArrayFastAccessNoCopy Indirect [] ];
+
+let heapStepper2 : { Heap2 -> HeapStep -> [Heap2, Any] } =
+    ["Heap", heap] -> step ->
+    loop ( [heap: Array Indirect, step: HeapStep] ->
+        match step
+        [ [ ["hGet", addr], k ] |=>
+            -- let indirect = listIndex heap addr;
+            let [heap2, indirect] = heap ["get", addr];
+            continue [ heap2, k indirect ]
+        , [ ["hSet", addr, indirect], k ] |=>
+            -- let heap2 = listUpdate heap addr indirect;
+            let [heap2,[]] = heap ["set",addr,indirect];
+            continue [ heap2, k [] ]
+        , [ ["hNew", nc, node], k ] |=>
+            -- let addr = length heap;
+            let [heap2,addr] = heap ["length"];
+            let indirect = [addr, [], nc, node];
+            -- let heap2 = append heap [indirect];
+            let [heap3,[]] = heap2 ["extend",[indirect]];
+            continue [ heap3, k addr ]
+        -- , [ ["hClone"], k ] |=>
+        --     let [heap2, length] = heap ["length"];
+        --     let [heap3, arrayCloned] = heap2 ["slice", 0, length];
+        --     let heapCloned: Heap2 = ["Heap", arrayCloned];
+        --     continue [ heap3, k heapCloned ]
+        , [ ["skip"], k ] |=>
+            continue [ heap, k [] ] 
+        , [ ["done", result], [] ] |=>
+            break [ ["Heap", heap], result]
+        ] 
+    ) [heap, step];
+
+
+
+-- let Heap = Heap1;
+-- let heapEmpty = heapEmpty1;
+-- let heapMk = heapMk1;
+-- let heapStepper = heapStepper1;
+
+let Heap = Heap2;
+let heapEmpty = heapEmpty2;
+let heapMk = heapMk2;
+let heapStepper = heapStepper2;
+
+
+
+let HeapSnapshot = { [] -> Heap };
+
+let snapshotHeap : { Heap -> [Heap, HeapSnapshot] } =
+    ["Heap", heapArray] -> 
+    let [heapArray2, arraySnapshot] = heapArray ["snapshot"];
+    [ ["Heap", heapArray2], -> ["Heap", arraySnapshot[]]];
+
+-- let HeapK : { Type -> Type } = 
+--     T -> 
+--     { { T -> HeapStep} -> HeapStep };
+
+let HeapK : { Type -> Type } = 
+    A -> { A -> HeapStep };
+let HeapAction : { Type -> Type } = 
+    A -> { K @ (HeapK A) -> HeapStep };
+let HeapA = HeapAction;
+
+
+
+
+let heapWhile = stepWhile HeapStep;
+let heapMap = stepMap HeapStep;
+let heapLoop = stepLoop HeapStep;
+let heapLoop1 = stepLoop1 HeapStep;
+let heapLoop2 = stepLoop2 HeapStep;
+-- let heapCond = stepCond HeapStep;
+
+
+let heapGet : { Addr -> (HeapK Indirect) -> HeapStep } =
+    addr -> returnK ->
+    [ ["hGet", addr], returnK ];
+
+let heapSet : { Addr -> Indirect -> (HeapK Nil) -> HeapStep } =
+    addr -> indirect -> returnK ->
+    [ ["hSet", addr, indirect], returnK ];
+
+let heapNewNode : { NcNode -> (HeapK Addr) -> HeapStep } =
+    [nc, node] -> returnK ->
+    [ ["hNew", nc, node], returnK ];
+
+let heapNew : { [] -> (HeapK Addr) -> HeapStep } =
+    [] ->
+    -- let ncNode = [ [0, "Term", "Weak", "None", []], ["HHole"] ];
+    let ncNode = [ [0, "Weak", "None", []], ["HHole"] ];
+    heapNewNode ncNode;
+
+let heapSkip : { (HeapK Nil) -> HeapStep } =
+    k ->
+    [ ["skip"], k ];
+
+-- let heapClone : { (HeapK Heap2) -> HeapStep } =
+--     k ->
+--     [ ["hClone"], k ];
+
+let heapDone : { Any -> HeapStep } =
+    result ->
+    [ ["done", result], [] ];
+
+
+let heapDeref : { Addr -> (HeapK NcNode) -> HeapStep } = 
+    addr -> returnK ->
+    heapLoop ( (addr: Addr) -> (breakK: HeapK NcNode) -> continueK ->
+        heapGet addr <| indirect ->
+        let [addr2, indirect2, nc, node] = indirect;
+        match indirect2
+        [ [] |=> breakK [nc, node]
+        , [addr3] |=> continueK addr3
+        ]
+    ) addr <| ncNode ->
+    returnK ncNode;
+
+let heapDerefInd : { Addr -> (HeapK Indirect) -> HeapStep } =
+    addr -> returnK ->
+    heapLoop ( (addr: Addr) -> (breakK: HeapK Indirect) -> continueK ->
+        heapGet addr <| indirect ->
+        let [addr2, indirect2, nc, node] = indirect;
+        match indirect2
+        [ [] |=> breakK indirect
+        , [addr3] |=> continueK addr3
+        ]
+    ) addr <| indirect ->
+    returnK indirect;
+
+let heapRef : { Addr -> K@(HeapK Addr) -> HeapStep } =
+    addr -> returnK ->
+    heapDerefInd addr <| [addr2, _, _, _] ->
+    returnK addr2;
+
+let heapLink : { Addr -> Addr -> (HeapK Nil) -> HeapStep } =
+    from -> to -> returnK ->
+    heapLoop ( (addr : Addr) -> (breakK : HeapK Nil) -> continueK ->
+        heapGet addr <| [ addr1, addrInd, nc, node] ->
+        heapSet addr [addr1, [to], nc, node] <| _ ->  -- TODO conditionally drop old nodes
+        match addrInd
+        [ [] |=> breakK []
+        , [addr2] |=>
+            continueK addr2
+        ]
+    ) from returnK;
+
+let heapSetReducedForm : { ReducedForm -> Addr -> (HeapK Nil) -> HeapStep } =
+    newForm -> addr -> returnK ->
+    heapDerefInd addr <| [addr2, ind, [depth, form, redu, sa], node] ->
+    heapSet addr2 [addr2, ind, [depth, form, newForm, sa], node] <| _ ->
+    returnK [];
+
+let heapSetReducedWeak : { Addr -> (HeapK Nil) -> HeapStep }
+    = addr ->
+    heapSetReducedForm "Weak" addr;
+
+let heapSetReducedStrong : { Addr -> (HeapK Nil) -> HeapStep }
+    = addr ->
+    heapSetReducedForm "Strong" addr;
+
+let nodeChildren : { Node -> (List Addr) }
+    = node ->
+    match node
+    [ ["HHole"]               |=> []
+    , ["HVar"]                |=> []
+    , ["HLambda", a ]         |=> [a]
+    , ["HApply", a, b ]       |=> [a,b]
+    , ["HValue", value ]      |=> []
+    , ["HPair", a, b ]        |=> [a,b]
+    , ["HOper", name, addrs ] |=> addrs
+    , ["HTypeAnnot", term, ty] |=> [term, ty]
+
+    , [ "TyFun", a, b ]       |=> [a, b]
+    , [ "TyVar" ]             |=> []
+    , [ "TyPair", a, b ]      |=> [a, b]
+    , [ "TyApp", a, b ]       |=> [a, b]
+    , [ "TyDatum", _ ]        |=> []
+    , [ "TyOper", _, args ]   |=> args
+    , [ "TySingle", a ]       |=> [a]
+    , [ "TyTermAnnot", a, b ] |=> [a,b]
+
+    ];
+
+let nodeRebuild : { Node -> (List Addr) -> Node }
+    = node -> children ->
+    match [node, children]
+    [ [ ["HHole"], [] ] |=> node
+    , [ ["HVar"], [] ] |=> node
+    , [ ["HLambda", _ ], [a] ] |=> ["HLambda", a]
+    , [ ["HApply", _, _ ], [a,b] ] |=> ["HApply", a, b]
+    , [ ["HValue", value ], [] ] |=> node
+    , [ ["HPair", _, _ ], [a,b] ] |=> ["HPair", a,b]
+    , [ ["HOper", name, _ ], addrs] |=> ["HOper", name, addrs]
+    , [ ["HTypeAnnot", _, _], [a, b] ] |=> [ "HTypeAnnot", a, b ]
+
+    , [ [ "TyFun", _, _], [a, b] ]       |=> [ "TyFun", a, b ]      
+    , [ [ "TyVar" ], [] ]                |=> [ "TyVar" ]            
+    , [ [ "TyPair", _, _], [a, b] ]      |=> [ "TyPair", a, b ]     
+    , [ [ "TyApp", _, _], [a, b] ]       |=> [ "TyApp", a, b ]      
+    , [ [ "TyDatum", datum], [] ]        |=> [ "TyDatum", datum ]   
+    , [ [ "TyOper", name, _], args ]     |=> [ "TyOper", name, args ]
+    , [ [ "TySingle", _], [a] ]          |=> [ "TySingle", a ]      
+    , [ [ "TyTermAnnot", _, _], [a, b] ] |=> [ "TyTermAnnot", a, b ]
+
+    , _ |=> error ["missing case", "nodeRebuild", [node, children]]
+    ];
+
+let heapDumpIsDone : { Addr -> (List Addr) -> Bool }
+    = addr -> done ->
+    listExists ((a: Addr) -> a==addr) done;
+
+
+let heapDumpOld : { Addr -> (HeapK (List Indirect)) -> HeapStep }
+    = root -> returnK -> 
+    heapLoop ( [todo: List Addr, done: List Addr, result: (List Indirect)] ->
+        (breakK: HeapK (List Indirect)) -> continueK ->
+        -- let _ = debug ["DumpLoop1", todo];
+        -- let _ = debug ["DumpLoop2", map hd result];
+        match todo
+        [ [] |=> breakK result
+        , [todo1,,todos] |=> 
+            if (heapDumpIsDone todo1 done)
+            [ -> continueK [todos, done, result]
+            , -> 
+                heapGet todo1 <| ind@[addr, ind2, nc, node] ->
+                let _ = if (addr == todo1) [ -> [], -> error ["addr mismatch", addr, todo1]];
+                let done2 = [todo1,,done];
+                match ind2
+                [ [] |=> 
+                    let children = nodeChildren node;
+                    let todo2 = append children todos;
+                    continueK [todo2, done2, [ind,,result]]
+                , [addr2] |=> 
+                    continueK [ [addr2,,todos], done2, [ind,,result]]
+                ]
+                -- let [nc,node] = heapDeref todo1 ([nc,n]->h2->[nc,n]) heap;
+
+            ]
+        ]
+    ) [[root], [], []] returnK;
+    
+let heapDumpAll : { (List Addr) -> (HeapK (List Indirect)) -> HeapStep }
+    = roots -> returnK -> 
+    heapLoop ( [todo: List Addr, done: List Addr, result: (List Indirect)] ->
+        (breakK: HeapK (List Indirect)) -> continueK ->
+        -- let _ = debug ["DumpLoop1", todo];
+        -- let _ = debug ["DumpLoop2", map hd result];
+        match todo
+        [ [] |=> breakK result
+        , [todo1,,todos] |=> 
+            if (heapDumpIsDone todo1 done)
+            [ -> continueK [todos, done, result]
+            , -> 
+                heapGet todo1 <| ind@[addr, ind2, nc, node] ->
+                let _ = if (addr == todo1) [ -> [], -> error ["addr mismatch", addr, todo1]];
+                let done2 = [todo1,,done];
+                match ind2
+                [ [] |=> 
+                    let children = nodeChildren node;
+                    let todo2 = append children todos;
+                    continueK [todo2, done2, [ind,,result]]
+                , [addr2] |=> 
+                    continueK [ [addr2,,todos], done2, [ind,,result]]
+                ]
+                -- let [nc,node] = heapDeref todo1 ([nc,n]->h2->[nc,n]) heap;
+
+            ]
+        ]
+    ) [roots, [], []] returnK;
+    
+let heapDump : { Addr -> (HeapK (List Indirect)) -> HeapStep } =
+    root -> returnK -> 
+    heapDumpAll [root] returnK;
+
+
+let showReduced : { Reduced -> Str }
+    = redu ->
+    match redu
+    [ "Reduced" |=> " * "
+    , "NotReduced" |=> " . "
+    ];
+
+let showReduced2 : { TargetForm -> ReducedForm -> Str }
+    = form -> redu ->
+    -- if (form==redu)
+    -- [ -> " * "
+    -- , -> " . "
+    -- ];
+    match [form, redu]
+    [ ["Weak"   , "None"  ] |=> " . "
+    , ["Weak"   , "Weak"  ] |=> " * "
+    , ["Weak"   , "Strong"] |=> " ERROR "
+    , ["Strong" , "None"  ] |=> " . "
+    , ["Strong" , "Weak"  ] |=> " o "
+    , ["Strong" , "Strong"] |=> " * "
+    ];
+
+let showForm : { Form -> Str }
+    = redu ->
+    match redu
+    [ "Strong" |=> " S "
+    , "Weak" |=> " W "
+    ];
+
+let showIndirect : { Indirect -> Str }
+    = ind -> 
+    match ind
+    [ [a, [i], _, _] |=> -- a ^ ": " ^ i
+        strCat [strPadEnd 4 (showInt a), ": ", showAny i]
+    -- , [a, [], nc@[depth, _, form, redu, _], n] |=> 
+    --     strCat [strPadEnd 4 (showInt a), ": ", showInt depth, showForm form, showReduced redu, strCat (repeat depth "    "), " ", showAny n]
+    , [a, [], nc@[depth, form, redu, _], n] |=> 
+        strCat [strPadEnd 4 (showInt a), ": ", showInt depth, showForm form, showReduced2 form redu, strCat (repeat depth "    "), " ", showAny n]
+    ];
+
+let heapDumpAllShow : { (List Addr) -> Heap -> [Heap, Str] } = 
+    roots -> heap ->
+    let [heap2, heapStr] = heapStepper heap <|
+        heapDumpAll roots <| indirects ->
+        let heapStr = strCat <| forMap (reverse indirects) <| a -> strCat [showIndirect a, "\n"];
+        heapDone (heapStr : Str);
+    let heapStr2 = cast Any Str heapStr;
+    [heap2, heapStr2];
+
+
+let traceHeap : { Addr -> (HeapK Nil) -> HeapStep } =
+    addr -> returnK ->
+    heapDump addr <| dump ->
+    let dump2 = map ((a: Indirect) -> showIndirect a ^ "\n") (reverse dump);
+    let _ = debug (strCat ["Dump2\n",,dump2]);
+    returnK [];
+    

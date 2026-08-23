@@ -1,0 +1,1723 @@
+language ferrum/0.1
+
+-- let grDebug = debug;
+let grDebug = _ -> [];
+
+let grTrace = debug2Skip;
+-- let grTrace = debug2;
+
+-- let grTraceHeap = traceHeap;
+let grTraceHeap = (addr : Addr) -> heapSkip;
+
+
+let HEnvTy = List { [Str, [Addr, Addr]] };
+
+
+-- let SubstMemo = ListAssoc Addr Addr;
+-- let substMemoMk : { [] -> SubstMemo } = 
+--     [] -> [];
+-- 
+-- let substMemoGet : { SubstMemo -> Addr -> (Maybe Addr) } =
+--     memo -> addr ->
+--     listKvGet memo addr;
+-- 
+-- let substMemoSet : { SubstMemo -> Addr -> Addr -> SubstMemo } =
+--     memo -> addr1 -> addr2 ->
+--     listKvSet memo addr1 addr2;
+
+
+-- let SubstMemo = Assoc Addr Addr;
+-- TODO
+let SubstMemo = Assoc1 Addr Addr;
+
+-- TODO it's not generally safe to use copy-on-snapshot here, 
+--   it works for now, but risks getting a stale-reference error
+--   if later code transformations result in the "set" being performed before a previous "get".
+let substMemoMk : { [] -> SubstMemo } = 
+    -- [] -> assocMkCopyOnWrite ([] : List { [Addr, Addr] });
+    [] -> assoc1MkEphemeral ([] : List { [Addr, Addr] });
+
+-- let substMemoGet : { SubstMemo -> Addr -> (Maybe Addr) } =
+--     memo -> addr ->
+--     memo "get" addr;
+
+let substMemoGet : { SubstMemo -> Addr -> [SubstMemo, (Maybe Addr)] } =
+    memo -> addr ->
+    let [memo2, addrMb] = memo "get" [addr];
+    [memo2, addrMb];
+
+let substMemoSet : { SubstMemo -> Addr -> Addr -> SubstMemo } =
+    memo -> addr1 -> addr2 ->
+    let [memo2, _] = memo "set" [addr1, [addr2]];
+    memo2;
+
+
+let graphSubst0 : { Int -> Int -> Addr -> Addr -> Addr -> { Form -> Form } -> (HeapA Addr) } =
+    heapFunc6 <|
+    (lamDepth : Depth) -> (depthShift : Int) -> (bodyAddr : Addr) -> (argAddr : Addr) -> (tyAddr : Addr) -> (newForm : { Form -> Form }) -> (k : K @ HeapK Addr) -> 
+    heapRef bodyAddr <| bodyAddr2 ->
+    let memo0 : SubstMemo = substMemoMk[];
+    let todo0 : List Addr =  [bodyAddr2];
+    heapLoop2 [memo0, todo0] ( [memo, todo] ->
+        (breakK : KB @ HeapK SubstMemo) -> 
+        (continueK : KC @ HeapK { [SubstMemo, (List Addr)] }) ->
+        -- let _ = grDebug ["gr3 MEMO >", memo];
+        -- let _ = grDebug ["gr3 TODO <", todo];
+        match todo
+        [ [] |=> breakK memo 
+        , [addr,,addrs] |=>
+            heapDerefInd addr <| [ addr2, [_, nc, node] ] ->
+            let depth = ncDepth nc;
+            let form = ncTargetForm nc;
+            if (depth <= lamDepth)
+            [ -> 
+                let memo2 = substMemoSet memo addr2 addr2;
+                continueK [memo2, addrs]
+            , -> 
+                match node
+                [ ["HVar"] |->
+                    guardTrue (depth == (lamDepth + 1)) <| _ =>
+                    let memo2 = substMemoSet memo addr2 argAddr;
+                    continueK [memo2, addrs]
+                , ["TyVar"] |->
+                    guardTrue (depth == (lamDepth + 1)) <| _ =>
+                    let memo2 = substMemoSet memo addr2 tyAddr;
+                    continueK [memo2, addrs]
+                , _ |=> 
+                    -- let addr3Mb = substMemoGet memo addr2;
+                    let [memo, addr3Mb] = substMemoGet memo addr2;
+                    match addr3Mb
+                    [ [addr3] |=> 
+                        continueK [memo, addrs]
+                    , [] |=>
+                        let children = nodeChildren node;
+                        heapMap heapRef children <| childrenRef -> 
+                        -- let unSubstChildren = filter ((child: Addr) -> (substMemoGet memo child)==[]) childrenRef;
+                        let [memo, _, unSubstChildren] = 
+                            while [memo, childrenRef, [] : List Addr] <|
+                                [memo, [child ,, childs], result] |=>
+                                let [memo, entryMb] = substMemoGet memo child;
+                                let result = 
+                                    ifNil entryMb
+                                    [ -> [child ,, result]
+                                    , [_] -> result
+                                    ];
+                                [memo, childs, result];
+                        let unSubstChildren = reverse unSubstChildren;
+                        match unSubstChildren
+                        [ [] |=> 
+                            -- let children2 = map ((child: Addr) -> substMemoGet memo child) childrenRef;
+                            let [memo, childrenRef, children2] = 
+                                while [memo, childrenRef, [] : List (Maybe Addr)] <|
+                                [memo, [child ,, childs], result] |=>
+                                let [memo, addrMb] = substMemoGet memo child;
+                                let result = [addrMb ,, result];
+                                [memo, childs, result];
+                            let children2 = reverse children2;
+                            let children3 = map ((child : Maybe Addr) -> match child [[] |=> error "failGr3", [child2] |=> child2]) children2;
+                            let node2 = nodeRebuild node children3;
+                            let nc2 = ncDefault
+                                |> ncSetDepth (depth + depthShift)
+                                |> ncSetTargetForm (newForm form);
+                            heapNewNode1 [nc2, node2] <| addr3 ->
+                            let memo2 = substMemoSet memo addr2 addr3;
+                            continueK [memo2, addrs]                            
+                        , _ |=>
+                            continueK [memo, concat [unSubstChildren, todo]]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ) <| memo ->
+
+    -- let result = substMemoGet memo bodyAddr2;
+    let [memo, result] = substMemoGet memo bodyAddr2;
+    match result
+    [ [] |=> error ["gs3 impossible", bodyAddr, memo]
+    , [resultAddr] |=> k resultAddr
+    ];
+
+let graphSubst : { Int -> Int -> Addr -> Addr -> { Form -> Form } -> (HeapA Addr) } =
+    (lamDepth : Depth) -> (depthShift : Int) -> (bodyAddr : Addr) -> (argAddr : Addr) -> (newForm : { Form -> Form }) -> (k : K @ HeapK Addr) -> 
+    -- We don't expected to meet any type-variables during term-graph reduction.
+    heapNewNode2 0 ["TyOper", "***UNEXPECTED-TY-VAR***", []] <| tyAddr ->
+    -- However, type-variables can be present in calls to justTrustMeCast, they have no term-level effect, but may nevertheless be present.
+    -- no information can pass from a type-value to a term-value, so whatever type-value
+    --   we use here, the same term-value will be computed.
+    -- perhaps if we were using a form of gradual-types, and the type-checking didn't pass at compile-time, but wasn't a definite error either,
+    --   (so the type-inhabitation calculation remained unknown)
+    --   then is it might make sense to do something clever here
+    --   and try to continue performing type-checking (type-inhabitation calculations) at run-time
+    -- heapNewNode2 0 ["TyOper", "Any", []] <| tyAddr ->
+    -- debug2 ["graphSubst", bodyAddr, argAddr, tyAddr] <| ->
+    -- traceHeap (show ["graphSubst/body", bodyAddr, argAddr, tyAddr]) bodyAddr <| ->
+    graphSubst0 lamDepth depthShift bodyAddr argAddr tyAddr newForm <| resultAddr ->
+    -- traceHeap (show ["graphSubst/result", resultAddr]) resultAddr <| ->
+    k resultAddr;
+
+
+-- "OpDefn"s perform heap operations, to determine whether to maybe return further heap operations
+-- TODO ? rather than pass a Maybe back, it might be better to pass forward a flag or function indicating whether or not to actually perform the computation
+-- let HeapAction = HeapA Addr;
+let MaybeHeapAction = Maybe { (HeapA Addr) };
+let MaybeMakeOpAction = { Depth -> (List AddrInd) -> (HeapA MaybeHeapAction) };
+let   OpDefn = MaybeMakeOpAction;
+let TyOpDefn = MaybeMakeOpAction;
+
+-- TODO ? move the op defns to fe4-builtins.fe ?
+
+let datumAction : { Int -> Datum -> (HeapA Addr) } =
+    heapFunc2 <| 
+    (depth : Depth) -> (datum : Datum) -> (k : K @ HeapK Addr) ->
+    heapNewNode2 depth ["HValue", datum] <| addr ->
+    k addr;
+
+let datumMbAction : { Int -> (Maybe Datum) -> (HeapA Addr) } =
+    heapFunc2 <| 
+    (depth : Depth) -> (datumMb : (Maybe Datum)) -> (k : K @ HeapK Addr) ->
+    ifNil datumMb
+    [ ->
+        heapNewNode2 depth ["HValue", []]    <| nilAddr ->
+        k nilAddr
+    , [datum] -> 
+        heapNewNode2 depth ["HValue", datum] <| valAddr ->
+        heapNewNode2 depth ["HValue", []]    <| nilAddr ->
+        heapNewNode2 depth ["HPair", valAddr, nilAddr] <| mbAddr ->
+        k mbAddr
+    ];
+
+let addrAction : { Addr -> (HeapA Addr) } =
+    heapFunc1 <|
+    (addr : Addr) -> (k : K @ HeapK Addr) ->
+    k addr;
+
+let applyAction : { Int -> Addr -> Addr -> (HeapA Addr) } =
+    heapFunc3 <|
+    (depth : Addr) -> (funcAddr : Addr) -> (argAddr : Addr) -> (k : K @ HeapK Addr) ->  
+    heapNewNode2 depth ["HApply", funcAddr, argAddr] <| appAddr ->
+    k appAddr;                
+
+let applyNilAction : { Int -> Addr -> (HeapA Addr) } =
+    heapFunc2 <|
+    (depth : Depth) -> (funcAddr : Addr) -> (k : K @ HeapK Addr) ->  
+    heapNewNode2 depth ["HValue", []] <| nilAddr ->
+    heapNewNode2 depth ["HApply", funcAddr, nilAddr] <| appAddr ->
+    k appAddr;                
+
+let nilAction : { Int -> (HeapA Addr) } =
+    heapFunc1 <|
+    (depth : Depth) -> (k : K @ HeapK Addr) ->  
+    -- TODO ? avoid dynamically allocating nils, and just use a common one ?
+    -- TODO ? or perhaps hash-cons every datum / everything we allocate ?
+    datumAction depth [] k;
+
+let singletonListAction : { Int -> Addr -> (HeapA Addr) } =
+    heapFunc2 <|
+    (depth : Depth) -> (elemAddr : Addr) -> (k : K @ HeapK Addr) ->  
+    heapNewNode2 depth ["HValue", []] <| nilAddr ->
+    heapNewNode2 depth ["HPair", elemAddr, nilAddr] <| listAddr ->
+    k listAddr;
+
+-- let typeOpAction : { Int -> Str -> (List Addr) -> (HeapA Addr) } =
+--     heapFunc3 <|
+--     (depth : Depth) -> (name : Str) -> (args : List Addr) -> (k : K @ HeapK Addr) ->  
+--     heapNewNode [[depth, "Weak", "None", []], ["TyOper", name, args ]] <| tyAddr ->
+--     k tyAddr;
+
+let termOpAction : { Int -> Str -> (List Addr) -> (HeapA Addr) } =
+    heapFunc3 <|
+    (depth : Depth) -> (name : Str) -> (args : List Addr) -> (k : K @ HeapK Addr) ->  
+    heapNewNode2 depth ["HOper", name, args] <| tyAddr ->
+    k tyAddr;
+
+
+let opArith : { { Int -> Int -> Datum } -> OpDefn } =
+    heapFunc3 <|
+    (op : { Int -> Int -> Datum }) ->
+    (depth : Depth) -> (args : List AddrInd) -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [ [_, [_, _, ["HValue", aVal]]], [_, [_, _, ["HValue", bVal]]]] |->
+      guardInt aVal <| aVal2 ->
+      guardInt bVal <| bVal2 =>
+      let result = op aVal2 bVal2; 
+      let action = datumAction depth result;
+      k [ action ]
+    , _ |=>
+      k []  
+    ];
+
+let opBool : { { Bool -> Bool -> Datum } -> OpDefn } =
+    heapFunc3 <|
+    (op : { Bool -> Bool -> Datum }) ->
+    (depth : Depth) -> (args : List AddrInd) -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [ [_, [_, _, ["HValue", aVal]]], [_, [_, _, ["HValue", bVal]]]] |->
+      guardBool aVal <| aVal2 ->
+      guardBool bVal <| bVal2 =>
+      let result = op aVal2 bVal2; 
+      let action = datumAction depth result;
+      k [ action ]
+    , _ |=>
+      k []  
+    ];
+
+let opDatumUnary : { G1 @ (Guard Datum) -> { (Domain (Domain (Codomain G1))) -> Datum } -> OpDefn } =
+    (guardDatum1 : G1 @ (Guard Datum)) -> (op : { (Domain (Domain (Codomain G1))) -> Datum }) ->
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [ [_, [_, _, ["HValue", aVal]]] ] |->
+      guardDatum1 aVal <| aVal2 =>
+      let result = op aVal2; 
+      let action = datumAction depth result;
+      k [ action ]
+    , _ |=>
+      k []  
+    ];
+
+let opDatumBinary : { G1 @ (Guard Datum) -> G2 @ (Guard Datum) -> { (Domain (Domain (Codomain G1))) -> (Domain (Domain (Codomain G2))) -> Datum } -> OpDefn } =
+    (guardDatum1 : G1 @ Guard Datum) -> (guardDatum2 : G2 @ Guard Datum) -> (op : { (Domain (Domain (Codomain G1))) -> (Domain (Domain (Codomain G2))) -> Datum }) ->
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [ [_, [_, _, ["HValue", aVal]]], [_, [_, _, ["HValue", bVal]]]] |->
+      guardDatum1 aVal <| aVal2 ->
+      guardDatum2 bVal <| bVal2 =>
+      let result = op aVal2 bVal2; 
+      let action = datumAction depth result;
+      k [ action ]
+    , _ |=>
+      k []  
+    ];
+
+let opDatumBinaryMb : { G1 @ (Guard Datum) -> G2 @ (Guard Datum) -> { (Domain (Domain (Codomain G1))) -> (Domain (Domain (Codomain G2))) -> (Maybe Datum) } -> OpDefn } =
+    (guardDatum1 : G1 @ Guard Datum) -> (guardDatum2 : G2 @ Guard Datum) -> (op : { (Domain (Domain (Codomain G1))) -> (Domain (Domain (Codomain G2))) -> (Maybe Datum) }) ->
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [ [_, [_, _, ["HValue", aVal]]], [_, [_, _, ["HValue", bVal]]]] |->
+      guardDatum1 aVal <| aVal2 ->
+      guardDatum2 bVal <| bVal2 =>
+      let result = op aVal2 bVal2; 
+      let action = datumMbAction depth result;
+      k [ action ]
+    , _ |=>
+      k []  
+    ];
+
+let opEq : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[_, [_, _, ["HValue", aVal]]], [_, [_, _, ["HValue", bVal]]]] |=>
+        let result = aVal == bVal; 
+        k [ datumAction depth result ]
+    , [[_, [_, _, ["HValue", _]]], [_, [_, _, ["HPair", _, _]]]] |=>
+        let result = false; 
+        k [ datumAction depth result ]
+    , [[_, [_, _, ["HPair", _, _]]], [_, [_, _, ["HValue", _]]]] |=>
+        let result = false; 
+        k [ datumAction depth result ]
+    , _ |=>
+      k []
+    ];
+
+let opCondition : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[_, [_, _, ["HValue", aVal]]], [_, [_, _, ["HPair", h, t]]]] |->
+        guardBool aVal <| aVal2 =>
+        let result = if aVal2 [ -> h, -> t];
+        k [ addrAction result ]
+    , _ |=>
+      k []  
+    ];
+
+-- only for datums, Nil, Bool, Int, Str
+let opIfGeneric : { { Datum -> K @ [Any -> Any, Any -> Any] -> (Codomain (Hd K)) | (Codomain (Hd (Tl K))) } -> OpDefn } =
+    (ifGeneric : { Datum -> K @ [Any -> Any, Any -> Any] -> (Codomain (Hd K)) | (Codomain (Hd (Tl K))) }) ->
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[_, [_, _, ["HValue", aVal]]], [_, [_, _, ["HPair", h, t]]]] |=>
+        let result = ifGeneric aVal [ _ -> h, _ -> t];
+        k [ addrAction result ]
+    , [[_, [_, _, ["HPair", _, _]]], [_, [_, _, ["HPair", h, t]]]] |=>
+        k [ addrAction t ]
+    , _ |=>
+      k []  
+    ];
+    
+
+let opIfPair : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[_, [_, _, ["HPair", _, _]]], [_, [_, _, ["HPair", h, t]]]] |=>
+        k [ addrAction h ]
+    , [[_, [_, _, ["HValue", _]]], [_, [_, _, ["HPair", h, t]]]] |=>
+        k [ addrAction t ]
+    , [[_, [_, _, ["HLambda", _]]], [_, [_, _, ["HPair", h, t]]]] |=>
+        k [ addrAction t ]
+    , _ |=>
+      k []  
+    ];
+
+
+-- TODO broaden the range on nodes considered reduced, 
+-- TODO   essentially anything eliciting information,
+-- TODO   which amounts to everything except variables, applications, and operations.
+
+let opResidualize : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [ [_, [_, nc, _]], [addr, [_, _, _]] ] |-> 
+        let depth = ncDepth nc;
+        guardTrue (depth == 0) <| _ |=>
+        k [ addrAction addr ]
+    , [ [_, [_, nc, ["HValue", _]]], [addr, [_, _, _]] ] |=> 
+        k [ addrAction addr ]
+      , _ |=>
+        k []  
+    ];
+
+let opSpecialize : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [ [_, [_, nc, ["HLambda", body]]], [argAddr, [_, _, _]] ] |=> 
+      let funcDepth = ncDepth nc;  
+      let action =
+          (k2 : K @ HeapK Addr) ->
+          let depthShift = depth - funcDepth - 1;
+          graphSubst funcDepth depthShift body argAddr (oldForm -> "Strong") <| newAddr ->
+          let _ = grDebug ["SPECIAL", body, argAddr, newAddr];
+          k2 newAddr;
+      k [ action ]
+    , _ |=>
+      k []  
+    ];
+
+let opProjection : { { [Addr,,Addr] -> Addr } -> OpDefn } =
+    op ->
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[_, [_, _, ["HPair", h, t]]]] |=>
+        let result = op [h ,, t];
+        k [ addrAction result ]
+    , _ |=>
+        k []  
+    ];
+
+-- TODO Implement conventional short-circuit behaviour before/during instantiation ?
+-- TODO   (x -> a && b) would effectively become (x -> a && ([] -> b))
+-- TODO This means depth can be used to keep the parts of b whose evaluation should be delayed, 
+-- TODO   apart from the parts which shouldn't ("b" may refer to variables bound beneath x)
+-- TODO Alternatively, keeping careful track of (potentially unreachable) obligations, 
+-- TODO   would also ensure that strictness of term-graph only reachable via "b" doesn't accidentally become lazy.
+
+--     -- TODO ? how much do we want non-strict operator arguments ?
+--     -- TODO ? should we allow &&,|| to be reduced, under lambdas, when either argument becomes known ?
+--     -- , ["||", [ ["Strict", "NonStrict"], canLogicOp, doLogicOp ] ]
+--     -- , ["&&", [ ["Strict", "NonStrict"], canLogicOp, doLogicOp ] ]
+--     -- , ["|-", [ ["Strict", "NonStrict"], canBoolGuard, doBoolGuard ] ]
+-- 
+--     -- TODO ? implement the Z-combinator as an operator ?
+--     -- ["Z",, ]
+--     -- ["$@",, ]
+-- 
+--     -- ["$??",, hyper-strict / deep seq ]
+--     -- [ a ,, b ] $?? --->  (a $??) (b $??)
+--     -- [ a ,, b ] $?? c d --->  (a $??) (b $??) c d
+--     -- (a : { Any \ [Any,,Any] }) $?? ---> identityFunction  -- (once "a" is reduced)
+--     ];
+
+let opPatGuardPair : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[_, [_, _, ["HPair", hdAddr, tlAddr]]],  [bAddr, [_, _, _]]] |=> 
+        let action =
+            (k2 : K @ HeapK Addr) ->
+            heapNewNode2 depth ["HApply", bAddr,    hdAddr] <| appAddr1 ->
+            heapNewNode2 depth ["HApply", appAddr1, tlAddr] <| appAddr2 ->
+            k2 appAddr2;
+        k [ action ]
+    , [[_, [_, _, ["HValue", val]]], [bAddr, [_, _, _]]] |=> 
+        let action =
+            (k2 : K @ HeapK Addr) ->  
+            heapNewNode2 depth ["HValue", []] <| nilAddr ->
+            k2 nilAddr;
+        k [ action ]
+    , _ |=>
+        k []
+    ];
+
+
+let opPatGuardEq : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[_, [_, _, ["HValue", aVal]]], [_, [_, _, ["HValue", bVal]]], [cAddr, [_, _, _]]] |=> 
+        if (aVal==bVal) 
+        [ ->
+            k [ applyNilAction depth cAddr ]
+        , ->
+            k [ nilAction depth ]
+        ]
+    , [[_, [_, _, ["HPair", _, _]]], [_, [_, _, ["HValue", _]]], [cAddr, [_, _, _]]] |=> 
+        k [ nilAction depth ]
+    , [[_, [_, _, ["HValue", _]]], [_, [_, _, ["HPair", _, _]]], [cAddr, [_, _, _]]] |=> 
+        k [ nilAction depth ]
+    ];
+
+
+
+-- let opPrimLoop : OpDefn =
+--     depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+--     -- TODO ? provide some kind of heapMatch function so that the nested pattern matching here can be combined into a single pattern ?
+--     match args
+--     [ [[_, _, _, ["HPair", h, t]], [bAddr, _, _, _]] |=>
+--         heapDeref h <| [_,hNode] ->
+--         match hNode
+--         [ ["HValue", "break"] |=>
+--             k [ addrAction t ]
+--         , ["HValue", "continue"] |=>
+--             let action = (k : K @ HeapK Addr) ->
+--               applyAction depth bAddr t <| applyAddr ->
+--               termOpAction depth "grLoop" [applyAddr, bAddr] <| opAddr ->
+--               k opAddr;
+--             k [ action ]
+--         , _ |=>
+--             k []
+--         ]      
+--     , _ |=>
+--         k []
+--     ];  
+
+
+let opPrimLoop : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    heapMatch args
+    [ [[_, [_, _, ["HPair", h, t]]], [bAddr, [_, _, _]]] |=>
+        heapMatchGuard (heapDeref h) <| [_,["HValue", "break"]] |=>
+        heapMatchGuard (heapDeref t) <| [_,["HPair", loopVal, _]] |=>
+        heapMatchOk [ addrAction loopVal ]
+    , [[_, [_, _, ["HPair", h, t]]], [bAddr, [_, _, _]]] |=>
+        heapMatchGuard (heapDeref h) <| [_,["HValue", "continue"]] |=>
+        heapMatchGuard (heapDeref t) <| [_,["HPair", loopVal, _]] |=>
+        let action = (k2 : K @ HeapK Addr) ->
+          applyAction depth bAddr loopVal <| applyAddr ->
+          termOpAction depth "grLoop" [applyAddr, bAddr] <| opAddr ->
+          k2 opAddr;
+        heapMatchOk [ action ]
+    , _ |=>
+        heapMatchOk []
+    ] k;  
+
+
+-- let opStrAppend : OpDefn =
+--     [ 2
+--     , depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+--       match args
+--       [ [[_, _, _, ["HValue", aVal]], [_, _, _, ["HValue", bVal]]] |=>
+--           let result = strAdd (cast Any Str aVal) (cast Any Str bVal);
+--           k [ datumAction depth result ]
+--       , _ |=>
+--           k []  
+--       ]
+--     ];    
+
+
+let opInverse : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[aAddr, [_, _, _]]] |=> 
+        -- let env : HEnv = [ ["a", aAddr]];
+        -- let expr : Expr = ["EOper", "Inverse", [ ["EVar", "a"] ]];
+        -- let action = instantiate "Type" depth env expr;
+        -- let action = typeOpAction depth "Inverse" [aAddr];
+        let action = termOpAction depth "Inverse" [aAddr];
+        k [ action ]
+    , _ |=>
+      k []
+    ];
+
+let opInverseApply : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    -- panic ["TODO", "opInverseApply"];
+    k [];
+
+
+let opGuardMaybe : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[_ , [_, _, ["HValue", val]]], [bAddr , [_, _, _]] ] |-> 
+        guardBool val <| val2 =>
+        if val2
+        [ -> 
+            let action = singletonListAction depth bAddr;
+            k [ action ]
+        , ->
+            k [ nilAction depth ]
+        ]
+    , _ |=>
+        k []  
+    ];  
+
+let opGuardNothing : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[_ , [_, _, ["HValue", val]]], [bAddr , [_, _, _]]] |-> 
+        guardBool val <| val2 =>
+        if val2
+        [ ->
+            k [ addrAction bAddr ]
+        , ->
+            k [ nilAction depth ]
+        ]
+    , _ |=>
+        k []  
+    ];    
+
+let opTrace : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[_ , [_, _, ["HValue", val]]], [bAddr , [_, _, _]] ] |=> 
+        let action : HeapA Addr = 
+            (k2 : K @ HeapK Addr) ->
+            debug2 ["Graph Trace", val] <| ->
+            heapNewNode2 depth ["HValue", []] <| nilAddr ->
+            applyAction depth bAddr nilAddr <| applyAddr ->
+            k2 applyAddr;
+        k [action]
+    , _ |=>
+        k []  
+    ];
+
+-- TODO opFix / opRec
+-- using the hand-written combinator makes for more graph-reduction work than really needed
+
+let opNop : { Int -> OpDefn } =
+    arity ->
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    k [];
+
+let tyOpNop : TyOpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    k [];
+
+let opTyApply : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[aAddr , [_, _, _]], [bAddr , [_, _, _]]] |=> 
+        heapDeref aAddr <| [_, aNode] ->  
+        match aNode
+        [ ["TyFun", dom, cod] |=>
+            -- TODO for now, just return the codomain
+            -- TODO in future, handle polytypes, use substitution
+            let action = 
+                (k2 : K @ HeapK Addr) ->
+                k2 cod;
+            k [action]
+        , ["TyOper", "&", [tyAddr1, tyAddr2]] |=>
+            -- TODO This is just enough logic to make the fe4a/inverse-apply test pass.
+            -- TODO It's not correct in general though (it doesn't check type-inhabitation at all).
+            -- TODO But perhaps we only need intersected function types to work 
+            -- TODO   when the first argument is a string, and the disjointness is very apparent?
+            heapDeref tyAddr1 <| [_, ty1] ->  
+            heapDeref tyAddr2 <| [_, ty2] ->  
+            heapDeref bAddr <| [_, arg] ->
+            let _ = debug ["opTyApply", "&1", ty1, ty2, arg];
+            match [ty1, ty2]
+            [ [ ["TyFun", dom1Addr, cod1Addr], ["TyFun", dom2Addr, cod2Addr] ] |=>
+                heapDeref dom1Addr <| [_, dom1Ty] ->
+                heapDeref dom2Addr <| [_, dom2Ty] ->
+                let _ = debug ["opTyApply", "&2", dom1Ty, dom2Ty, arg];
+                match [dom1Ty, dom2Ty, arg]
+                [ [ ["TyOper", dom1TyName, []], ["TyOper", dom2TyName, []], ["TyOper", argTyName, []] ] |=> 
+                    if (argTyName == dom1TyName)
+                    [ ->
+                        let _ = debug ["opTyApply", "&", "matched dom1"];
+                        k [ addrAction cod1Addr ]
+                    , ->
+                      if (argTyName == dom2TyName)
+                      [ ->
+                        let _ = debug ["opTyApply", "&", "matched dom2"];
+                        k [ addrAction cod2Addr ]
+                      , ->
+                        let _ = debug ["opTyApply", "&", " no match"];
+                        k []
+                      ]
+                    ]
+                , _ |=>
+                    k []    
+                ]
+            ]  
+        , _ |=>      
+            -- otherwise build a TyApp node
+            -- TODO get rid of this, just leave the EOper/Apply node unreduced/blocked
+            -- TODO modify the readback code to recognise the EOper/Apply node as a type-application
+            -- let action = 
+            --     (k : K @ HeapK Addr) ->
+            --     heapNewNode [[depth, "Weak", "None", []], ["TyApp", aAddr,    bAddr]] <| tyAppAddr ->
+            --     k tyAppAddr;
+            -- k [action]
+            k []
+        ]
+    , _ |=>
+        k []  
+    ];
+
+
+let opTyInverse : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[aAddr , [_, _, _]]] |=> 
+        heapDeref aAddr <| [_, aNode] ->  
+        match aNode
+        [ ["TyFun", dom, cod] |=>
+            -- TODO for now, just swap the domain and the codomain 
+            -- TODO in future, check for polytypes, cannot necessarily invert these
+            let action = 
+                (k2 : K @ HeapK Addr) ->
+                heapNewNode2 depth ["TyFun", cod, dom] <| tyFunAddr ->
+                k2 tyFunAddr;
+            k [action]
+        , ["TyOper", "&", [tyAddr1, tyAddr2]] |=>
+            -- TODO This is just enough logic to make the fe4a/inverse-apply test pass.
+            -- TODO It's not correct in general though (it doesn't check type-inhabitation at all).
+            -- TODO But perhaps we only need intersected function types to work 
+            -- TODO   when the first argument is a string, and the disjointness is very apparent?
+            heapDeref tyAddr1 <| [_, ty1] ->  
+            heapDeref tyAddr2 <| [_, ty2] ->  
+            match [ty1, ty2]
+            [ [ ["TyFun", dom1Addr, cod1Addr], ["TyFun", dom2Addr, cod2Addr] ] |=>
+                let action = 
+                    (k2 : K @ HeapK Addr) ->
+                    heapNewNode2 depth ["TyFun", cod1Addr,  dom1Addr] <| fun1Addr ->
+                    heapNewNode2 depth ["TyFun", cod2Addr,  dom2Addr] <| fun2Addr ->
+                    heapNewNode2 depth ["TyOper", "&", [fun1Addr,  fun2Addr]] <| tyInterAddr ->
+                    k2 tyInterAddr;
+                k [ action ]
+            , _ |=>
+                k []
+            ]      
+        , _ |=>      
+            k []
+        ]
+    , _ |=>
+        k []  
+    ];
+
+let opTyInverseApply : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    panic ["TODO", "opTyInverseApply"];
+
+
+let opTyDomain : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[aAddr , [_, _, _]]] |=> 
+        heapDeref aAddr <| [_, aNode] ->  
+        match aNode
+        [ ["TyOper", "Any", []] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            heapNewNode2 depth ["TyOper", "Void", []] <| resultAddr ->
+            k resultAddr
+        , ["TyOper", "<:", [a, b]] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            heapNewNode2 depth ["HOper", "Domain", [a]] <| aDom ->
+            heapNewNode2 depth ["HOper", "Domain", [b]] <| bDom ->
+            heapNewNode2 depth ["TyOper", ":>", [aDom, bDom]] <| abSuper ->
+            k abSuper
+        -- TODO , ["TyOper", "&", [a, b]] |=>
+        , ["TyFun", dom, cod] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            -- TODO implement and call "convertPatTypeClosed"
+            k dom
+        , _ |=>
+            k no
+        ]
+    , _ |=> 
+        k no
+    ];
+
+let opTyCodomain : OpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[aAddr , [_, _, _]]] |=> 
+        heapDeref aAddr <| [_, aNode] ->  
+        match aNode
+        [ ["TyOper", "Any", []] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            heapNewNode2 depth ["TyOper", "Any", []] <| resultAddr ->
+            k resultAddr
+        , ["TyOper", "<:", [a, b]] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            heapNewNode2 depth ["HOper", "Codomain", [a]] <| aCod ->
+            heapNewNode2 depth ["HOper", "Codomain", [b]] <| bCod ->
+            heapNewNode2 depth ["TyOper", "<:", [aCod, bCod]] <| abSub ->
+            k abSub
+        , ["TyOper", ":>", [a, b]] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            heapNewNode2 depth ["HOper", "Codomain", [a]] <| aCod ->
+            heapNewNode2 depth ["HOper", "Codomain", [b]] <| bCod ->
+            heapNewNode2 depth ["TyOper", ":>", [aCod, bCod]] <| abSub ->
+            k abSub
+        , ["TyOper", "&", [a, b]] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            heapNewNode2 depth ["HOper", "Codomain", [a]] <| aCod ->
+            heapNewNode2 depth ["HOper", "Codomain", [b]] <| bCod ->
+            heapNewNode2 depth ["TyOper", "|", [aCod, bCod]] <| abUn ->
+            k abUn
+        , ["TyFun", dom, cod] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            -- TODO implement and call "convertPatTypeClosed"
+            k cod
+        , _ |=>
+            k no
+        ]
+    , _ |=> 
+        k no
+    ];
+
+let opTyHd : OpDefn = 
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[aAddr , [_, _, _]]] |=> 
+        heapDeref aAddr <| [_, aNode] ->
+        match aNode
+        [ ["TyOper", "Any", []] |=> 
+            k <| yes <| (k : K @ HeapK Addr) ->
+            k aAddr
+        , ["TyOper", "Void", []] |=> 
+            k <| yes <| (k : K @ HeapK Addr) ->
+            k aAddr
+        , ["TyPair", h, t] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            -- TODO check the inabitation of the tail
+            k h
+        , ["TyOper", "|", [a, b]] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            heapNewNode2 depth ["HOper", "Hd", [a]] <| aHd ->
+            heapNewNode2 depth ["HOper", "Hd", [b]] <| bHd ->
+            heapNewNode2 depth ["TyOper", "|", [aHd, bHd]] <| abHd ->
+            k abHd
+        , _ |=> 
+            k no
+        ]
+    , _ |=> 
+        k no
+    ];
+
+let opTyTl : OpDefn = 
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [[aAddr , [_, _, _]]] |=> 
+        heapDeref aAddr <| [_, aNode] ->
+        match aNode
+        [ ["TyOper", "Any", []] |=> 
+            k <| yes <| (k : K @ HeapK Addr) ->
+            k aAddr
+        , ["TyOper", "Void", []] |=> 
+            k <| yes <| (k : K @ HeapK Addr) ->
+            k aAddr
+        , ["TyPair", h, t] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            k t
+        , ["TyOper", "|", [a, b]] |=>
+            k <| yes <| (k : K @ HeapK Addr) ->
+            heapNewNode2 depth ["HOper", "Tl", [a]] <| aTl ->
+            heapNewNode2 depth ["HOper", "Tl", [b]] <| bTl ->
+            heapNewNode2 depth ["TyOper", "|", [aTl, bTl]] <| abTl ->
+            k abTl
+        , _ |=> 
+            k no
+        ]
+    , _ |=> 
+        k no
+    ];
+
+
+let opDefns : List {[Str, OpDefn]} = 
+    [ ["+",   opArith (a -> b -> a + b) ] 
+    , ["-",   opArith (a -> b -> a - b) ] 
+    , ["*",   opArith (a -> b -> a * b) ] 
+    , ["<",   opArith (a -> b -> a < b) ] 
+    , [">",   opArith (a -> b -> a > b) ] 
+    , ["<=",  opArith (a -> b -> a <= b) ]
+    , [">=",  opArith (a -> b -> a >= b) ]
+    , ["&&",  opBool (a -> b -> a && b) ]
+    , ["||",  opBool (a -> b -> a || b) ]
+    , ["==",  opEq ]
+    , ["?",   opCondition ]
+    , ["opCondition", opCondition ]
+    , ["hd",  opProjection hd ]
+    , ["tl",  opProjection tl ]
+    , ["$!",  opSpecialize ]
+    , ["$?",  opResidualize ]
+    , ["<$",  opSpecialize ]
+
+    -- TODO ? Conditional specialization (f $?!? x)
+    -- TODO ?    Only specialize if/when "f" is a lambda and "x" is reduced, not stuck as an EApply or EOper or EVar.
+    -- TODO ?    Use single "!"  to indicate partially static info in "x" is sufficient, (example: ["three", n * n])
+    -- TODO ?    Use double "!!" to indicate     fully static info in "x" is required    (example: ["three", 9])
+    -- TODO ? Semi-conditional specialization (f $?! x) vs (f $!? x)
+    -- TODO ?    Use which side of the "!" the "?" is on to indicate which of the above conditions must be met.
+    -- TODO ?    However, not much point in specialization either a non-function to anything, or a function to something uninformative.
+    -- TODO ? Eager specialization (f $-! x)
+    -- TODO ?    This is the current behaviour.
+    -- TODO ?    Only start specializing when the current context is being reduced.
+    -- TODO ?    Specialization is one-shot, (non-sticky).
+    -- TODO ?    If this tries to specialize something not yet reduced to a function (EApply, EOper, EVar), then a application is formed, and specialization is over.
+    -- TODO ?    If the argument is uninformative (EApply, EOper, Evar), this risks non-termination, depending on how the function is written. 
+    -- TODO ?    There is a trade-off here between knowing when specialization will occur, and performing useful specialization .
+    -- TODO ?    The "$-!" operator makes the timing of specialization more apparent and controllable, but perhaps that's not the best thing to optimize for.
+    -- TODO ? Extra eager specialization (f $+! x)
+    -- TODO ?    Start specialization before the immediately surrounding context is being reduced.
+    -- TODO ?    Essentially, try to reduce at, or immediately after instantiation, and after every application until specialization succeeds.
+    -- TODO ?    Specialization is still one-shot, (non-sticky), once we have a function and an informative argument, specialization is performed.
+    -- TODO ?    This might be the assumed behaviour by users.
+    -- TODO ?    It was previously discounted because immediately specializing is often unlikely to be useful in practice, as too little info would be present.
+    -- TODO ?    But combined with conditional specialization, and repeated attempts, this becomes a more viable option.
+    -- TODO ? Extra extra eager specialization (f $++! x)
+    -- TODO ?    Extra eager, and sticky.
+    -- TODO ?    Reduce early, and keep trying to reduce as more substitutions make more info available, even when specialization has already succeeded.
+    -- TODO ?    Still need to avoid non-termination, either combine with conditional specialization, 
+    -- TODO ?      or require the function to be specialized to make sufficient use of the residualization operator "$?" to keep reduction finite.
+    -- TODO ?
+    -- TODO ? With a bit of luck, just one of the above will stand out as the most practical, and that one can be called ($!)
+    -- TODO ?
+
+    -- TODO ?
+    -- TODO ? how about using <$ (and $>) for specializing applications, similar to <| (and |>) for standard applications
+    -- TODO ? reduce "<$" nodes during (or immediately after) instantiation and graph-substitution,
+    -- TODO ? and reduce all the freshly instantiated/copied nodes to "Strong" form ?
+    -- TODO ?   this means reducing some nodes to strong form while immediately neighbouring nodes aren't even being reduced to weak form.
+    -- TODO ? 
+    -- TODO ? so for:
+    -- TODO ?     forMap numbers <| n -> n * n;
+    -- TODO ? codegen results in a use of higher-order functions and closures (assuming no special handling for forMap)
+    -- TODO ? whereas:
+    -- TODO ?     forMap numbers <$ n -> n * n;
+    -- TODO ? codegen results in a simple while-loop (assuming forMap is user-defined using while, and there is special handling for while)
+    -- TODO ?
+
+
+    , ["pgPair", opPatGuardPair]
+    , ["pgEq", opPatGuardEq]
+    , ["grLoop", opPrimLoop]
+
+    -- , ["ifNil", opIfNil]
+    -- , ["if", opIfGeneric (a -> a == true) ]
+
+    -- , ["ifNil", opIfGeneric (a -> a == []) ]
+    -- , ["if", opIfGeneric (a -> a == true) ]
+    
+    -- , ["ifNil", opIfGeneric (a -> [ a == [], a ]) ]
+    -- , ["if", opIfGeneric (a -> [ a == true, [] ]) ]
+    
+    -- , ["ifNil", a -> [kT, kF] -> (opCondition (a == []) [kT ,, kF]) a ]
+    -- , ["if", a -> [kT, kF] -> (opCondition a [kT ,, kF]) [] ]
+
+    , ["opIfNil",  opIfGeneric ifNil  ]
+    , ["opIfBool", opIfGeneric ifBool ]
+    , ["opIfInt",  opIfGeneric ifInt  ]
+    , ["opIfStr",  opIfGeneric ifStr  ]
+    , ["opIfType", opIfGeneric ifType ]
+
+    , ["opIfPair", opIfPair ]
+
+    -- , ["prinStrAppend", opStrAppend]
+    -- , ["^", opStrAppend]
+    , ["primInverse", opInverse]
+    , ["primInverseApply", opInverseApply]
+    , ["Void", opNop 0]
+    , ["Bool", opNop 0]
+    , ["Int", opNop 0]
+    , ["Str", opNop 0]
+    , ["Char", opNop 0]
+    , ["Any", opNop 0]
+    , ["Type", opNop 0]
+    , ["List", opNop 1]
+    , ["Elem", opNop 1]
+    , ["TupleMap", opNop 2]
+    , ["Single", opNop 1]
+    , ["Fix", opNop 1]
+    , ["Self", opNop 1]
+    , ["SelfT", opNop 1]
+    , ["Tl", opTyTl]
+    , ["Hd", opTyHd]
+    , ["Inverse", opTyInverse]
+    , ["InverseApply", opTyInverseApply]
+    , ["Domain", opTyDomain]
+    , ["Codomain", opTyCodomain]
+    -- , ["Apply", opTyApply]
+
+    -- TODO ? Inverse-apply, combine Inverse and Apply into a single operator
+    -- TODO ?    { F ~<| Y )  
+    -- TODO ? Calculates what type would cause a function of type "F" to return a value of type "Y"
+    -- TODO ? Example:
+    -- TODO ?     { { (Inverse { F A }) B } C }
+    -- TODO ? becomes:
+    -- TODO ?     { F <| A ~<| B <| C }
+    -- TODO ? 
+    -- TODO ? Additionally, use "_" to indicate a-suitable-argument-for-the-context, then
+    -- TODO ?    (Domain (Codomain (Domain F)))
+    -- TODO ? becomes:
+    -- TODO ?    { F <| _ ~<| _ <| _ }
+    -- TODO ? or, make "<|_" and "~<|" into post-fix operators
+    -- TODO ?    { F <|_ ~<|_ <|_ }
+    -- TODO ? 
+
+    , ["|=", opGuardMaybe]
+    , ["|-", opGuardNothing]
+    , ["primMkArrayFastAccessSlowCopy", opNop 0] -- TODO
+    , ["primMkArrayFastAccessNoCopy", opNop 0] -- TODO
+    , ["error", opNop 1]
+
+    , [ "show", opDatumUnary guardDatum show ]
+    , [ "show2", opDatumUnary guardDatum show2 ]
+    , [ "strLen", opDatumUnary guardStr strLen ]
+    , [ "strOrd", opDatumUnary guardStr strOrd ]
+    , [ "strChr", opDatumUnary guardInt strChr ]
+
+    -- , [ "strCharAt", opDatumBinary guardStr guardInt strCharAt ]
+    -- , [ "strAdd", opDatumBinary guardStr guardStr strAdd ]
+
+    , [ "opStrCharAt", opDatumBinary guardStr guardInt strCharAt ]
+    , [ "opStrCharAtMb", opDatumBinaryMb guardStr guardInt strCharAtMb ]
+    , [ "opStrAdd", opDatumBinary guardStr guardStr strAdd ]
+
+    , [ "ioArgV"       , opNop 0 ]
+    , [ "ioDoPrim"     , opNop 0 ]
+    , [ "ioPrint"      , opNop 0 ]
+    , [ "ioReadFile"   , opNop 0 ]
+    , [ "ioRun"        , opNop 0 ]
+    , [ "ioWriteFile"  , opNop 0 ]
+
+    , [ "jsEval"        , opNop 0 ]
+    , [ "jsEvalMaybe"   , opNop 0 ]
+
+    -- , [ "primAssoc1MkCopyOnSnapshot"  , opNop 0 ]
+    -- , [ "primAssoc1MkCopyOnWrite"     , opNop 0 ]
+    -- , [ "primAssocMkCopyOnSnapshot"   , opNop 0 ]
+    -- , [ "primAssocMkCopyOnWrite"      , opNop 0 ]
+    , [ "primAssoc1MkEphemeral"       , opNop 0 ]
+    , [ "primAssoc1MkPersistent"      , opNop 0 ]
+
+    , ["opTrace", opTrace]
+
+    ];
+
+
+let tisIntersect : { Addr -> Addr -> (HeapA TiVal) } =
+    rec <| (tisIn : { Addr -> Addr -> (HeapA TiVal) }) ->
+    a -> b -> (k : K @ HeapK TiVal) ->
+    heapDeref a <| [_, aNode] ->
+    heapDeref b <| [_, bNode] ->
+    match [aNode, bNode]
+    [ [["TyDatum", aDatum], ["TyDatum", bDatum]] |=>
+        k (tiValFromBool (aDatum == bDatum))
+    , [["TyPair", aHd, aTl], ["TyPair", bHd, bTl]] |=>
+        tisIn aHd bHd <| tiHd ->
+        tisIn aTl bTl <| tiTl ->
+        k (tiAnd tiHd tiTl)
+    , _ |=>
+        -- TODO return tiUnknown, unless we're certain the type is inhabited
+        k tiTrue
+    ];
+
+let tyRelComp : TyOpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    -- TODO try to perform a type relative complement
+    --   currently always returning "nothing"
+    k [];
+
+let tyUnion : TyOpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    match args
+    [ [a, b] |=>
+        let [aAddr, [_, _, aNode]] = a;
+        let [bAddr, [_, _, bNode]] = b;
+        heapMatch [aNode, bNode]
+        [ [["TyOper", "Any", []], _] |=>
+            ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+            kYes <| yes <| (k : K @ HeapK Addr) ->
+            k aAddr
+        , [_, ["TyOper", "Any", []]] |=>
+            ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+            kYes <| yes <| (k : K @ HeapK Addr) ->
+            k bAddr
+        , [["TyOper", "Void", []], _] |=>
+            ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+            kYes <| yes <| (k : K @ HeapK Addr) ->
+            k bAddr
+        , [_, ["TyOper", "Void", []]] |=>
+            ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+            kYes <| yes <| (k : K @ HeapK Addr) ->
+            k aAddr
+        , _ |=>
+            ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+            kYes no
+        ] <| result ->
+        k result
+    , _ |=>
+        -- impossible, incorrect number of args
+        k no
+    ];
+
+
+let tyIntersect : TyOpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    -- debug2 ["tyIntersect", args] <| ->
+    match args
+    [ [a, b] |=>
+        let [aAddr, [_, _, aNode]] = a;
+        let [bAddr, [_, _, bNode]] = b;
+        heapMatch [aNode, bNode]
+        [ [["TyPair", aHd, aTl], ["TyPair", bHd, bTl]] |=>
+            ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+            tisIntersect aHd bHd <| tiHd ->
+            if (tiIsFalse tiHd)
+            [ ->
+                kYes <| yes <| (k : K @ HeapK Addr) ->
+                heapNewNode2 depth ["TyOper", "Void", []] <| tyVoid ->
+                k tyVoid
+            , ->
+                tisIntersect aTl bTl <| tiTl ->
+                if (tiIsFalse tiTl)
+                [ ->
+                    kYes <| yes <| (k : K @ HeapK Addr) ->
+                    heapNewNode2 depth ["TyOper", "Void", []] <| tyVoid ->
+                    k tyVoid
+                , ->
+                    if (tiIsTrue tiHd && tiIsTrue tiTl)
+                    [ ->
+                        kYes <| yes <| (k : K @ HeapK Addr) ->
+                        heapNewNode2 depth ["TyOper", "&", [aHd, bHd]] <| hdIn ->
+                        heapNewNode2 depth ["TyOper", "&", [aTl, bTl]] <| tlIn ->
+                        heapNewNode2 depth ["TyPair", hdIn, tlIn] <| result ->
+                        k result
+                    , ->
+                        kNo []
+                    ]
+                ]
+            ]
+        -- [ [["TyPair", aHd, aTl], ["TyPair", bHd, bTl]] |=>
+        --     kYes <| yes <| (k : K @ HeapK Addr) ->
+        --     -- TODO use Hd to narrow Tl
+        --     heapNewNode2 depth ["TyOper", "&", [aHd, bHd]] <| hdIn ->
+        --     heapNewNode2 depth ["TyOper", "&", [aTl, bTl]] <| tlIn ->
+        --     heapNewNode2 depth ["TyPair", hdIn, tlIn] <| result ->
+        --     k result
+        -- [ [_, ["TyPair", bHd, bTl]] |=>
+        --     ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+        --     kYes <| yes <| (k : K @ HeapK Addr) ->
+        --     -- TODO use Hd to narrow Tl
+        --     heapNewNode2 depth ["HOper", "Hd", [aAddr]] <| aHd ->
+        --     heapNewNode2 depth ["HOper", "Tl", [aAddr]] <| aTl ->
+        --     heapNewNode2 depth ["TyOper", "&", [aHd, bHd]] <| hdIn ->
+        --     heapNewNode2 depth ["TyOper", "&", [aTl, bTl]] <| tlIn ->
+        --     heapNewNode2 depth ["TyPair", hdIn, tlIn] <| result ->
+        --     k result
+        , [ ["TyOper", "|", [a1, a2]], _] |=>
+            ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+            kYes <| yes <| (k : K @ HeapK Addr) ->
+            heapNewNode2 depth ["TyOper", "&", [a1, bAddr]] <| in1 ->
+            heapNewNode2 depth ["TyOper", "&", [a2, bAddr]] <| in2 ->
+            heapNewNode2 depth ["TyOper", "|", [in1, in2]] <| result ->
+            k result
+        , [ ["TyOper", aOp, []], ["TyOper", bOp, []]] |=>
+            ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+            match [aOp, bOp]
+            [ ["Int", "Int"] |=>
+                kYes <| yes <| (k : K @ HeapK Addr) ->
+                k aAddr
+            , ["Int", "Any"] |=>
+                kYes <| yes <| (k : K @ HeapK Addr) ->
+                k aAddr
+            , ["Str", "Any"] |=>
+                kYes <| yes <| (k : K @ HeapK Addr) ->
+                k aAddr
+            , ["Str", "Int"] |=>
+                kYes <| yes <| (k : K @ HeapK Addr) ->
+                heapNewNode2 depth ["TyOper", "Void", []] <| voidTy ->
+                k voidTy
+            , _ |=>
+                kNo []
+            ]
+        , [ ["TyDatum", aDatum], ["TyDatum", bDatum]] |=>
+            ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+            kYes <| yes <| (k : K @ HeapK Addr) ->
+            if (aDatum == bDatum)
+            [ ->
+                k aAddr
+            , ->
+                heapNewNode2 depth ["TyOper", "Void", []] <| voidTy ->
+                k voidTy
+            ]
+        , _ |=>
+            ([kYes, kNo] : K @ CpsMbK HeapHandler MaybeHeapAction) ->
+            kYes no
+        ] <| result ->
+        k result
+    , _ |=>
+        -- impossible, incorrect number of args
+        k no
+    ];
+
+let tySubType : TyOpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    -- TODO ?
+    k [];
+
+let tySuperType : TyOpDefn =
+    depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+    -- TODO ?
+    k [];
+
+-- let tyInverse : TyOpDefn =
+--     depth -> args -> (k : K @ HeapK MaybeHeapAction) ->
+--     -- TODO 
+--     k [];
+
+
+
+let tyOpDefns : List {[ Str, TyOpDefn ]} = 
+    [ ["\\", tyRelComp ]
+    , ["relComp", tyRelComp ]
+    , ["|", tyUnion ]
+    , ["&", tyIntersect ]
+    , ["<:", tySubType ]
+    , [":>", tySuperType ]
+    , ["Void", tyOpNop ]
+    , ["Nil", tyOpNop ]
+    , ["Bool", tyOpNop ]
+    , ["Int", tyOpNop ]
+    , ["Str", tyOpNop ]
+    , ["Char", tyOpNop ]
+    , ["Any", tyOpNop ]
+    , ["Type", tyOpNop ]
+    , ["TODO", tyOpNop ]
+    , ["***UNEXPECTED-TY-VAR***", tyOpNop ]
+    ];
+
+-- let grInitEnv = 
+--     [
+--         -- "if", -- TODO 
+--         -- "if", ["ELambda", ["EVar", "a"], ["ELambda", ["EVar", "b"], ["EOp", "if", [["EVar", "a"],["EVar", "b"]]]]]
+--     ];
+
+let lookupOpDefn : { Str -> OpDefn } =
+    opName ->
+    match (lookup opName opDefns)
+    [ [] |=> error ["unknown operator B", opName]
+    , [opDefn] |=> opDefn
+    ];
+
+let lookupTyOpDefn : { Str -> TyOpDefn } =
+    opName ->
+    match (lookup opName tyOpDefns)
+    [ [] |=> error ["unknown type operator", opName]
+    , [opDefn] |=> opDefn
+    ];
+
+let reduceRedex : { Addr -> (HeapA Nil) } =
+    heapFunc1 <|
+    (addr : Addr) -> (k : K @ HeapK Nil) -> 
+    heapDeref addr <| [nc, node] ->
+    let nodeDepth = nc |> ncDepth;
+    let form1     = nc |> ncTargetForm;
+    let redu      = nc |> ncReducedForm;
+    match node
+    [ ["HApply", func, arg] |=> 
+        heapDeref func <| [fnc, fNode] ->
+        let funcDepth = fnc |> ncDepth;
+        match fNode
+        [ ["HLambda", body] |=>
+            let depthShift = nodeDepth - funcDepth - 1;
+            -- copy the form from the application-node to every freshly instantiated node
+            graphSubst funcDepth depthShift body arg ((form2: Form) -> form1) <| newAddr ->
+
+            heapLink addr newAddr <| _ -> 
+            k []
+        , other |=> 
+            -- heapSetReduced addr <| _ ->
+            heapSetReducedWeak addr <| _ ->
+            k []
+        ]
+        
+    , ["HOper", opName, args] |=>
+        let tryMakeOpAction: OpDefn = lookupOpDefn opName;
+        heapMap heapDerefInd args <| argNodes -> 
+            tryMakeOpAction nodeDepth argNodes <| maybeAction ->
+            match maybeAction
+            [ [action] |=>
+                action <| addr2 ->
+                heapLink addr addr2 <| _ ->
+                k []
+            , [] |=>
+                heapSetReducedForm "Weak" addr <| _ ->
+                k []
+            ]
+
+    , ["TyOper", opName, args] |=>
+        let tryMakeOpAction: TyOpDefn = lookupTyOpDefn opName;
+        heapMap heapDerefInd args <| argNodes -> 
+            -- tryReduce nodeDepth argNodes <| addr2Maybe ->
+            -- match addr2Maybe
+            -- [ [addr2] |=>
+            tryMakeOpAction nodeDepth argNodes <| maybeAction ->
+            match maybeAction
+            [ [action] |=>
+                action <| addr2 ->
+                heapLink addr addr2 <| _ ->
+                k []
+            , [] |=>
+                heapSetReducedForm "Weak" addr <| _ ->
+                k []
+            ]
+
+
+    , ["TyApp", func, arg] |=>
+        let tryMakeOpAction: TyOpDefn = opTyApply;
+        heapMap heapDerefInd [func, arg] <| argNodes -> 
+        tryMakeOpAction nodeDepth argNodes <| maybeOpAction ->
+        match maybeOpAction
+        [ [action] |=>
+            action <| addr2 ->
+            heapLink addr addr2 <| _ ->
+            k []
+        , [] |=>
+            heapSetReducedForm "Weak" addr <| _ ->
+            k []
+        ]
+
+
+    , ["HTypeAnnot", term, ty] |=>
+        heapLink addr term <| _ ->
+        k []
+
+    , ["TyTermAnnot", term, ty] |=>
+        heapLink addr ty <| _ ->
+        k []
+
+    , other |=> 
+        match redu
+        [ "None" |=> 
+            heapSetReducedForm "Weak" addr <| _ ->
+            k []
+        , _ |=> 
+            error ["reduceRedex", "unexpected node, already reduced", other]
+        ]
+        
+    ];
+
+
+let firstNotReducedNode : { Form -> (List Addr) -> (HeapA (Maybe Addr)) } =
+    heapFunc2 <|
+    (form : Form) -> (addrs0 : List Addr) -> (k : K @ HeapK (Maybe Addr)) ->
+    heapLoop2 addrs0 ( addrs ->
+        (breakK : KB @ HeapK (Maybe Addr)) -> 
+        (continueK  : K @ HeapK (List Addr)) ->
+        match addrs
+        [ [] |=> breakK [] 
+        , [addr,,addrss] |=>
+            heapDeref addr <| [nc,node] ->
+            let form2 = nc |> ncTargetForm;
+            let redu = nc |> ncReducedForm;
+            match [form, redu]
+            [ [ _, "None" ] |=>
+                breakK [addr]
+            , [ "Strong", "Weak" ] |=>
+                breakK [addr]
+            , _ |=> 
+                continueK addrss
+            ]
+        ]
+    ) k;
+
+let RedexCategory = { "Beta" | "Delta" | "MarkWeak" | "MarkStrong" | "NotARedex"  | "Annot" };
+
+let getStrictChildren : { Form -> Node -> (List Addr) } =
+    form -> node ->
+    match [form, node]
+    [ [ _         , [ "HVar"                    ] ] |=> []
+    , [ "Weak"    , [ "HLambda"  , body         ] ] |=> []
+    , [ "Strong"  , [ "HLambda"  , body         ] ] |=> [body]
+    , [ _         , [ "HApply"   , func, arg    ] ] |=> [func, arg]
+    , [ _         , [ "HValue"   , val          ] ] |=> []
+    , [ _         , [ "HPair"    , h, t         ] ] |=> [h, t]
+    , [ "Weak"    , [ "HOper"    , opName, args ] ] |=> args     -- TODO in weak mode, only return stict args
+    , [ "Strong"  , [ "HOper"    , opName, args ] ] |=> args
+    , [ _         , [ "HTypeAnnot" , tm, ty         ] ] |=> [tm, ty]
+
+
+    , [ _ , [ "TyFun", a, b ]       ] |=> [a, b]
+    , [ _ , [ "TyVar" ]             ] |=> []
+    , [ _ , [ "TyPair", a, b ]      ] |=> [a, b]
+    , [ _ , [ "TyApp", a, b ]       ] |=> [a, b]
+    , [ _ , [ "TyDatum", _ ]        ] |=> []
+    , [ _ , [ "TyOper", _, args ]   ] |=> args
+    , [ _ , [ "TySingle", a ]       ] |=> [a]
+    , [ _ , [ "TyTermAnnot", a, b ] ] |=> [a,b]
+
+    , other |=> error ["getStrictChildren", other]
+    ];
+
+
+let getWeakStrictChildren : { Node -> (List Addr) } = getStrictChildren "Weak";
+-- let getStrongStrictChildren : { Node -> (List Addr) } = getStrictChildren "Strong";
+
+let isReducedToTargetForm : { [NodeCommon, Node] -> Bool } =
+    [ nc, node ] -> 
+    let form = nc |> ncTargetForm;
+    let redu = nc |> ncReducedForm;
+    match [form, redu]
+    [ [ _         , "None" ] |=> false
+    , [ "Strong"  , "Weak" ] |=> false
+    , [ _         , _      ] |=> true
+    ];
+
+let isAllReducedToTargetForm : { (List Addr) -> (HeapA Bool) } =
+    heapFunc1 <|
+    (addrs : List Addr) -> (k : K @ HeapK Bool) ->
+    heapMap heapDeref addrs <| ncNodes ->
+    -- let allReduced = listForAll isReducedToTargetForm ncNodes;
+    let allReduced = listAllTrue ncNodes isReducedToTargetForm;
+    k allReduced;
+
+let isReducedToWeak : { [NodeCommon, Node] -> Bool } =
+    [ nc, node ] -> 
+    let redu = nc |> ncReducedForm;
+    match redu
+    [ "None"   |=> false
+    , "Weak"   |=> true
+    , "Strong" |=> true
+    ];
+
+let isAllReducedToWeak : { (List Addr) -> (HeapA Bool) } =
+    heapFunc1 <|
+    (addrs : List Addr) -> (k : K @ HeapK Bool) ->
+    heapMap heapDeref addrs <| ncNodes ->
+    -- let allReduced = listForAll isReducedToWeak ncNodes;
+    let allReduced = listAllTrue ncNodes isReducedToWeak;
+    k allReduced;
+
+let isBetaRedex : { Addr -> (HeapA Bool) } =
+    heapFunc1 <|
+    (addr : Addr) -> (k : K @ HeapK Bool) ->
+    heapDeref addr <| [nc,node] ->
+    match node
+    [ ["HApply", func, arg] |=> 
+        heapDeref func <| [fnc,fNode] ->
+        match fNode
+        [ ["HLambda", _] |=> k true
+        , _ |=> k false
+        ]
+    , _ |=> k false
+    ];
+     
+-- let isTyAppRedex : { Addr -> (HeapA Bool) }
+--      = addr -> (k : K @ HeapK Bool) ->
+--     heapDeref addr <| [nc,node] ->
+--     match node
+--     [ ["TyApp", func, arg] |=> 
+--         let [depth,,_] = nc;
+--         let [_, tryReduce] = opTyApply;
+--         tryReduce depth [func, arg] <| mbAction ->
+--         heapDeref func <| [fnc,fNode] ->
+--         match fNode
+--         [ ["HLambda", _] |=> k true
+--         , _ |=> k false
+--         ]
+--     , _ |=> k false
+--     ];
+     
+let isDeltaRedex : { Addr -> (HeapA Bool) } =
+    heapFunc1 <|
+    (addr : Addr) -> (k : K @ HeapK Bool) ->
+    heapDeref addr <| [nc, node] ->
+    let depth = nc |> ncDepth;
+    match node
+    [ ["HOper", opName, args] |=>
+        let tryMakeOpAction: OpDefn = lookupOpDefn opName;
+        heapMap heapDerefInd args <| argNodes -> 
+        tryMakeOpAction depth argNodes <| maybeOpAction ->
+        match maybeOpAction
+        [ [_] |=> k true
+        , [] |=> k false
+        ]
+    , ["TyOper", opName, args] |=>
+        let nodeDepth = nc |> ncDepth;
+        let tryMakeOpAction: TyOpDefn = lookupTyOpDefn opName;
+        heapMap heapDerefInd args <| argNodes -> 
+        tryMakeOpAction nodeDepth argNodes <| maybeOpAction ->
+        match maybeOpAction
+        [ [] |=> k false 
+        , [ _ ] |=> k true
+        ]
+    , ["TyApp", func, arg] |=>
+        let nodeDepth = nc |> ncDepth;
+        let tryMakeOpAction: TyOpDefn = opTyApply;
+        heapMap heapDerefInd [func, arg] <| argNodes -> 
+        tryMakeOpAction nodeDepth argNodes <| maybeOpAction ->
+        match maybeOpAction
+        [ [] |=> k false 
+        , [ _ ] |=> k true
+        ]
+    , other |=>
+        k false
+    ];
+     
+let isAnnotRedex : { Addr -> (HeapA Bool) } =
+    heapFunc1 <|
+    (addr : Addr) -> (k : K @ HeapK Bool) ->
+    heapDeref addr <| [nc,node] ->
+    match node
+    [ ["HTypeAnnot", term, ty] |=> 
+        k true
+    , ["TyTermAnnot", term, ty] |=> 
+        k true
+    , _ |=> 
+        k false
+    ];
+
+
+let getReductionMode : { Form -> Form -> Form } =
+    contextForm -> targetForm ->
+    match [ contextForm, targetForm ]
+    [ ["Weak", "Strong"] |=> "Strong"
+    , _ |=> "Weak"
+    ];
+
+
+let categorizeRedex : { Form -> Addr -> (HeapA RedexCategory) } =
+    heapFunc2 <|
+    (contextForm : Form)-> (addr : Addr) -> (k : K @ HeapK RedexCategory) ->
+    heapDeref addr <| [ nc, node] ->
+    let form = nc |> ncTargetForm;
+    let redu = nc |> ncReducedForm;
+    let reductionMode = getReductionMode contextForm form;
+    match [reductionMode, redu]
+    [ ["Weak"    , "Weak"    ] |=> k "NotARedex"
+    , ["Strong"  , "Strong"  ] |=> k "NotARedex"
+    , ["Weak"    , "Strong"  ] |=> k "NotARedex"
+    , ["Weak"    , "None"    ] |=>
+        let candidateChildren = getWeakStrictChildren node;
+        isAllReducedToWeak candidateChildren <| allReduced ->
+        if allReduced
+        [ -> 
+            isBetaRedex addr <| isB ->
+            if (isB) [ -> k "Beta", -> 
+            isDeltaRedex addr <| isD ->
+            if (isD) [ -> k "Delta", -> 
+            isAnnotRedex addr <| isA ->
+            if isA [ -> k "Annot", ->
+            k "MarkWeak" ] ] ]
+        , -> 
+            k "NotARedex"
+        ]
+    , ["Strong"    , "Weak"    ] |=> 
+        isAllReducedToTargetForm (nodeChildren node) <| allReduced ->
+        if allReduced
+        [ -> k "MarkStrong"
+        , -> k "NotARedex"
+        ]
+    , ["Strong"    , "None"    ] |=>
+        let candidateChildren = getWeakStrictChildren node;
+        isAllReducedToWeak candidateChildren <| allReduced ->
+        if allReduced
+        [ ->
+            isBetaRedex addr <| isB ->
+            if isB [ -> k "Beta", -> 
+            isDeltaRedex addr <| isD ->
+            if isD [ -> k "Delta", -> 
+            isAnnotRedex addr <| isA ->
+            if isA [ -> k "Annot", ->
+            isAllReducedToTargetForm (nodeChildren node) <| allReduced2 ->
+            if allReduced2 [ -> k "MarkStrong", ->
+            k "NotARedex" ] ] ] ]
+        , -> 
+            k "NotARedex" 
+        ]
+    , other |=> error ["categorizeRedex", "impossible"]
+    ];
+
+
+
+
+let findNextRedex : { Stack -> (HeapA Stack) } =
+    heapFunc1 <|
+    (stack0 : Stack) -> (k : K @ HeapK Stack) -> 
+    heapLoop2 stack0 ( stack ->
+        (breakK : KB @ HeapK Stack) ->
+        (continueK : KC @ HeapK Stack) ->
+        -- let _ = grDebug ["Stack", stack];
+        match stack
+        [ [] |=> breakK []
+        , [[addr, form],,addrs] |=>
+            heapDeref addr <| [nc, node0] -> 
+            let form2 = nc |> ncTargetForm;
+            let redu = nc |> ncReducedForm;
+            let reductionMode = getReductionMode form form2;
+            match redu
+            [ "None" |=> 
+                heapDeref addr <| [nc,node] -> 
+                -- let reductionMode = getReductionMode form form2;
+                let strictChildren = getStrictChildren reductionMode node;
+                firstNotReducedNode "Weak" strictChildren <| nextNode ->
+                -- let _ = grDebug ["strictChildren", addr, reductionMode, strictChildren, nextNode];
+                match nextNode
+                [ [] |=> 
+                    -- match form2
+                    match reductionMode
+                    [ "Weak" |=> breakK stack
+                    , "Strong" |=>
+                        isBetaRedex addr <| isB -> 
+                        isDeltaRedex addr <| isD ->
+                        isAnnotRedex addr <| isA ->
+                        if (isB || isD || isA)
+                        [ -> breakK stack
+                        , -> 
+                            let strictChildren2 = getStrictChildren "Strong" node;
+                            firstNotReducedNode "Strong" strictChildren2 <| nextNode2 ->
+                            match nextNode2
+                            [ [] |=> breakK stack
+                            , [nextAddr2] |=>
+                                continueK [ [nextAddr2, "Weak"],,stack]
+                            ]
+                        ]
+                    ]
+                , [nextAddr] |=> 
+                    continueK [[nextAddr, form2],,stack]
+                ]
+            , "Weak" |=>
+                match reductionMode
+                [ "Strong" |=>
+                    let strictChildren2 = getStrictChildren "Strong" node0;
+                    firstNotReducedNode "Strong" strictChildren2 <| nextNode2 ->
+                    match nextNode2
+                    [ [] |=> breakK stack
+                    , [nextAddr2] |=>
+                        continueK [ [nextAddr2, "Weak"],,stack]
+                    ]
+                , "Weak" |=>
+                    continueK addrs
+                ]
+            , _ |=>
+                continueK addrs
+            ]
+        ]
+    ) k;
+
+
+let reduceAll1 : { Addr -> (HeapA Nil) } =
+    heapFunc1 <|
+    (root : Addr) -> (k : K @ HeapK Nil) ->
+    grTraceHeap root <| _ ->
+    let stack0 : Stack = [[root, "Weak"]];
+    heapLoop2 stack0 ( stack ->
+        (breakK : KB @ HeapK Nil) -> 
+        (continueK : KC @ HeapK Stack) ->
+        -- grTraceHeap root <| _ ->
+        -- let _ = grDebug d;
+        findNextRedex stack <| stack2 ->
+        -- -- let _ = grDebug ["Stack1", stack];
+        -- let _ = grDebug ["Stack", stack2];
+        match stack2
+        [ [] |=> 
+            breakK []
+        , [[addr, form],,stack3] |=> 
+            categorizeRedex form addr <| redexCateg ->
+            let _ = grDebug ["Redex", redexCateg, addr];
+            match redexCateg
+            [ "Beta" |=>
+                reduceRedex addr <| heap2 ->
+                -- grTraceHeap root <| _ ->
+                continueK stack2
+            , "Delta" |=>
+                reduceRedex addr <| _ ->
+                -- grTraceHeap root <| _ ->
+                continueK stack2
+            , "Annot" |=>
+                reduceRedex addr <| _ ->
+                -- grTraceHeap root <| _ ->
+                continueK stack2
+            , "Mark" |=>
+                heapSetReducedForm "Weak" addr <| _ ->
+                continueK stack3
+            , "MarkWeak" |=>
+                heapSetReducedForm "Weak" addr <| _ ->
+                continueK stack3
+            , "MarkStrong" |=>
+                heapSetReducedForm "Strong" addr <| _ ->
+                continueK stack3
+            , other |=> error ["reduceAll impossible", other]
+            ]
+        ]
+    ) <| _ ->
+    grTraceHeap root <| _ ->
+    k [];
+
+let reduceAll2 : { Addr -> (HeapA Nil) } =
+    heapFunc1 <|
+    (root : Addr) -> (k : K @ HeapK Nil) ->
+    grTraceHeap root <| _ ->
+    let stack0 : Stack = [[root, "Weak"]];
+    heapLoop2 [stack0, 0] ( [stack, redexCount] ->
+        (breakK : KB @ HeapK Nil) -> 
+        (continueK : KC @ HeapK { [Stack, Int] }) ->
+        let redexCount2 = redexCount + 1;
+        -- grTraceHeap root <| _ ->
+        -- let _ = grDebug d;
+        findNextRedex stack <| stack2 ->
+        -- -- let _ = grDebug ["Stack1", stack];
+        -- let _ = grDebug ["Stack", stack2];
+        if false
+        -- if (redexCount == 0) 
+        -- if (redexCount >= 1000) 
+        [ -> 
+            grTrace ["Redex Count", redexCount, "Early Exit"] <| ->
+            breakK []
+        , ->
+            match stack2
+            [ [] |=> 
+                grTrace ["Redex Count", redexCount] <| ->
+                breakK []
+            , [[addr, form],,stack3] |=> 
+                categorizeRedex form addr <| redexCateg ->
+                let _ = grDebug ["Redex", redexCateg, addr];
+                match redexCateg
+                [ "Beta" |=>
+                    reduceRedex addr <| heap2 ->
+                    -- grTraceHeap root <| _ ->
+                    continueK [stack2, redexCount2]
+                , "Delta" |=>
+                    reduceRedex addr <| _ ->
+                    -- grTraceHeap root <| _ ->
+                    continueK [stack2, redexCount2]
+                , "Annot" |=>
+                    reduceRedex addr <| _ ->
+                    -- grTraceHeap root <| _ ->
+                    continueK [stack2, redexCount2]
+                , "Mark" |=>
+                    heapSetReducedForm "Weak" addr <| _ ->
+                    continueK [stack3, redexCount2]
+                , "MarkWeak" |=>
+                    heapSetReducedForm "Weak" addr <| _ ->
+                    continueK [stack3, redexCount2]
+                , "MarkStrong" |=>
+                    heapSetReducedForm "Strong" addr <| _ ->
+                    continueK [stack3, redexCount2]
+                , other |=> error ["reduceAll impossible", other]
+                ]
+            ]
+        ]
+    ) <| _ ->
+    grTraceHeap root <| _ ->
+    k [];
+
+-- let reduceAll = reduceAll1;
+let reduceAll = reduceAll2;
+
+-- TODO reduceN
+-- TODO reduce a bounded number of steps
+
+let InstantiateBuiltins = HeapA HEnvTy;
+
+

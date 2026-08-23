@@ -1,0 +1,431 @@
+language ferrum/0.1
+
+let IoId = Int;
+
+let IoError = Str;
+
+let IoResult : { Type -> Type } = 
+    OK -> Result OK IoError;
+
+-- TODO ? parameterise over the exit/done type, rather than using Any ?
+let IoReqResp = 
+    Rec <| IoReqResp ->
+        { [ ["readFile", Str],        Str             -> IoReqResp ]
+        | [ ["readFile2", Str],       (IoResult Str)  -> IoReqResp ]
+        | [ ["writeFile", Str, Str],  []          -> IoReqResp ]
+     -- | [ ["print", Str],           []          -> IoReqResp ]
+     -- | [ ["print", Data],          []          -> IoReqResp ]
+        | [ ["print", Any],           []          -> IoReqResp ]
+        | [ ["getArgs"],              (List Str)  -> IoReqResp ]
+        | [ ["getEnvVar", Str],       (Maybe Str) -> IoReqResp ]
+        | [ ["getFerrumDir"],      (Maybe Str) -> IoReqResp ]
+     -- | [ ["exit", Int],            []                       ]
+        | [ ["done", Any],            []                       ]
+
+        -- http network io
+        -- | [ ["listen", Str, Int],            [Int, Int]            -> IoReqResp ]
+        -- | [ ["accept", Int],                 [Int]                 -> IoReqResp ]
+        -- | [ ["httpServe", Int],              [Int]                 -> IoReqResp ]
+        -- | [ ["httpNext", Int],               [(Maybe Int)]         -> IoReqResp ]
+        | [ ["httpReqMethod", Int],          [Str]                 -> IoReqResp ]
+        | [ ["httpReqUrlPathname", Int],     [Str]                 -> IoReqResp ]
+        | [ ["httpReqUrlQueryParams", Int],  [(List {[Str, Str]})] -> IoReqResp ]
+        | [ ["httpReqData", Int],            [Any]                 -> IoReqResp ]
+        -- | [ ["httpReqJson", Int],            [Int]                 -> IoReqResp ]
+        | [ ["httpReqFormData", Int],        [Int]                 -> IoReqResp ]
+        -- | [ ["httpRespond", Int, (List {[Str,Str]}), Str],  []     -> IoReqResp ]
+
+        | [ ["httpServerCreate"],                                        [Int] -> IoReqResp ]
+        | [ ["httpServerListen", Int, Str, Int],                         []    -> IoReqResp ]
+        | [ ["httpServerRecvRequest", Int],                              [Int] -> IoReqResp ]
+        | [ ["httpServerSendResponse", Int, (List { [Str,Str] }), Str],  []    -> IoReqResp ]
+
+
+        -- general network io, not currently needed
+        -- | [ ["close", Int],           []          -> IoReqResp ]
+        -- | [ ["read", Int],            [Str]       -> IoReqResp ]
+        -- | [ ["write", Int, Str],      []          -> IoReqResp ]
+        -- | [ ["connect", Str, Int],    [Int]       -> IoReqResp ]
+
+        -- for user-space / cooperative concurrency
+        -- | [ ["fork", IoReqResp],      [Int]       -> IoReqResp ]
+
+        -- | (Self (S -> 
+        --     { [ ["createState", Void -> Any ]
+        --     ,   
+        --         let F = (Hd (Tl (Hd (Hd S))));
+        --         [ A @ { (Domain F) & Data } -> { { F A } -> IoReqResp } -> IoReqResp            -- get
+        --         , A @ { (Domain F) & Data } -> { F A } -> { [] -> IoReqResp } -> IoReqResp      -- set
+        --         ]
+        --         -> IoReqResp 
+        --       ] 
+        --     }
+        --   ))
+
+        | [ ["get", Data, [] -> Any],          Any   -> IoReqResp ]
+        | [ ["set", Data, Any],                []    -> IoReqResp ]
+        | [ ["stateOp", Data, (Maybe Data) -> [(Maybe Data), Data] ],  Data    -> IoReqResp ]
+        -- | [ ["stateQuery", Query ],                QueryResult   -> IoReqResp ]
+        -- | [ ["stateQuery", (Comparator Data), Data -> Bool ],      (List {[Data,Data]})   -> IoReqResp ]
+
+        -- | [ ["pushExceptionHandler", Str -> IoReqResp],     [] -> IoReqResp ]
+        -- | [ ["popExceptionHandler"],                        [] -> IoReqResp ]
+
+
+        };
+
+let ioGet : { Data -> { [] -> Any } -> { Any -> IoReqResp } -> IoReqResp } =
+    key -> mkInitVal -> k ->
+    [ ["get", key, mkInitVal], k ];
+
+let ioSet : { Data -> Any -> { [] -> IoReqResp } -> IoReqResp } =
+    key -> val -> k ->
+    [ ["set", key, val], k ];
+
+-- TODO (maybe one day) 
+--     generalize stateOp to accept effectful operation.
+--        the effects available at the state/data/db-location may be different from those available locally
+--        (unless transparent proxying is available / a good idea)
+let ioStateOp : { Data -> { (Maybe Data) -> [(Maybe Data), Data] } -> { Data -> IoReqResp } -> IoReqResp } =
+    key -> op -> k ->
+    [ ["stateOp", key, op], k ];
+
+-- let ioGet2 : { Data -> { (Maybe Data) -> IoReqResp } -> IoReqResp } =
+--     key -> k ->
+--     let k2 = justTrustMeCast { (Maybe Data) -> IoReqResp } { Data -> IoReqResp } k;
+--     ioStateOp key (valMb -> [valMb, valMb]) k2;
+-- 
+-- let ioSet2 : { Data -> (Maybe Data) -> { [] -> IoReqResp } -> IoReqResp } =
+--     key -> valMb -> k ->
+--     let k2 = justTrustMeCast { [] -> IoReqResp } { Data -> IoReqResp } k;
+--     ioStateOp key (_ -> [valMb, []]) k2;
+
+
+-- -- TODO implement a type-correct version of this without casts
+-- let ioCreateState : 
+--     {  F @ { Void -> Any } 
+--     -> [ A @ { Data & (Domain F) } -> { F A -> IoReqResp } -> IoReqResp 
+--        , A @ { Data & (Domain F) } -> { F A } -> { [] -> IoReqResp } -> IoReqResp 
+--        ]
+--     } =
+--     (f : F @ { Void -> Any }) ->
+--     [ (key : A @ { Data & (Domain F) }) -> 
+--       justTrustMeCast { { Any -> IoReqResp } -> IoReqResp } { { { F A } -> IoReqResp } -> IoReqResp } <|
+--       ioGet key ( -> f key )
+--     , justTrustMeCast { Data -> Any -> { [] -> IoReqResp } -> IoReqResp }  { A @ (Domain F) -> { F A } -> { [] -> IoReqResp } -> IoReqResp } 
+--       ioSet
+--     ];
+
+
+-- TODO ? compose effect handlers ?
+-- let withState = 
+-- let withErrorHandler = 
+
+
+let Io = IoReqResp;
+let IoK : { Type -> Type } = T -> { T -> Io };
+let IoA : { Type -> Type } = T -> { (IoK T) -> Io };
+-- let IoA : { Type -> Type } = T -> { K @ (IoK T) -> K T };
+
+
+
+-- sometimes we might want to return a req/resp tuple back to an effect-handling stepper function,
+-- sometimes we might want pass the effect-handler on forward to be used, and possibly inlined, in-place.
+-- this alternative type for Io keeps both options open
+-- let Io2 = { H @ { IoReqResp -> Any } -> H IoReqResp }
+
+let IoDo =  { IoReqResp -> Any };
+
+let ioDo = cast { Void -> Any } IoDo ioDoPrim;
+
+
+let io2ReadFile : { Str -> { Str -> IoReqResp } -> IoReqResp }
+    = filename -> respH ->
+    [ ["readFile", filename], respH ];
+
+let io2ReadFile2 : { Str -> { (IoResult Str) -> IoReqResp } -> IoReqResp } =
+    filename -> k ->
+    [ ["readFile2", filename], k ];
+
+let io2WriteFile : { Str -> Str -> { [] -> IoReqResp } -> IoReqResp }
+    = filename -> contents -> respH ->
+    [ ["writeFile", filename, contents], respH ];
+
+-- let io2Print : { Data -> { [] -> IoReqResp } -> IoReqResp }
+--     = contents -> respH ->
+--     [ ["print", contents], respH ];
+
+let io2Print : { Any -> { [] -> IoReqResp } -> IoReqResp }
+    = contents -> respH ->
+    [ ["print", contents], respH ];
+
+let io2GetArgs : { { (List Str) -> IoReqResp } -> IoReqResp }
+    = respK ->
+    [ ["getArgs"], respK ];
+
+let io2GetEnvVar : { Str -> { (Maybe Str) -> IoReqResp } -> IoReqResp } =
+    envVarName -> respK ->
+    [ ["getEnvVar", envVarName], respK ];
+
+let io2GetEnvVar_orPanic : { Str -> { Str -> IoReqResp } -> IoReqResp } =
+    envVarName -> respK ->
+    io2GetEnvVar envVarName <| valueMb ->
+    ifNil valueMb
+    [ -> panic ["io2GetEnvVar_orPanic: environment variable not set", envVarName]
+    , [value] ->
+        respK value
+    ];
+
+
+-- let io2GetFerrumDir : { { (Maybe Str) -> IoReqResp } -> IoReqResp }
+--     = respK ->
+--     [ ["getFerrumDir"], respK ];
+
+-- TODO ? lookup "FerrumDir" in the processes environment ? 
+-- TODO ?   (feels a bit unfunctional, but no less functional than using a single global filesystem?)
+let io2GetFerrumDir : { { (Maybe Str) -> IoReqResp } -> IoReqResp } =
+    io2GetEnvVar "ferrumDir";
+
+let io2GetFerrumDir_orPanic : { { Str -> IoReqResp } -> IoReqResp } =
+    respK ->
+    io2GetFerrumDir <| srcDirMb ->
+    ifNil srcDirMb
+    [ -> panic "io2GetFerrumDir: Ferrum src dir is unavailable"
+    , [srcDir] ->
+        respK srcDir
+    ];
+
+let io2GetFerrumTestDir : { { (Maybe Str) -> IoReqResp } -> IoReqResp } =
+    io2GetEnvVar "ferrumTestDir";
+
+let io2GetFerrumTestDir_orPanic : { { Str -> IoReqResp } -> IoReqResp } =
+    respK ->
+    io2GetFerrumTestDir <| testDirMb ->
+    ifNil testDirMb
+    [ -> panic "io2GetFerrumTestDir: Ferrum test dir is unavailable"
+    , [testDir] ->
+        respK testDir
+    ];
+
+
+let io2Exit : { Int -> IoReqResp }
+    = exitVal ->
+    -- [ ["exit", exitVal], [] ];
+    [ ["done", exitVal], [] ];
+
+let io2Done : { Any -> IoReqResp } =
+    result ->
+    [ ["done", result], [] ];
+
+-- Deno network and http
+-- let io2Listen : { Str -> Int -> { [Int, Int] -> Io } -> Io } =
+--     hostname -> port -> k ->
+--     [ ["listen", hostname, port], k ];
+-- 
+-- let io2Accept : { Int -> { [Int] -> Io } -> Io } =
+--     listener -> k ->
+--     [ ["accept", listener], k ];
+-- 
+-- let io2HttpServe : { Int -> { [Int] -> Io} -> Io } =
+--     skt -> k ->
+--     [ ["httpServe", skt], k];
+-- 
+-- let io2HttpNext : { Int -> { [(Maybe Int)] -> Io} -> Io } =
+--     conn -> k ->
+--     [ ["httpNext", conn], k];
+-- 
+-- let io2HttpRespond : { Int -> (List {[Str,Str]}) -> Str -> { [] -> Io } -> Io } =
+--     req -> headers -> value -> k ->
+--     [ ["httpRespond", req, headers, value], k];
+
+
+
+-- NodeJs network and http
+let ioHttpServerCreate : { { [Int] -> Io } -> Io } = 
+    k ->
+    [ ["httpServerCreate"], k ];
+
+let ioHttpServerListen : { Int -> Str -> Int -> { -> Io } -> Io } = 
+    server -> host -> port -> k ->
+    [ ["httpServerListen", server, host, port], k ];
+
+let ioHttpServerRecvRequest : { Int -> { [Int] -> Io } -> Io } = 
+    server -> k ->
+    [ ["httpServerRecvRequest", server], k ];
+
+let ioHttpServerSendResponse : { Int -> (List { [Str,Str] }) -> Str -> { [] -> Io } -> Io } = 
+    request -> headers -> body -> k ->
+    [ ["httpServerSendResponse", request, headers, body], k ];
+
+
+
+
+-- Common http request parsing routines
+let io2HttpReqMethod : { Int -> { [Str] -> Io } -> Io } =
+    req -> k ->
+    [ ["httpReqMethod", req], k];
+
+let io2HttpReqUrlPathnamne : { Int -> { [Str] -> Io } -> Io } =
+    req -> k ->
+    [ ["httpReqUrlPathname", req], k];
+
+let io2HttpReqUrlQueryParams : { Int -> { [(List {[Str, Str]})] -> Io } -> Io } =
+    req -> k ->
+    [ ["httpReqUrlQueryParams", req], k];
+
+let io2HttpReqData : { Int -> { [Any] -> Io } -> Io } =
+    req -> k ->
+    [ ["httpReqData", req], k];
+
+
+-- let io2PushExceptionHandler : { { Str -> Io } -> { [] -> Io } -> Io } =
+--     excHandler -> k ->
+--     [ ["pushExceptionHandler", excHandler], k];
+-- 
+-- let io2PopExceptionHandler : { { [] -> Io } -> Io } =
+--     k ->
+--     [ ["popExceptionHandler"], k];
+-- 
+-- -- let io2WithErrorHandler
+
+
+-- let IoLoopBody = Self ( LB -> { Void -> ["continue", (Domain LB)] | ["break", Any] } );
+-- let IoLoopResult = (LB: Type) -> { (Hd (Tl { (Codomain LB) & ["break", Any]})) };
+
+let IoLoopBody = SelfT ( LB -> { Void -> IoReqResp } );
+let IoLoopResult = (LB: Type) -> { (Hd (Tl { (Codomain LB) & ["break", Any]})) };
+
+-- let io2Loop : { LB @ IoLoopBody -> (Domain LB) -> { (IoLoopResult LB) -> IoReqResp } -> IoReqResp }
+let io2Loop : { LB @ IoLoopBody -> (Domain LB) -> H @ { Void -> IoReqResp } -> IoReqResp }
+    = (body: LB @ IoLoopBody) -> initVal -> (handler : H @ { Void -> IoReqResp }) ->
+    let step : { IoReqResp -> IoReqResp } =
+        rec ( (step : {IoReqResp -> IoReqResp}) ->
+            (reqResp : IoReqResp) ->
+            match reqResp
+            [ [ ["done", ["break", result]], [] ] |=>
+                -- let result2 = cast Any (IoLoopResult LB) result;
+                -- let result2 = cast Any (Domain H) result;
+                let result2 = castT result: (Domain H);
+                handler result2
+            , [ ["done", ["continue", loopVal]], [] ] |=>
+                -- let loopVal2 = cast Any (Domain LB) loopVal;
+                let loopVal2 = castT loopVal: (Domain LB);
+                step (body loopVal2)
+            , [ ["done", val], [] ] |=>
+                error ["bad io2Loop result", val]
+            , [req, respH] |=>
+                let respH2 = cast Any { Any -> IoReqResp } respH;
+                let rr = [req, resp -> step (respH2 resp)];
+                let rr2 = cast Any IoReqResp rr;
+                rr2
+            , _ |=>
+                error "io2Loop missing case"
+            ]
+        );
+    step (body initVal);
+
+let io2Break : { Any -> IoReqResp } =
+    loopResult -> [ ["done", ["break", loopResult]], [] ];
+
+let io2Continue : { Any -> IoReqResp } =
+    loopVal -> [ ["done", ["continue", loopVal]], [] ];
+
+-- -- let printNumbers : { { [Int, Str] -> IoReqResp } -> IoReqResp } = ioReturn ->
+-- let printNumbers : IoReqResp =
+--     io2Loop ( (i: Int) ->
+--         io2Print [i, i*i, i*i*i] <| ->
+--         if (i >= 10)
+--         [ -> io2Break [i, "i = "^i] 
+--         , -> io2Continue (i+1)
+--         ]
+--     ) 1 <| (result: {[Int, Str]}) ->
+--     io2Print result <| ->
+--     -- ioReturn resut
+--     io2Exit 3;
+
+-- let IoLoopBody2 = Self ( LB -> { Void -> { Void -> IoReqResp } -> { (Domain LB) -> IoReqResp } -> IoReqResp } );
+let IoLoopBody2A = (Result : Type) -> SelfT ( LB -> { Void -> { Result -> IoReqResp} -> { (Domain LB) -> IoReqResp } -> IoReqResp } );
+
+-- let io2Loop2 : { LB @ IoLoopBody2 -> (Domain LB) -> H @ { (Domain (Codomain LB)) -> IoReqResp } -> IoReqResp }
+--     = (body: LB @ IoLoopBody2) -> initVal -> (handler : H @ { (Domain (Codomain LB)) -> IoReqResp }) ->
+--     let breakK = handler;
+--     let continueK = rec ( (continueK:{ (Domain LB) -> IoReqResp }) -> val -> body val breakK continueK );
+--     body initVal breakK continueK;
+
+let io2Loop2A : { { Result: Type } ->  LB @ (IoLoopBody2A Result) -> (Domain LB) -> H @ { Result -> IoReqResp } -> IoReqResp }
+    = (Result: Type) -> (body: LB @ (IoLoopBody2A Result)) -> initVal -> (handler : H @ { Result -> IoReqResp }) ->
+    let breakK = handler;
+    let continueK = rec ( (continueK:{ (Domain LB) -> IoReqResp }) -> val -> body val breakK continueK );
+    body initVal breakK continueK;
+
+let IoLoopBody2B = SelfT ( LB -> { Void -> { Any -> Io } -> { (Domain LB) -> Io } -> Io } );
+
+let io2Loop2B : { LB @ IoLoopBody2B -> (Domain LB) -> { (Domain (Domain (Codomain LB))) -> Io } -> Io } =
+    (body: LB @ IoLoopBody2B) -> 
+    (initVal: Domain LB) -> 
+    (returnK : { (Domain (Domain (Codomain LB))) -> Io }) ->
+    let breakK = returnK;
+    let continueK = rec ( (continueK: { (Domain LB) -> Io }) -> val -> body val breakK continueK );
+    body initVal breakK continueK;
+
+
+-- let io2ReadLine : { { Str -> IoReqResp } -> IoReqResp }
+--     = handler ->
+--     error "TODO";
+
+
+-- let io2Map : 
+--     { { Result : Type }
+--     -> F @ { Void -> (IoA Result) } 
+--     -> (List (Domain F)) 
+--     -> { (List Result) -> Io } 
+--     -> Io
+--     } =
+--     ( Result: Type ) ->
+--     (f : F @ { Void -> (IoA Result)}) -> 
+--     (args : List (Domain F)) ->
+--     (returnK : { (List Result) -> Io }) ->
+--     let mapAux = rec ( (mapAux : {(List (Domain F)) -> (List Result) -> Io }) -> (args2 : List (Domain F)) -> (results : List Result) -> 
+--         match args2
+--         [ [] |=> 
+--             returnK (reverse results)
+--         , [arg1 ,, argss2] |=>
+--             f arg1 <| result ->
+--             -- nop | -> 
+--             mapAux argss2 [result ,, results]
+--         ]
+--     );
+--     mapAux args [];
+
+let io2Map2 : 
+    {  F @ { Void -> (IoA Any) } 
+    -> (List (Domain F)) 
+    -> { (List (Domain (Domain (Codomain F)))) -> Io } 
+    -> Io
+    } =
+    (f : F @ { Void -> (IoA Any)}) -> 
+    (args : List (Domain F)) ->
+    (returnK : { (List (Domain (Domain (Codomain F)))) -> Io }) ->
+    let mapAux = rec ( 
+        (mapAux : {(List (Domain F)) -> (List (Domain (Domain (Codomain F)))) -> Io }) -> 
+        (args2 : List (Domain F)) -> 
+        (results : List (Domain (Domain (Codomain F)))) -> 
+        match args2
+        [ [] |=> 
+            returnK (reverse results)
+        , [arg1 ,, argss2] |=>
+            f arg1 <| result ->
+            -- nop | -> 
+            -- step | -> 
+            mapAux argss2 [result ,, results]
+        ]
+    );
+    mapAux args [];
+
+
+let readFile = io2ReadFile;
+-- let writeFile = io2WriteFile;
+let print = io2Print;
+let ioMap = io2Map2;
+let ioLoop = io2Loop2B;
+let ioDone = io2Done;

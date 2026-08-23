@@ -1,0 +1,73 @@
+language ferrum/0.1
+
+-- TODO records: a better alternative to tuples and key-value lists
+
+e.g.
+
+let MyEvent = 
+    Record <|
+    [ ["event", Str]
+    , ["attendees", Int]
+    , ["public" Bool]
+    ];
+
+
+let p = record [ ["event", "party"], ["attendees", 20], ["public", false] ]; 
+
+-- To accsss
+let num = p "attendees";
+
+-- to modify
+let p = p ["attendees", 25];
+-- or
+let p = (set p) "attendees" 25;
+let p = (set p).attendees 25;
+let p = (p []).attendees 25;
+let p = p.set "attendees" 25;
+let p = p "set" "attendees" 25;
+
+let p = p |> (set "attendees" 25) |> (set "fancy dress party" 25)
+
+-- ? or with syntactic sugar ?
+  -- implicitly rebind "p"
+  ( p .attendees != 25 )
+  ( context ( p =!. attendees 25 ) )   -reduced-to->   ( let [p, result] = p "=" "attendees" 25; context result ) -- result in this case is nil
+
+-- What works well with nested records ?
+    q "Tuesday" "public"
+    q.tuesday.public
+    q (set "Tuesday") (set "public" true) 
+
+let Record : { (List { [Str, Type] }) -> Type } =
+    fields ->
+    panic ["TODO"];
+
+let record : { R @ (Record Any) -> ??? } =
+    r ->
+    panic ["TODO"];
+
+
+let RecordSchema = List { [Str, Type] };
+
+let RecordSchemaToType : { RecordSchema -> Type } =
+    schema ->
+    panic ["TODO", "RecordSchemaToType"];
+
+let recordSet : 
+    {  S @ RecordSchema 
+    -> K @ (Domain (RecordSchemaToType S))
+    -> (RecordSchemaToType S) K
+    -> (RecordSchemaToType S) 
+    -> (RecordSchemaToType S) 
+    } =
+    (schema : S @ RecordSchema) ->
+    (key : K @ (Domain (RecordSchemaToType S))) ->
+    (val : { (RecordSchemaToType S) K }) ->
+    (old : RecordSchemaToType S) ->
+    panic ["TODO", "recordSet"]; 
+    -- TODO use the schema to read all the values out of the old record,
+    -- TODO then build a closure, replacing one key/value pair, for the new record.
+    -- TODO  ( need to avoid accidentaly building an ever growing (and leaking) chain of closures )
+
+
+

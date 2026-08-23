@@ -1,0 +1,140 @@
+language ferrum/0.1
+
+let parseTrace = debug2Skip;
+-- let parseTrace = debug2;
+
+let parseDebug = _ -> [];
+-- let parseDebug = debug;
+
+let ParserHandler =
+    Rec <| P ->
+    { { "parseToken"     -> [[TokenTag, Str]]  -> K @ { Token         -> P -> Any } -> K Token         P }
+    & { "tryParseToken"  -> [[TokenTag, Str]]  -> K @ { (Maybe Token) -> P -> Any } -> K (Maybe Token) P }
+    & { "peekNextToken"  -> []                 -> K @ { (Maybe Token) -> P -> Any } -> K (Maybe Token) P }
+    & { "takeNextToken"  -> []                 -> K @ { (Maybe Token) -> P -> Any } -> K (Maybe Token) P }
+    };
+
+let ParserK : { Type -> Type } = 
+    A -> { A -> ParserHandler -> Any };
+let ParserA : { Type -> Type } = 
+    A -> { K @ (ParserK A) -> ParserHandler -> K A ParserHandler };
+
+-- let ParserMk = { (List Token) -> ParserHandler };
+
+let hParseToken : { [TokenTag, Str] -> (ParserA Token) } = 
+    hpsAction1 <|
+    -- ( [ tag, val] : { [TokenTag, Str] } ) -> 
+    ( tagVal : { [TokenTag, Str] } ) -> 
+    ( k : K @ ParserK Token ) ->
+    ( handler : ParserHandler ) ->
+    handler "parseToken" [tagVal] k;
+
+let hTryParseToken : { [TokenTag, Str] -> (ParserA (Maybe Token)) } = 
+    hpsAction1 <|
+    -- ( [tag, val] : { [TokenTag, Str] } ) -> 
+    ( tagVal : { [TokenTag, Str] } ) -> 
+    ( k : K @ ParserK (Maybe Token) ) ->
+    ( handler : ParserHandler ) ->
+    handler "tryParseToken" [tagVal] k;
+
+let hPeekNextToken : { (ParserA (Maybe Token)) } = 
+    hpsAction0 <|
+    ( k : K @ ParserK (Maybe Token) ) ->
+    ( handler : ParserHandler ) ->
+    handler "peekNextToken" [] k;
+
+let hTakeNextToken : { (ParserA (Maybe Token)) } = 
+    hpsAction0 <|
+    ( k : K @ ParserK (Maybe Token) ) ->
+    ( handler : ParserHandler ) ->
+    handler "takeNextToken" [] k;
+
+
+-- let Parser = List Token;
+
+
+
+
+let parserMk : { (List Token) -> ParserHandler } =
+    annotate_HandlerMk <|
+    rec <| (parserMk : { (List Token) -> ParserHandler }) ->
+    tokens -> 
+    hpsDispatch ParserHandler
+    [ [ "parseToken"
+      , [tok @ [tag : TokenTag, val : Str]] -> 
+        (k : K @ ParserK Token) ->
+        -- TODO ? change the "match" calls to "ifNil" (temporarily) to make HPS codegen easier ?
+        ifNil tokens
+        [ [] ->
+            error ["parserMk", "expected token", tok, "but got token", "EOF"]
+        , [tok1 @ [tag1, val1, _] ,, toks] ->
+            if ((tag1 == tag) && (val1 == val))
+            [ ->
+                let _ = parseDebug ["PARSED TOKEN", "parseToken", tok1];
+                k tok1 (parserMk toks)
+            , ->
+                error ["parserMk", "expected token", tok, "but got token", tok1]
+            ]
+        ]
+      ]  
+    , [ "tryParseToken"
+      , [tok @ [tag : TokenTag, val : Str]] -> 
+        (k : K @ ParserK (Maybe Token)) ->
+        ifNil tokens
+        [ [] ->
+            k [] (parserMk tokens)
+        , [tok1 @ [tag1, val1, _] ,, toks] ->
+            if ((tag1 == tag) && (val1 == val))
+            [ ->
+                let _ = parseDebug ["PARSED TOKEN", "tryParseToken", tok1];
+                k [tok1] (parserMk toks)
+            , ->
+                k [] (parserMk tokens)
+            ]
+        ]
+      ]  
+    , [ "peekNextToken"
+      , [] -> 
+        (k : K @ ParserK (Maybe Token)) ->
+        ifNil tokens
+        [ [] ->
+            k [] (parserMk tokens)
+        , [tok1 @ [tag1, val1, _] ,, toks] ->
+            k [tok1] (parserMk tokens)
+        ]
+      ]  
+    , [ "takeNextToken"
+      , [] -> 
+        (k : K @ ParserK (Maybe Token)) ->
+        ifNil tokens
+        [ ->
+            error ["parserMk", "expected any token", "but got", "EOF"]
+        , [tok1 @ [tag1, val1, _] ,, toks] ->
+            let _ = parseDebug ["PARSED TOKEN", "takeNextToken", tok1];
+            k [tok1] (parserMk toks)
+        ]
+      ]  
+    ];
+
+
+let parserDo : { (ParserA ExprLoc) -> ParserHandler -> ExprLoc } =
+    action -> handler ->
+    action (expr -> handler1 -> expr) handler;
+
+-- let parserDo2 : { (ParserA ExprLoc) -> ParserMk -> (List Token) -> ExprLoc } =
+--     action -> handlerMk -> initState ->
+--     action (expr -> handler1 -> expr) (handlerMk initState);
+
+-- let parserDo2 : { (ParserA ExprLoc) -> ParserMk -> (List Token) -> ExprLoc } =
+--     action -> handlerMk -> initState ->
+--     hpsDo ParserHandler action handlerMk initState;
+
+
+-- let hLoop1 = hpsLoop1 ParserHandler;
+let hLoop2 = hpsLoop2 ParserHandler;
+let hFunc0 = hpsFunc0 ParserHandler;
+let hFunc1 = hpsFunc1 ParserHandler;
+let hFunc2 = hpsFunc2 ParserHandler;
+let hFunc3 = hpsFunc3 ParserHandler;
+
+

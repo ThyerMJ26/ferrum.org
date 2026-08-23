@@ -1,0 +1,691 @@
+language ferrum/0.1
+
+
+-- let scanWhile : { Str -> Int -> A @ Any -> { A -> Str -> [A, Bool] } -> [Str, Int, A, Bool] } =
+--     inStr -> inPos -> state -> pred ->
+
+-- let scanSimple = (input : Str) ->
+--     let inputLen = strLen input;
+--     let addTok : { Str -> (List Token) -> (List Token) } =
+--         tokStr -> toks ->
+--         if (tokStr == "") 
+--         [ -> toks
+--         , -> [ ["WORD", tokStr, nilLoc] ,, toks ]
+--         ];
+--     loop2 
+--     [ 0 : Int
+--     , "" : Str
+--     , [] : List Token
+--     ] <| [i, tokStr, toks] ->
+--     if (i < inputLen)
+--     [ -> 
+--         let ch = strCharAt input i;
+--         match ch
+--         [ " " |=>  
+--             continue [i + 1, "", addTok tokStr toks]
+--         , _ |=> 
+--             continue [i + 1, strAdd tokStr ch, toks]
+--         ]
+--     , -> break (reverse (addTok tokStr toks))
+--     ];
+
+
+let scanSimple : { Str -> Tokens } = 
+    input ->
+    loop2 
+    [ 0 : Int
+    , [] : List Char
+    , [] : List Token
+    ] <| [i, chars, toks] ->
+    let chMb = strCharAtMb input i;
+    match [chMb, chars]
+    [ [ [], [] ] |=> 
+        break (reverse toks)
+    , [ [], _ ] |=>
+        let tok : Token = ["WORD", char_concat (reverse chars), nilLoc];
+        -- break <| reverse [tok ,, toks]
+        break <| reverse ([tok ,, toks] : Tokens)
+    , [ [" "], _ ] |=>  
+        let tok : Token  = ["WORD", char_concat (reverse chars), nilLoc];
+        continue <| [ i + 1, [], [tok ,, toks] ]
+    , [ [ch], _ ] |=> 
+        continue <| [ i + 1, [ch ,, chars], toks ]
+    ];
+
+-- let trace3 : { Data -> F @ { -> Data } -> { F [] } } = 
+--     msg -> (k : F @ { -> Data }) ->
+--     trace2 ["+", msg] <| ->
+--     let result = k[];
+--     trace2 ["-", result] <| ->
+--     result;
+
+
+let isUpper = (a : Str) -> (strOrd a >= strOrd "A") && (strOrd a <= strOrd "Z");
+let isLower = (a : Str)-> (strOrd a >= strOrd "a") && (strOrd a <= strOrd "z");
+let isAlpha = (a : Str)-> isUpper a || isLower a;
+let isDigit = (a : Str) -> (strOrd a >= strOrd "0") && (strOrd a <= strOrd "9"); 
+let isAlphanum = (a : Str)-> isAlpha a || isDigit a;
+-- let isAlphaUS = (a : Str) -> isAlpha a || (a == "_");
+
+let punctChars : List Str = ["(", ")", "[", "]", "{", "}", ";"];
+let operChars : List Str = ["!", "#", "$", "%", "&", "*", "+", ".", "/", "<", "=", ">", "?", "@", "\\", "^", "|", "-", "~", ":"];
+let keyWords : List Str = ["let"];
+let keyOpers : List Str = ["=", "@", ":", "...", "->", "=>", "|->", "|=>", "|-", "|="];
+-- let whitespaceChars : List Str = [" ", "\t", "\n", "\r"];
+let whitespaceChars : List Str = [" ", "\t", "\n", "\r", ""];
+
+-- let isElem = (a : Any) -> (x0 : List Any) ->
+let isElem = (a : Str) -> (x0 : List Str) ->
+    loop2 
+    (x0 : List Str)
+    <| x ->
+    ifNil x
+    [ -> break false
+    , [x1 ,, xs] -> 
+        if (a == x1) 
+        [ -> break true
+        , -> continue xs
+        ]
+    ];
+
+let isElemInt = (a : Int) -> (x0 : List Int) ->
+    loop2 
+    (x0 : List Int)
+    <| x ->
+    ifNil x
+    [ -> break false
+    , [x1 ,, xs] -> 
+        if (a == x1) 
+        [ -> break true
+        , -> continue xs
+        ]
+    ];
+
+let isWhitespace = (ch : Str) -> isElem ch whitespaceChars;
+
+let whatDigit = (d : Str) -> strOrd d - strOrd "0";
+
+let zeroVal = strOrd "0";
+let nineVal = strOrd "9";
+let alVal   = strOrd "a";
+let zlVal   = strOrd "z";
+let auVal   = strOrd "A";
+let zuVal   = strOrd "Z";
+
+let nibbleVal : { Str -> Int } =
+    ch ->
+    let c = strOrd ch;
+    match []
+    [ -> guardTrue ((zeroVal <= c) && (c <= nineVal)) <| _ => (     (c - zeroVal))
+    , -> guardTrue ((alVal <= c)   && (c <= zlVal)  ) <| _ => (10 + (c - alVal))
+    , -> guardTrue ((auVal <= c)   && (c <= zuVal)  ) <| _ => (10 + (c - auVal))
+    , -> panic ["invalid hex nibble" : Str, ch]
+    ];
+
+let tryScan : { Str -> Pos -> Str -> (Maybe Pos) } =
+    a -> pos1 -> input ->
+    let aLen = strLen a;
+    -- trace2 ["tryScan", a, pos1] <| ->
+    loop2
+    [0 : Int
+    , pos1
+    ] <| [j, pos] ->
+    let pos2 = posAdv input pos;
+    if (j == aLen)
+    [ -> break [pos]
+    , ->
+        let chA = strCharAt a j;
+        let chI = strCharAt input (posIdx pos);
+        if (chA == chI)
+        [ -> continue [j + 1, pos2]
+        , -> break []
+        ]
+    ];
+
+let doScan = tryScan "";
+
+let tryEOF : { Pos -> Str -> (Maybe Pos) } =
+    (pos @ [row, col, idx]) -> input ->
+    -- trace2 ["tryEOF", pos] <| ->
+    let inputLen = strLen input;
+    if (idx == inputLen) 
+    [ -> [pos]
+    , -> []
+    ];
+
+-- let tryScanComment : { Pos -> Str -> (Maybe Pos) } =
+--     pos1 -> input ->
+--     let pos2a = tryScan "--" pos1 input;
+--     ifNil pos2a
+--     [ [] -> []
+--     , [pos2] -> 
+--         let ch = strCharAt input (posIdx pos2);
+--         if (isElem ch operChars)
+--         [ -> []
+--         , -> [pos2]
+--         ]
+--     ];
+
+let scanComment : { Pos -> Str -> Str -> (List Token) -> [Pos, (List Token)] } =
+    pos1 -> filename -> input -> tokens ->
+    let ch1 = strCharAt input (posIdx pos1);
+    if (isElem ch1 operChars)
+    [ -> error ["comment cannot start with an operator character", ch1, filename, pos1]
+    , ->
+        loop2 pos1 <| pos ->
+        let ch = strCharAt input (posIdx pos);
+        let nextPos = posAdv input pos;
+        if (ch == "")
+        [ -> break [pos, tokens]
+        , ->
+            if ((ch == "\n") || (ch == "\r"))
+            [ -> break [nextPos, tokens]
+            , -> continue nextPos
+            ]
+        ]
+    ];
+
+let scanString : { Pos -> Str -> Str -> (List Token) -> [Pos, (List Token)] } =
+    pos0 -> filename -> input -> tokens ->
+    let pos1 = posAdv input pos0;
+    let result = 
+        loop2 
+        [ pos1
+        , [] : List Char
+        ] <| [pos, val] ->
+        let chMb = strCharAtMb input (posIdx pos);
+        let pos2 = posAdv input pos;
+        match chMb 
+        [ [] |=> error ["unexpected EOF in string", pos]
+        , ["\n"] |=> error ["unexpected EOL in string", pos]
+        , ["\r"] |=> error ["unexpected EOL in string", pos]
+        , ["\""] |=>
+            let ch2 = strCharAt input (posIdx pos2);
+            -- TODO correctly handle close quotes at the last position in an input file 
+            if (not (isWhitespace ch2 || isElem ch2 punctChars || (ch2 == ",") || (ch2 == "") ))
+            [ -> error ["string literal cannot be immediately followed by ", ch2, filename, pos2, input]
+            , ->
+                -- let tok = ["STRING", val, [filename, pos0, pos2]];
+                let val2 = char_concat <| reverse val;
+                let tok = ["STRING", val2, [filename, pos0, pos2]];
+                break [pos2, [tok,,tokens]]
+            ]
+        , ["\\"] |=>
+            let chMb2 = strCharAtMb input (posIdx pos2);
+            let pos3 = posAdv input pos2;
+            match chMb2
+            [ ["n"] |=> continue [pos3,  ["\n" ,, val]]
+            , ["r"] |=> continue [pos3,  ["\r" ,, val]]
+            , ["t"] |=> continue [pos3,  ["\t" ,, val]]
+            , ["\""] |=> continue [pos3, ["\"" ,, val]]
+            , ["\\"] |=> continue [pos3, ["\\" ,, val]]
+            , ["x"] |=>
+                let pos = pos3;
+                let nibble1 = strCharAt input (posIdx pos);
+                let pos = posAdv input pos;
+                let nibble2 = strCharAt input (posIdx pos);
+                let pos = posAdv input pos;
+                let hexVal = strChr ((nibbleVal nibble1 * 16) + nibbleVal nibble2);
+                continue [pos, [hexVal ,, val]]
+            , _ |=> error ["unexpected escape sequence or EOF", chMb2, pos]
+            ]
+        , [ch] |=> continue [pos2, [ch ,, val]]
+        ];
+    result;
+
+let skipWhitespaceToEol : { Str -> Pos -> Pos } =
+    input -> pos0 -> 
+    loop2 pos0 <| pos ->
+    let ch = strCharAt input (posIdx pos);
+    let nextPos = posAdv input pos;
+    match ch
+    [ " "  |=> continue nextPos
+    , "\t" |=> continue nextPos
+    , "\n" |=> break nextPos
+    , "\r" |=> break nextPos
+    , _    |=> error ["unexpected character on same line as triple quotes", ch, pos]
+    ];
+
+
+let scanVerbatimString : { Pos -> Pos -> Str -> Str -> Str -> (List Token) -> [Pos, (List Char), (List Token)] } =
+    posBegin -> pos0 -> filename -> input -> indent -> tokens ->
+    let marginCol = strLen indent + 1;
+    let pos1 = skipWhitespaceToEol input pos0;
+    let [pos2, lines] = 
+        loop2 
+        [ pos1
+        , [] : Maybe Str
+        , [] : List Char
+        , [] : List Str
+        ] <| [pos @ [row, col, idx], margin, chars, lines] ->
+        let chMb = strCharAtMb input (posIdx pos);
+        let nextPos = posAdv input pos;
+        match chMb
+        [ ["\n"] |=> continue [nextPos, margin, [], [char_concat(reverse chars) ,, lines] : List Str]
+        , ["\r"] |=> continue [nextPos, margin, [], [char_concat(reverse chars) ,, lines] : List Str]
+        , [ch]   |=> 
+            if (col < marginCol)
+            [ -> 
+                let expectedCh = strCharAt indent (col-1);
+                if (ch==expectedCh)
+                [ -> continue [nextPos, margin, chars, lines]                    
+                , ->
+                    -- let _ = debug ["VERBATIM", pos, col, marginCol, margin, indent]; 
+                    error ["inconsistent/invalid indentation in verbatim string", ch, "expected", expectedCh, "at", pos]
+                ]
+            , _ ->
+                if (col == marginCol)
+                [ ->
+                    ifNil margin
+                    [ [] -> 
+                        if ((ch == " ") || (ch == "\t"))
+                        [ -> continue [nextPos, [ch], chars, lines]
+                        , -> 
+                            if (ch == "\"")
+                            [ -> 
+                                break [pos, lines]
+                            , ->
+                                error ["invalid character in margin column of verbatim string", ch, "at", pos]
+                            ]
+                        ]
+                    , [marginCh] ->
+                        if (ch==marginCh)
+                        [ -> continue [nextPos, margin, chars, lines]
+                        , -> 
+                            if (ch == "\"")
+                            [ -> 
+                                break [pos, lines]
+                            , ->
+                                error ["inconsistent character in margin column of verbatim string", ch, "expected", marginCh, "at", pos]
+                            ]
+                        ]
+                    ]
+                , ->
+                    continue [nextPos, margin, [ch ,, chars], lines]
+                ]
+            ]
+        ];
+
+    let val = strJoin "\n" (reverse lines);
+    let posQ1 = tryScan "\"\"\"" pos2 input;
+    let posEnd = 
+        ifNil posQ1
+        [ [] -> error ["expected closing triple quotes here", pos2]
+        , [posQ2] -> posQ2
+        ];
+    let pos3 = skipWhitespaceToEol input posEnd;
+    let tok = ["STRING", val, [filename, posBegin, posEnd]];
+    [pos3, [], [tok ,, tokens]];
+
+
+
+
+
+-- let ScanCondition = { Pos -> Str -> (Maybe Pos) };
+-- let ScanAction = { Pos -> Any };
+-- let ScanOption = { [ScanCondition, ScanAction] };
+-- 
+-- let scanOptions : { Pos -> Str -> SO @ (List ScanOption) -> (Codomain (Hd (Tl (Elem SO)))) } =
+--     pos -> input -> (opts0 : SO @ (List ScanOption)) ->
+--     loop2 (opts0 : List (Elem SO)) <| opts ->
+--     ifNil opts
+--     [ _ -> error "no option matched"
+--     , [so ,, sos] -> 
+--         let [sc, sa] = so;
+--         let maybePos = sc pos input;
+--         ifNil maybePos
+--         [ [] -> continue sos
+--         , [pos2] -> break (sa pos2)
+--         ]
+--     ];
+
+let CharClassName = 
+    { "WHITESPACE" | "LETTER" | "DIGIT" | "OPER" | "PUNCT" | "UNDERSCORE" | "QUOTE" | "COMMA"};
+
+let CharClassDefn = { [ CharClassName, Str->Bool ] };
+
+let charClasses: List CharClassDefn = 
+    -- [ ["WHITESPACE", ch -> isElem ch [" ", "\t", "\n", "\r", ""]]
+    [ ["WHITESPACE", isWhitespace]
+    , ["LETTER", isAlpha]
+    , ["DIGIT", isDigit]
+    -- , ["DOT", ch -> ch == "."] -- TODO ? distinguish dot from other operators so as to allow decimal points in numbers
+    , ["OPER", ch -> isElem ch operChars]
+    , ["PUNCT", ch -> isElem ch punctChars]
+    , ["UNDERSCORE", ch -> ch == "_"]
+    , ["QUOTE", ch -> ch == "\""]
+    , ["COMMA", ch -> ch == ","]
+    ];
+
+-- let whichCC = (ch: Str) ->
+--     loop2 charClasses <|
+--     charClasses1 ->
+--     ifNil charClasses1
+--     [ [] -> error ["character doesn't belong to any character class", ch]
+--     , [ [name, test] ,, ccs ] -> 
+--         if (test ch)
+--         [ -> break name
+--         , -> continue ccs
+--         ]
+--     ];
+
+let TokenRule = { [ TokenTag, (List CharClassName), (List CharClassName), (List CharClassName) ] };
+
+-- let TokenRule = Self ( TT -> 
+--     {   let VAL = ( Hd { [(Hd TT), Any] } ) & Token;
+--         [ TokenTag, (List CharClassName), (List CharClassName), (List CharClassName), VAL, VAL->VAL, VAL->Loc->Token ]
+--     } );
+
+let tokenRules: List TokenRule = 
+    [ ["WORD",    ["LETTER"],       ["LETTER", "DIGIT", "UNDERSCORE"],  ["WHITESPACE", "PUNCT", "OPER", "COMMA"]]
+    , ["OPER",    ["OPER"],         ["OPER"],                           ["WHITESPACE", "PUNCT", "LETTER", "DIGIT", "UNDERSCORE", "COMMA"]]
+    , ["NUMBER",  ["DIGIT"],        ["DIGIT"],                          ["WHITESPACE", "PUNCT", "COMMA"]]
+    , ["PUNCT",   ["PUNCT"],        [],                                 ["WHITESPACE", "PUNCT", "LETTER", "DIGIT", "OPER", "UNDERSCORE", "QUOTE", "COMMA"]]
+    , ["WILD",    ["UNDERSCORE"],   [],                                 ["WHITESPACE", "PUNCT", "OPER", "COMMA"]]
+    , ["COMMA",   ["COMMA"],        ["COMMA"],                          ["WHITESPACE", "PUNCT", "LETTER", "DIGIT", "OPER", "UNDERSCORE", "QUOTE"]]
+    ];
+
+-- let TokenConstructor = 
+--     Self ( TC -> { 
+--         [ Type
+--         , (hd TC)
+--         , (hd TC)->Str->(hd TC)
+--         , (hd TC)->Loc->Token 
+--         ] 
+--     } );
+-- 
+-- let mkDefaultTokenConstructor
+--     : {TokenTag -> TokenConstructor}
+--     = (tag: TokenTag) ->
+--     [ Str, "", strAdd, (val:Str) -> (loc:Loc) -> [tag, val, loc] ];
+
+
+-- let TokenConstructor = 
+--     Self ( TC -> { 
+--         [ Void->Str->(Domain (hdT TC))
+--         , (Domain (hdT TC))
+--         , (Domain (hdT TC))->Loc->Token 
+--         ] 
+--     } );
+-- 
+-- let mkDefaultTokenConstructor
+--     : {TokenTag -> TokenConstructor}
+--     = (tag: TokenTag) ->
+--     [ strAdd, "", (val:Str) -> (loc:Loc) -> [tag, val, loc] ];
+-- 
+-- let getTokenConstructor
+--     : { TokenTag -> TokenConstructor }
+--     = tag -> 
+--     match tag
+--     [ "WORD" |=> mkDefaultTokenConstructor "WORD" 
+--     , "OPER" |=> mkDefaultTokenConstructor "OPER"
+--     , "PUNCT" |=> mkDefaultTokenConstructor "PUNCT"
+--     , "WILD" |=> mkDefaultTokenConstructor "WILD"
+--     , "NUMBER" |=> [Int, 0, (num: Int) -> (ch: Str) -> whatDigit ch + (num*10), (num: Int) -> (loc: Loc) -> ["NUMBER", num, loc]]
+--     ];
+
+let parseInt : { Str -> Int} =
+    text ->
+    loop2 
+    [ 0 : Int
+    , 0 : Int
+    ] <| [idx, num] ->
+    if (idx==strLen text)
+    [ -> break num
+    , -> 
+        let ch = strCharAt text idx;
+        continue [idx+1, whatDigit ch + (num * 10)]
+    ];
+
+-- TODO a smarter way to incrementally construct tokens so as to not need to run through the digits in a number twice
+-- TODO   need a slightly smarter type system to accepts the types required for this.
+let cookToken : { RawToken -> Token } =
+    [tag, val, loc] ->
+    match tag
+    [ "WORD"   |=> 
+        if (isElem val keyWords) 
+            [->["KEYWORD", val, loc] 
+            ,->["WORD", val, loc]
+            ]
+    , "OPER"   |=> 
+        if (isElem val keyOpers) 
+            [->["KEYOPER", val, loc] 
+            ,->["OPER", val, loc]
+            ]
+    , "PUNCT"  |=> ["PUNCT", val, loc] 
+    , "COMMA"  |=> ["COMMA", val, loc] 
+    , "WILD"   |=> ["WILD", val, loc] 
+    , "NUMBER" |=> ["NUMBER", parseInt val, loc] 
+    ];
+
+
+let lookupCharClass = (ccName: Str) ->
+    let cc = lookup ccName charClasses;
+    ifNil cc
+    [ [] -> error ["unknown character class", ccName]
+    , [cc2] -> cc2
+    ];
+
+let anyCcMatch = (ccs: List CharClassName) -> (ch: Str) ->
+    loop2 ccs <| ccs2 ->
+    ifNil ccs2
+    [ [] -> break false
+    , [ ccName ,, ccs3] -> 
+        let ccTest = lookupCharClass ccName;
+        if (ccTest ch)
+        [ -> break true
+        , -> continue ccs3
+        ]
+    ];
+
+
+let scanToken : { Pos -> Str -> Str -> (List Token) -> [Pos, (List Token)] } =
+    pos1 -> filename -> input -> tokens ->
+    let ch = strCharAt input (posIdx pos1);
+    loop2 tokenRules <| rules ->
+    ifNil rules
+    [ [] -> error ["no rule matched", pos1, ch, strLen input]
+    , [ rule @ [name, begin, middle, end] ,, ruless ] -> 
+        if (anyCcMatch begin ch)
+        [ -> 
+            let [pos3, value] = 
+                loop2 [posAdv input pos1, [ch] : List Str] <| 
+                [pos, chars] ->
+                let ch2 = strCharAt input (posIdx pos);
+                let nextPos = posAdv input pos;
+                if (anyCcMatch middle ch2)
+                [ -> continue [nextPos, [ch2 ,, chars]]
+                , -> break [pos, strCat (reverse chars)]
+                ];
+            let ch3 = strCharAt input (posIdx pos3);
+            let endMatch = anyCcMatch end ch3;
+            if endMatch
+            [ -> 
+                let tok = cookToken [name, value, [filename, pos1, pos3]];
+                break [pos3, [tok,,tokens]]
+            , -> error ["invalid character after token", filename, pos3, ch3, value, end]
+            ]
+        , -> continue ruless
+        ]
+    ];
+
+let scanEof : { Str -> Pos -> (List Token) -> (List Token) } =
+    filename -> pos -> tokens ->
+    let eofTok = ["EOF", "", [filename, pos, pos]];
+    reverse [eofTok,,tokens];
+
+
+let scanFromPos : { Str -> Str -> Pos -> Tokens } = 
+    filename -> input -> pos ->
+    let tokens : Tokens = [];
+    let indent : List Char = [];
+    loop2 
+    [pos, indent, tokens] <|
+    [pos, indent, tokens] ->
+    match []
+    [ -> tryEOF           pos input |> [pos] |=> break <| scanEof filename pos tokens
+    , -> tryScan " "      pos input |> [pos] |=> continue <| [ pos, [" "  ,, indent], tokens ]
+    , -> tryScan "\t"     pos input |> [pos] |=> continue <| [ pos, ["\t" ,, indent], tokens ]
+    , -> tryScan "\n"     pos input |> [pos] |=> continue <| [ pos, ["\n" ,, indent], tokens ]
+    , -> tryScan "\r"     pos input |> [pos] |=> continue <| [ pos, ["\r" ,, indent], tokens ]
+    , -> tryScan "\"\"\"" pos input |> [pos2] |=> 
+            continue <|
+            scanVerbatimString pos pos2 filename input (char_concat (reverse indent)) tokens
+    , _ =>
+        continue <|
+        loop2 
+        [pos, tokens] <|
+        [pos, tokens] ->
+        match []
+        [ -> tryEOF       pos input |> [pos] |=> break <| [pos, [], tokens]
+        , -> tryScan "\n" pos input |> [pos] |=> break <| [pos, [], tokens]
+        , -> tryScan "\r" pos input |> [pos] |=> break <| [pos, [], tokens]
+        , -> tryScan " "  pos input |> [pos] |=> continue <| [pos, tokens] 
+        , -> tryScan "\t" pos input |> [pos] |=> continue <| [pos, tokens]
+        , -> tryScan "--" pos input |> [pos] |=> continue <| scanComment pos filename input tokens
+        , -> tryScan "\"" pos input |> [_  ] |=> continue <| scanString pos filename input tokens
+        , -> tryScan ""   pos input |> [pos] |=> continue <| scanToken pos filename input tokens
+        ]
+    ];
+
+
+-- let scanFromPos1 = (filename: Str) -> (input : Str) -> (pos0: Pos) ->
+--     loop2
+--     [ pos0
+--     , [] : List Str
+--     , [] : List Token
+--     ] <|
+--     [pos, indent, tokens] ->
+--     scanOptions pos input
+--     -- [ [ tryEOF, pos2 -> break (reverse tokens) ]
+--     [ [ tryEOF, pos2 -> break (scanEof filename pos2 tokens) ]
+--     , [ tryScan " ", pos2 -> continue [pos2, [" " ,, indent], tokens] ]
+--     , [ tryScan "\t", pos2 -> continue [pos2, ["\t" ,, indent], tokens] ]
+--     , [ tryScan "\n", pos2 -> continue [pos2, [], tokens] ]
+--     , [ tryScan "\r", pos2 -> continue [pos2, [], tokens] ]
+--     , [ tryScan "\"\"\"", pos2 -> continue (scanVerbatimString pos pos2 filename input (strCat (reverse indent)) tokens) ]
+--     , [ doScan, pos3 ->
+--         loop1 ( [pos1 : Pos, tokens1 : List Token] ->
+--             scanOptions pos1 input
+--             -- [ [ tryEOF, pos2 -> break (break (reverse tokens1)) ]
+--             [ [ tryEOF, pos2 -> break (break (scanEof filename pos2 tokens1)) ]
+--             , [ tryScan "\n", pos2 -> break (continue [pos2, [], tokens1]) ]
+--             , [ tryScan "\r", pos2 -> break (continue [pos2, [], tokens1]) ]
+--             , [ tryScan " ",  pos2 -> continue [pos2, tokens1] ]
+--             , [ tryScan "\t", pos2 -> continue [pos2, tokens1] ]
+--             , [ tryScan "--", pos2 -> continue (scanComment pos2 filename input tokens1) ]
+--             , [ tryScan "\"", pos2 -> continue (scanString pos1 filename input tokens1) ]
+--             , [ doScan, pos2 -> continue (scanToken pos2 filename input tokens1) ]
+--             ]
+--         ) [pos3, tokens] ]
+--     ];
+
+
+
+
+let scan = (input: Str) -> scanFromPos "" input [1, 1, 0];
+
+let scanFile = (filename: Str) -> (input: Str) ->
+    -- handle the "language" line at the start of the file
+    -- just skip the first line for now
+    let pos = 
+        loop2 ([1, 1, 0] : Pos) <|
+        pos -> 
+        if (strCharAt input (posIdx pos) == "\n")
+        [ -> break pos
+        , -> continue (posAdv input pos)
+        ];
+    let toks = scanFromPos filename input pos;
+    toks;
+
+
+
+
+
+
+
+
+
+-- an experiment with a more uniform way of expressing scan rules
+
+-- let RegExp = Rec ( RegExp -> 
+--     { ["SEQ", (List RegExp)]
+--     | ["ALT", (List RegExp)]
+--     | ["NOT", RegExp]
+--     | ["CHAR", Str]
+--     | ["CLASS", Str]
+--     } );
+-- 
+-- let spaceRe = ["ALT", [["CHAR", " "], ["CHAR", "\t"]]];
+-- let newlineRe = ["ALT", [["CHAR", "\n"], ["CHAR", "\r"]]];
+-- let eofRe = ["CHAR", ""];
+-- let tripleQuoteRe = ["SEQ", [["CHAR", "\""],["CHAR", "\""],["CHAR", "\""]]];
+-- let commentRe = ["SEQ", [ ["CHAR", "-"], ["CHAR", "-"], ["NOT", ["CLASS", "OPER"]]]];
+-- let quoteRe = ["CHAR", "\""];
+-- let anyRe = ["SEQ", []];
+-- 
+-- -- let reSeq = (elems: List RegExp) -> ["SEQ", elems];
+-- -- let reAlt = (elems: List RegExp) -> ["ALT", elems];
+-- -- let reNot = (re: RegExp) -> ["NOT", re];
+-- -- let reChar = (ch: Str) -> ["CHAR", ch];
+-- -- let reClass = (cls: Str) -> ["CLASS", cls];
+-- -- 
+-- -- let spaceRe = reAlt [reChar " ", reChar "\t"];
+-- -- let newlineRe = reAlt [reChar "\n", reChar "\r"];
+-- -- let eofRe = reChar "";
+-- -- let tripleQuoteRe = reSeq [reChar "\"", reChar "\"", reChar "\""];
+-- -- let commentRe = reSeq [reChar "-", reChar "-", reNot (reClass "OPER")];
+-- -- let quoteRe = reChar "\"";
+-- 
+-- 
+-- let tryRe
+--     : { Str -> Pos -> Str -> (Maybe Pos) }
+--     = re -> pos1 -> input ->
+--     error "TODO";
+-- 
+-- let scanFromPos2 = (filename: Str) -> (input : Str) -> (pos0: Pos) ->
+--     loop ( [pos : Pos, indent : Str, tokens : List Token] ->
+--         scanOptions pos input
+--         [ [ eofRe, pos2 -> break (reverse tokens) ]
+--         , [ spaceRe, pos2 -> continue [pos2, strAdd indent (strCharAt input (posIdx pos)), tokens] ]
+--         , [ newlineRe, pos2 -> continue [pos2, "", tokens] ]
+--         , [ tripleQuoteRe, pos2 -> continue (scanVerbatimString pos pos2 filename input indent tokens) ]
+--         , [ anyRe, pos2 ->
+--             loop ( [pos : Pos, tokens : List Token] ->
+--                 scanOptions pos input
+--                 [ [ eofRe, pos2 -> break (break (reverse tokens)) ]
+--                 , [ newlineRe, pos2 -> break (continue [pos2, "", tokens]) ]
+--                 , [ spaceRe, pos2 -> continue [pos2, tokens] ]
+--                 , [ commentRe, pos2 -> continue (scanComment pos2 filename input tokens) ]
+--                 , [ quoteRe, pos2 -> continue (scanString pos filename input tokens) ]
+--                 , [ anyRe, pos2 -> continue (scanToken pos2 filename input tokens) ]
+--                 ]
+--             ) [pos2, tokens] ]
+--         ]
+--     ) [pos0, "", []];
+-- 
+
+-- let scanFromPos2 = (filename: Str) -> (input : Str) -> (pos0: Pos) ->
+--     loop ( [pos : Pos, indent : Str, tokens : List Token] ->
+--         scanOptions pos input
+--         [ [ [], pos2 -> break (reverse tokens) ]
+--         , [ [" ", "\t"], pos2 -> continue [pos2, strAdd indent (strCharAt input (posIdx pos)), tokens] ]
+--         , [ ["\n", "\r"], pos2 -> continue [pos2, "", tokens] ]
+--         , [ [["\"","\"","\""]], pos2 -> continue (scanVerbatimString pos pos2 filename input indent tokens) ]
+--         , [ [[]], pos2 ->
+--             loop ( [pos : Pos, tokens : List Token] ->
+--                 scanOptions pos input
+--                 [ [ [], pos2 -> break (break (reverse tokens)) ]
+--                 , [ ["\n", "\r"], pos2 -> break (continue [pos2, "", tokens]) ]
+--                 , [ [" ", "\t"], pos2 -> continue [pos2, tokens] ]
+--                 , [ [["-", "-", "WHITESPACE"]], pos2 -> continue (scanComment pos2 filename input tokens) ]
+--                 , [ [["-", "-", "OPER"]], pos2 -> -- TODO allow operators starting with -- (like Haskell) ?
+--                 , [ [["-", "-"]], pos2 -> badComment -- TODO -- continue (scanComment pos2 filename input tokens) ]
+--                 , [ ["\""], pos2 -> continue (scanString pos filename input tokens) ]
+--                 , [ [[]], pos2 -> continue (scanToken pos2 filename input tokens) ]
+--                 ]
+--             ) [pos2, tokens] ]
+--         ]
+--     ) [pos0, "", []];
+-- 
+

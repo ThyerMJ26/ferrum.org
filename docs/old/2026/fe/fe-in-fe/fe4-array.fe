@@ -1,0 +1,151 @@
+language ferrum/0.1
+
+let Array : { Type -> Type } = 
+    V -> 
+    Rec ( (A : Type) ->
+        { { ["get", Int]         -> [ A, V       ] }
+        & { ["set", Int, V]      -> [ A, []      ] }
+        & { ["length"]           -> [ A, Int     ] }
+        & { ["extend", (List V)] -> [ A, []      ] }
+        & { ["slice", Int, Int]  -> [ A, A       ] }
+        & { ["snapshot"]         -> [ A, [] -> A ] }
+        } 
+    );
+
+-- TODO ? might make some type-related things easier ?
+-- TODO ?   also makes it possible to directly invoke methods on JS objects (albeit a nullary one that immediately returns the actually intended function)
+-- TODO ?   rather than using a switch statement in a single function implementing all the methods
+-- TODO ? the current codegen would then generate
+-- TODO ?    myArray("set")([4, ["a",null]]) 
+-- TODO ?    ( but, would still need an adaper function to accept ("set"), and call 
+-- TODO ?        myArray["set"] / myArray.set
+-- TODO ?      and we could be doing that now already  
+-- TODO ?    )
+-- TODO ? a smarter type and arity aware codegen could do better
+-- let Array : { Type -> Type } = 
+--     V -> 
+--     Rec ( (A : Type) ->
+--         { { "get"      -> [Int]      -> [ A, V       ] }
+--         & { "set"      -> [Int, V]   -> [ A, []      ] }
+--         & { "length"   -> []         -> [ A, Int     ] }
+--         & { "extend"   -> [(List V)] -> [ A, []      ] }
+--         & { "slice"    -> [Int, Int] -> [ A, A       ] }
+--         & { "snapshot" -> []         -> [ A, [] -> A ] }
+--         } 
+--     );
+
+-- let ArraySnapshot : { Type -> Type }
+--     = V -> { [] -> (Array V) };
+
+-- let ArrayApprox : { Type -> Type } = 
+--     V -> 
+--     -- { (Domain (Array V)) -> (Codomain (Array V)) };
+--     { (Domain (Array V)) -> (Array V) Any };
+
+let ArrayApprox : { Type -> Type } = 
+    V -> 
+    Rec ( (A : Type) ->
+    { (Domain (Array V)) -> [ A, (Hd (Tl (Codomain (Array V)))) ] } );
+
+-- let MkArrayList1 = { A@(List Any) -> (Array (Elem A)) };
+-- let MkArrayListApprox1 = { A@(List Any) -> (ArrayApprox (Elem A)) };
+
+-- let mkArrayListApprox : MkArrayListApprox = 
+--     rec ( (mkAL: MkArrayListApprox) -> 
+--     elems -> req ->
+--     match req
+--     [ ["get", pos] |=>
+--         [mkAL elems, listIndex elems pos]
+--     -- , ["set", pos, val] |=>
+--     --     let elems2 = listUpdate elems pos val;
+--     --     [mkAL elems2, []]
+--     -- , ["length"] |=>
+--     --     [mkAL elems, length elems]
+--     -- , ["extend", elems2] |=>
+--     --     let elems3 = append elems elems2;
+--     --     [mkAL elems3, []]
+--     -- , ["slice", pos1, pos2] |=>
+--     --     error "TODO: array slice"
+--     ] );
+-- 
+-- let mkArrayList = cast MkArrayListApprox MkArrayList mkArrayListApprox;
+
+
+let MkArrayList2 = { {V : Type} -> (List V) -> (Array V) };
+let MkArrayListApprox2 = { {V : Type} -> (List V) -> (ArrayApprox V) };
+
+
+
+
+-- TODO ? don't supply initial contents of list ?
+-- let MkArrayList2 = { {V:Type} -> (Array V) };
+-- let MkArrayListApprox2 = { {V:Type} -> (ArrayApprox V) };
+
+let mkArrayListApprox2 : MkArrayListApprox2 = 
+    rec ( (mkAL: MkArrayListApprox2) -> 
+    (V: Type) ->
+    elems -> req ->
+    match req
+    [ ["get", pos] |=>
+        [mkAL V elems, listIndex elems pos]
+    , ["set", pos, val] |=>
+        let elems2 = listUpdate elems pos val;
+        [mkAL V elems2, []]
+    , ["length"] |=>
+        -- let _ = debug ["ArrayList length", elems, length elems];
+        [mkAL V elems, length elems]
+    , ["extend", elems2] |=>
+        -- let _ = debug ["ArrayList extend", elems, elems2];
+        let elems3 = append elems elems2;
+        [mkAL V elems3, []]
+    , ["slice", pos1, pos2] |=>
+        -- TODO for some reason slice and snapshot seem difficult to get to type-check
+        -- TODO   even with (or perhaps because of) the approximate definition of MkArrayListApprox2 
+        -- let elems2 : List V = listSlice pos1 pos2 elems;
+        -- [mkAL V elems, mkAL V elems2]
+        -- [mkAL V elems, mkAL V elems]
+        error ["TODO", "mkArrayList", "slice"]
+    , ["snapshot"] |=>
+        -- [mkAL V elems, [] -> mkAL V elems]
+        error ["TODO", "mkArrayList", "snapshot"]
+    ] );
+
+let mkArrayList2 = cast MkArrayListApprox2 MkArrayList2 mkArrayListApprox2;
+
+-- let mkArrayList = mkArrayList2;
+
+-- -- Linear Array : O(1) get/set accesses, O(n) slicing+duplication
+-- let mkLinearArray : { A@(List Any) -> (Array (Elem A)) } = elems -> error "TODO";
+-- 
+-- -- Persistent Array : O(log n) get/set accesses, O(log n) slicing, O(1) duplication
+-- let mkPersistentArray : { A@(List Any) -> (Array (Elem A)) } = elems -> error "TODO";
+-- 
+-- -- O(log n) get/set accesses, O(log n) slicing, O(1) duplication
+-- let mkArrayFastCopy : { A@(List Any) -> (Array (Elem A)) } = elems -> error "TODO";
+-- 
+-- -- O(1) get/set accesses, O(n) slicing+duplication
+-- let mkArrayFastAccessSlowCopy : { A@(List Any) -> (Array (Elem A)) } = elems -> error "TODO";
+-- 
+-- -- O(1) get/set accesses, O(n) slicing, type-error/runtime-error on access to old/stale references
+-- let mkArrayFastAccessNoCopy : { A@(List Any) -> (Array (Elem A)) } = elems -> error "TODO";
+
+
+
+-- -- let mkArrayFastAccessCopyOnWrite -- TODO ? rename to this ?
+-- -- unfortunately this currently implements copy-on-EVERY-write
+let mkArrayFastAccessSlowCopy : MkArrayList2 = 
+    cast { Void -> Any } MkArrayList2 primMkArrayFastAccessSlowCopy;
+
+-- let mkArrayFastAccessLinearUse -- TODO ? rename to this ?
+-- let mkArrayFastAccessCopyOnSnapshot -- TODO ? rename to this ?
+let mkArrayFastAccessNoCopy : MkArrayList2 = 
+    cast { Void -> Any } MkArrayList2 primMkArrayFastAccessNoCopy;
+
+-- TODO ? for copy-on-write purposes, treat appending/extending differently from mutating ?
+-- TODO ?   if we keep the length of the array separate from the contents of a the array,
+-- TODO ?   then an array can be appended to without triggering a copy-on-write action.
+-- TODO ?   any persistent/shared references will each have their own historic copy of the length of the array.
+-- TODO ? need to be sure that the array is extended in a "somewhat" linear fashion,
+-- TODO ?   it's okay to keep historic references, so long as we don't end up 
+-- TODO ?   forking history and trying to maintain two possible alternate futures in the same place
+
